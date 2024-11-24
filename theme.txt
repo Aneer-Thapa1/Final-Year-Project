@@ -1,0 +1,46 @@
+// tailwind.config.js
+module.exports = {
+  theme: {
+    extend: {
+      colors: {
+        light: {
+          primary: '#4A90E2', // Soft Blue
+          accent: '#7ED321',  // Fresh Green
+          background: '#F9F9F9', // Off-White
+          text: '#333333',  // Dark Gray
+          highlight: '#F5A623',  // Sunny Yellow
+        },
+        dark: {
+          primary: '#1C7ED6', // Teal Blue
+          accent: '#29D07A',  // Neon Green
+          background: '#1E1E1E', // Charcoal Black
+          text: '#E0E0E0',  // Light Gray
+          highlight: '#FFB400',  // Amber
+        },
+      },
+    },
+  },
+  plugins: [],
+};
+
+
+
+Font Family Suggestions
+Primary Font (Headings, Titles, Highlights)
+
+Font: Poppins
+Style: Clean, modern, and geometric.
+Reason: Its rounded and sleek design gives a professional and approachable look, perfect for motivational headings.
+Fallbacks: 'Poppins', 'Arial', sans-serif'
+Secondary Font (Body Text)
+
+Font: Inter
+Style: Highly legible and designed for screen use.
+Reason: It's ideal for habit descriptions and long text, offering excellent readability.
+Fallbacks: 'Inter', 'Helvetica', sans-serif'
+Accent Font (Optional - For Motivational Words/Badges)
+
+Font: Pacifico
+Style: Handwritten and playful.
+Reason: Adds a touch of creativity for elements like "You’re Amazing!" badges. Use sparingly for motivational emphasis.
+Fallbacks: 'Pacifico', 'cursive'
