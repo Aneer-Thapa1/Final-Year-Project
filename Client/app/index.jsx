@@ -4,13 +4,10 @@ import { Text, View } from "react-native";
 
 export default function App() {
   return (
-    <View className="flex items-center justify-center bg-white">
-      <Text className="text-3xl">
-        Open up App.js to start working on your app!
-      </Text>
-      <Link href="/blogs" className="text-blue-700 font-bold">
-        {" "}
-        Go to blogs
+    <View className="flex justify-center items-center">
+      <Text>Hello World!</Text>
+      <Link href="/blogs" className="text-green-900">
+        Go to blog
       </Link>
       <StatusBar style="auto" />
     </View>

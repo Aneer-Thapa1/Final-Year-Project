@@ -1,12 +1,12 @@
 import { Text, View } from "react-native";
 import React from "react";
 
-const Blogs = () => {
+const blogs = () => {
   return (
     <View>
-      <Text>Blogs</Text>
+      <Text>blogs</Text>
     </View>
   );
 };
 
-export default Blogs;
+export default blogs;
