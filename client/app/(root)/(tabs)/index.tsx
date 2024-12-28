@@ -1,4 +1,4 @@
-import { Text, View } from "react-native";
+import {Image, Text, View} from "react-native";
 import {Link} from "expo-router";
 
 export default function Index() {
@@ -10,11 +10,11 @@ export default function Index() {
         alignItems: "center",
       }}
     >
-      <Text className='font-bold'>Welcome to Habit Pulse!</Text>
+
+      <Text className='text-3xl font-montserrat-light'>Welcome to Habit Pulse!</Text>
         <Link href='/sign-in'>Sign In</Link>
         <Link href='/profile'>Profile</Link>
         <Link href='/explore'>Explore</Link>
-
     </View>
   );
 }
