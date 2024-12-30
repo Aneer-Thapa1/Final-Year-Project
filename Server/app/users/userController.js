@@ -1,93 +1,186 @@
-// importing necessary libraries
-import {PrismaClient} from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
 const prisma = new PrismaClient();
 
 const register = async (req, res) => {
-    const {user_name, user_email, gender, password} = req.body;
+    const { user_name, user_email, gender, password, device_token } = req.body;
 
-    // Check for missing fields
-    if (!user_name || !user_email || !gender || !password) {
-        return res.status(400).json({error: "Please fill all the fields!"});
+    // Input validation
+    if (!user_name?.trim() || !user_email?.trim() || !gender || !password) {
+        return res.status(400).json({
+            success: false,
+            error: "Please fill all the required fields"
+        });
     }
 
     try {
         // Check if user already exists
-        const user = await prisma.user.findFirst({
-            where: {user_email: user_email}
+        const existingUser = await prisma.user.findFirst({
+            where: { user_email: user_email.toLowerCase() }
         });
 
-        if (user) {
-            return res.status(400).json({error: "User already exists!"});
+        if (existingUser) {
+            return res.status(409).json({
+                success: false,
+                error: "Email already registered"
+            });
         }
 
         // Hash the password
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-
-
+        const hashedPassword = await bcrypt.hash(password, 12);
 
         // Create a new user
         const newUser = await prisma.user.create({
             data: {
-                user_name: user_name,
-                user_email: user_email,
+                user_name: user_name.trim(),
+                user_email: user_email.toLowerCase().trim(),
                 password: hashedPassword,
-                gender: gender
+                gender,
+                device_token,
+                last_login: new Date()
             }
         });
 
-        const { password, ...userData } = newUser;
+        // Generate JWT token
+        const token = jwt.sign(
+            {
+                id: newUser.user_id,
+                email: newUser.user_email
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: '30d' // Longer expiry for mobile apps
+            }
+        );
 
-        // Respond with success
-        return res.status(201).json({message: "User registered successfully." , userData});
-    } catch (e) {
-        console.error(e);
-        return res.status(500).json({error: "Internal Server Error!"});
+        // Remove sensitive data
+        const { password: _, ...userData } = newUser;
+
+        return res.status(201).json({
+            success: true,
+            message: "Registration successful",
+            data: {
+                user: userData,
+                token
+            }
+        });
+    } catch (error) {
+        console.error('Registration error:', error);
+        return res.status(500).json({
+            success: false,
+            error: "Unable to complete registration"
+        });
     }
 };
 
-
 const login = async (req, res) => {
-    const {user_email, password} = req.body;
+    const { user_email, password, device_token } = req.body;
 
-    // Check for missing fields
-    if (!user_email || !password) {
-        return res.status(400).json({error: "Please fill all the fields!"});
+    if (!user_email?.trim() || !password) {
+        return res.status(400).json({
+            success: false,
+            error: "Email and password are required"
+        });
     }
 
     try {
-        // Find the user by email
         const user = await prisma.user.findFirst({
-            where: {user_email: user_email}
+            where: { user_email: user_email.toLowerCase().trim() }
         });
 
-        // Check if user exists
         if (!user) {
-            return res.status(400).json({error: "User does not exist!"});
+            return res.status(401).json({
+                success: false,
+                error: "Invalid credentials"
+            });
         }
 
-        // Check if password matches
-        const isPasswordCorrect = await bcrypt.compare(password, user.password);
+        const isPasswordValid = await bcrypt.compare(password, user.password);
 
-        if (!isPasswordCorrect) {
-            return res.status(400).json({error: "Wrong password!"});
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                success: false,
+                error: "Invalid credentials"
+            });
         }
 
-        const token = jwt.sign({ id: user.user_id }, process.env.JWT_SECRET, { expiresIn: '7d' });
+        // Update last login and device token
+        await prisma.user.update({
+            where: { user_id: user.user_id },
+            data: {
+                last_login: new Date(),
+                device_token: device_token || user.device_token
+            }
+        });
 
-        // Successful login
-        res.status(200).json({message: "User logged in successfully." , token});
-    } catch (e) {
-        console.error(e);
-        return res.status(500).json({error: "Internal Server Error!"});
+        const token = jwt.sign(
+            {
+                id: user.user_id,
+                email: user.user_email
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: '30d'
+            }
+        );
+
+        const { password: _, ...userData } = user;
+
+        return res.status(200).json({
+            success: true,
+            message: "Login successful",
+            data: {
+                user: userData,
+                token
+            }
+        });
+    } catch (error) {
+        console.error('Login error:', error);
+        return res.status(500).json({
+            success: false,
+            error: "Unable to complete login"
+        });
     }
 };
 
+// Refresh token endpoint - useful for mobile apps
+const refreshToken = async (req, res) => {
+    try {
+        const user = await prisma.user.findUnique({
+            where: { user_id: req.user.id }
+        });
 
-module.exports = {
-    register,
-        login
-}
+        if (!user) {
+            return res.status(401).json({
+                success: false,
+                error: "User not found"
+            });
+        }
+
+        const token = jwt.sign(
+            {
+                id: user.user_id,
+                email: user.user_email
+            },
+            process.env.JWT_SECRET,
+            {
+                expiresIn: '30d'
+            }
+        );
+
+        return res.status(200).json({
+            success: true,
+            data: { token }
+        });
+    } catch (error) {
+        console.error('Token refresh error:', error);
+        return res.status(500).json({
+            success: false,
+            error: "Unable to refresh token"
+        });
+    }
+};
+
+export { register, login, refreshToken };
