@@ -1,12 +1,11 @@
 // importing necessary libraries
 import {PrismaClient} from "@prisma/client";
-import res from "express/lib/response";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
 const prisma = new PrismaClient();
 
-const signin = async (req, res) => {
+const register = async (req, res) => {
     const {user_name, user_email, gender, password} = req.body;
 
     // Check for missing fields
@@ -40,8 +39,10 @@ const signin = async (req, res) => {
             }
         });
 
+        const { password, ...userData } = newUser;
+
         // Respond with success
-        return res.status(201).json({message: "User registered successfully."});
+        return res.status(201).json({message: "User registered successfully." , userData});
     } catch (e) {
         console.error(e);
         return res.status(500).json({error: "Internal Server Error!"});
@@ -75,12 +76,18 @@ const login = async (req, res) => {
             return res.status(400).json({error: "Wrong password!"});
         }
 
-        const token = jwt.sign({ id: user.user_id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const token = jwt.sign({ id: user.user_id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 
         // Successful login
-        res.status(200).json({message: "User logged in successfully."});
+        res.status(200).json({message: "User logged in successfully." , token});
     } catch (e) {
         console.error(e);
         return res.status(500).json({error: "Internal Server Error!"});
     }
 };
+
+
+module.exports = {
+    register,
+        login
+}
