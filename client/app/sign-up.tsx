@@ -60,7 +60,7 @@ const SignUp = () => {
                             autoCapitalize="none"
                         />
                         <TouchableOpacity  className="bg-blue-500 p-3 rounded">
-                            <Text className="text-white text-lg text-center"> <Link href='/home'></Link> Sign Up</Text>
+                            <Text className="text-white text-lg text-center"> <Link href='/home'>Sign Up</Link> </Text>
                         </TouchableOpacity>
                         <Text className='text-center'>Already have an account? <Text className='text-primary-300'> <Link href='/sign-in'>Sign In</Link> </Text> </Text>
                     </View>

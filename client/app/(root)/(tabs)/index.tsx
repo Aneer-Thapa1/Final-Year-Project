@@ -11,7 +11,6 @@ export default function Index() {
                 <Image source={images.onBoarding} className='w-full h-4/6' resizeMode='contain' />
                 <View className='px-10 flex items-center justify-between w-full gap-4'>
                     <Text className='text-base text-center'>
-
                         Welcome to habit pulse
                     </Text>
 
