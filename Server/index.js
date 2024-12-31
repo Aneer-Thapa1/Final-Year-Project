@@ -1,7 +1,8 @@
 const express = require("express");
 const { createServer } = require("http");
 const { Server } = require("socket.io");
-const morgan = require("morgan"); // Import Morgan
+const morgan = require("morgan");
+const {errorLogger} = require("./app/middleware/loggerMiddleware"); // Import Morgan
 require("dotenv").config();
 
 // Initialize the Express app
@@ -34,6 +35,9 @@ io.on("connection", (socket) => {
     );
   });
 });
+
+
+app.use(errorLogger)
 
 // Start the HTTP server listening for requests
 httpServer.listen(process.env.PORT, () => {
