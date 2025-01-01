@@ -4,12 +4,19 @@ const { Server } = require("socket.io");
 const morgan = require("morgan");
 const {errorLogger} = require("./app/middleware/loggerMiddleware"); // Import Morgan
 require("dotenv").config();
+const routes = require("./app/routes/route.js");
 
 // Initialize the Express app
 const app = express();
 
 // Use Morgan for HTTP request logging in 'dev' format
 app.use(morgan("dev"));
+
+// Middleware to parse JSON body
+app.use(express.json());
+
+// using route
+app.use('/api', routes);
 
 // Create an HTTP server from the Express app
 const httpServer = createServer(app);
@@ -42,4 +49,7 @@ app.use(errorLogger)
 // Start the HTTP server listening for requests
 httpServer.listen(process.env.PORT, () => {
   console.log(`Server is running on http://localhost:${process.env.PORT}`);
+
+  console.log(process.env["NODE_MAILER_GMAIL"])
+  console.log(process.env["NODE_MAILER_PASSWORD"])
 });
