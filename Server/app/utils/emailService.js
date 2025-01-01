@@ -4,8 +4,8 @@ const getEmailTemplate = require('./emailTemplates');
 const transporter = nodemailer.createTransport({
     service: 'Gmail', // Replace with your email provider
     auth: {
-        user: process.env["NODE_MAILER_GMAIL "],
-        pass: process.env["NODE_MAILER_PASSWORD "],
+        user: "habit234pulse@gmail.com",
+        pass: "vholnvmegtvmjptw",
     },
 });
 
@@ -15,7 +15,7 @@ const sendMail = async (to, emailType, data) => {
         const { subject, html } = getEmailTemplate(emailType, data);
 
         const mailOptions = {
-            from: process.env["NODE_MAILER_GMAIL "],
+            from: '"Habit Pulse" <habit234pulse@gmail.com>',
             to,
             subject,
             html,
