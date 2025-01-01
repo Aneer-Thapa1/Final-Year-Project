@@ -3,28 +3,28 @@ import req from "express/lib/request";
 
 const prisma = new PrismaClient();
 
-const { PrismaClient } = require('@prisma/client');
+const {PrismaClient} = require('@prisma/client');
 const prisma = new PrismaClient();
 
 //  function to add blog
 const addBlog = async (req, res) => {
 
     // getting data from front end
-    const { blog_title, blog_description, blog_image } = req.body;
+    const {blog_title, blog_description, blog_image} = req.body;
 
     // getting user_id extracted from middleware
     const user_id = req.user.user_id;
 
     // Check if all necessary fields are filled
-    if (!blog_title || !blog_description ) {
-        return res.status(400).json({ error: 'Please enter all details including title, description.' });
+    if (!blog_title || !blog_description) {
+        return res.status(400).json({error: 'Please enter all details including title, description.'});
     }
 
     try {
         // starting transition query so that points_gained do not change in error
         const result = await prisma.$transaction(async (prisma) => {
             const user = await prisma.user.findUnique({
-                where: { id: user_id }
+                where: {id: user_id}
             });
 
 
@@ -40,8 +40,8 @@ const addBlog = async (req, res) => {
 
             // Update user points by deducting 20 points
             const updatedUser = await prisma.user.update({
-                where: { id: user_id },
-                data: { points_gained: user.points_gained - 20 }
+                where: {id: user_id},
+                data: {points_gained: user.points_gained - 20}
             });
 
             // Add new blog entry
@@ -54,15 +54,15 @@ const addBlog = async (req, res) => {
                 }
             });
 
-            return { updatedUser, newBlog };
+            return {updatedUser, newBlog};
         });
 
         // If transaction is successful
-        return res.status(201).json({ success: 'Blog added successfully', blog: result.newBlog });
+        return res.status(201).json({success: 'Blog added successfully', blog: result.newBlog});
 
     } catch (error) {
         // Transaction failed
-        return res.status(403).json({ error: error.message });
+        return res.status(403).json({error: error.message});
     }
 };
 
@@ -92,15 +92,23 @@ const getBlogs = async (req, res) => {
         });
 
         if (blogs.length === 0) {
-            return res.status(404).json({ message: "No more blogs found" });
+            return res.status(404).json({message: "No more blogs found"});
         }
 
         res.status(200).json(blogs);
     } catch (error) {
-        res.status(500).json({ error: 'An error occurred while retrieving blogs' });
+        res.status(500).json({error: 'An error occurred while retrieving blogs'});
     }
 };
 
-module.exports = { addBlog, getBlogs };
+
+const editBlog = async (req, res) => {
+
+    const blog_id = req.params.blog_id;
+    const {blog_title, blog_description, blog_image} = req.body;
+
+
+}
+module.exports = {addBlog, getBlogs};
 
 

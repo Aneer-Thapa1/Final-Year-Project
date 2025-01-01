@@ -2,6 +2,10 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 
+
+const sendEmail = require('../utils/emailService')
+
+
 const prisma = new PrismaClient();
 
 const register = async (req, res) => {
@@ -42,6 +46,12 @@ const register = async (req, res) => {
                 last_login: new Date()
             }
         });
+
+        await sendEmail(
+            email: newUser.user_email,
+
+
+        )
 
         // Generate JWT token
         const token = jwt.sign(
