@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
 generator client {
   provider = "prisma-client-js"
@@ -14,9 +9,48 @@ datasource db {
 }
 
 model User {
-  user_id    Int     @id @default(autoincrement())
-  user_email String  @unique
-  user_name  String?
-  gender     String?
-  avatar     String
+  user_id              Int      @id @default(autoincrement())
+  user_email           String   @unique
+  user_name            String?
+  gender               String?
+  avatar               String
+  points_gained        Int
+  registeredAt         DateTime @default(now())
+  updatedAt            DateTime @default(now()) @updatedAt
+
+  blogs Blog[]
+  likes Like[]
+}
+
+model Blog {
+  blog_id          Int      @id @default(autoincrement())
+  blog_title       String?
+  blog_description String?
+  blog_image       String
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  category_id Int
+  category    Category @relation(fields: [category_id], references: [category_id])
+
+  user_id Int
+  user    User   @relation(fields: [user_id], references: [user_id])
+  likes   Like[]
+}
+
+model Category {
+  category_id   Int    @id @default(autoincrement())
+  category_name String
+
+  blogs Blog[]
+}
+
+model Like {
+  like_id Int @id @default(autoincrement())
+
+  liked_by   Int // User who liked the blog
+  user       User     @relation(fields: [liked_by], references: [user_id])
+  blog_id    Int // Blog that was liked
+  blog       Blog     @relation(fields: [blog_id], references: [blog_id])
+  created_at DateTime @default(now()) // Timestamp for when the like was made
 }
