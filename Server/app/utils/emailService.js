@@ -1,13 +1,7 @@
 const nodemailer = require('nodemailer');
 const getEmailTemplate = require('./emailTemplates');
 
-const transporter = nodemailer.createTransport({
-    service: 'Gmail', // Replace with your email provider
-    auth: {
-        user: "habit234pulse@gmail.com",
-        pass: "vholnvmegtvmjptw",
-    },
-});
+const transporter = require('../config/nodeMailerConfig')
 
 const sendMail = async (to, emailType, data) => {
     try {

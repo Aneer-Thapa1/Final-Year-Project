@@ -9,7 +9,7 @@ const {sendMail} = require('../utils/emailService')
 const prisma = new PrismaClient();
 
 const register = async (req, res) => {
-    const {user_name, user_email, gender, password} = req.body;
+    const { user_name, user_email, gender, password } = req.body;
 
     // Input validation
     if (!user_name?.trim() || !user_email?.trim() || !gender || !password) {
@@ -22,7 +22,7 @@ const register = async (req, res) => {
     try {
         // Check if user already exists
         const existingUser = await prisma.user.findFirst({
-            where: {user_email: user_email.toLowerCase()}
+            where: { user_email: user_email.toLowerCase() }
         });
 
         if (existingUser) {
@@ -35,7 +35,7 @@ const register = async (req, res) => {
         // Hash the password
         const hashedPassword = await bcrypt.hash(password, 12);
 
-        // Create a new user
+        // Start a transaction for creating the user in the database
         const newUser = await prisma.user.create({
             data: {
                 user_name: user_name.trim(),
@@ -47,10 +47,8 @@ const register = async (req, res) => {
             }
         });
 
-        console.log(newUser)
-
-
-        await sendMail(newUser.user_email, 'welcome', {user_name: newUser.user_name});
+        // Send the welcome email (done after the transaction)
+        await sendMail(newUser.user_email, 'welcome', { user_name: newUser.user_name });
 
         // Generate JWT token
         const token = jwt.sign(
@@ -65,7 +63,7 @@ const register = async (req, res) => {
         );
 
         // Remove sensitive data
-        const {password: _, ...userData} = newUser;
+        const { password: _, ...userData } = newUser;
 
         return res.status(201).json({
             success: true,
@@ -83,6 +81,8 @@ const register = async (req, res) => {
         });
     }
 };
+
+
 
 const login = async (req, res) => {
     const {user_email, password, device_token} = req.body;
@@ -124,16 +124,7 @@ const login = async (req, res) => {
             }
         });
 
-        const token = jwt.sign(
-            {
-                id: user.user_id,
-                email: user.user_email
-            },
-            process.env.JWT_SECRET,
-            {
-                expiresIn: '30d'
-            }
-        );
+
 
         const {password: _, ...userData} = user;
 
@@ -142,7 +133,6 @@ const login = async (req, res) => {
             message: "Login successful",
             data: {
                 user: userData,
-                token
             }
         });
     } catch (error) {

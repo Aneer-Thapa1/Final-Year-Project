@@ -107,6 +107,12 @@ const editBlog = async (req, res) => {
     const blog_id = req.params.blog_id;
     const {blog_title, blog_description, blog_image} = req.body;
 
+    const blog = prisma.blog.findFirst({where : blog_id})
+
+    if (!blog) {
+        return res.status(404).json({error: 'Blog not found!'});
+    }
+
 
 }
 module.exports = {addBlog, getBlogs};
