@@ -103,18 +103,62 @@ const getBlogs = async (req, res) => {
 
 
 const editBlog = async (req, res) => {
+    try {
+        const blog_id = parseInt(req.params.blog_id); // Convert to integer if it's a string
+        const { blog_title, blog_description, blog_image } = req.body;
 
-    const blog_id = req.params.blog_id;
-    const {blog_title, blog_description, blog_image} = req.body;
+        // Input validation
+        if (!blog_title || !blog_description) {
+            return res.status(400).json({
+                success: false,
+                error: 'Blog title and description are required!'
+            });
+        }
 
-    const blog = prisma.blog.findFirst({where : blog_id})
+        // Check if blog exists
+        const existingBlog = await prisma.blog.findUnique({
+            where: {
+                blog_id: blog_id
+            }
+        });
 
-    if (!blog) {
-        return res.status(404).json({error: 'Blog not found!'});
+        if (!existingBlog) {
+            return res.status(404).json({
+                success: false,
+                error: 'Blog not found!'
+            });
+        }
+
+        // Update blog
+        const updatedBlog = await prisma.blog.update({
+            where: {
+                blog_id: blog_id
+            },
+            data: {
+                blog_title,
+                blog_description,
+                blog_image,
+                updated_at: new Date()
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Blog updated successfully',
+            data: updatedBlog
+        });
+
+    } catch (error) {
+        console.error('Error updating blog:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to update blog',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
+};
 
 
-}
 module.exports = {addBlog, getBlogs};
 
 
