@@ -1,5 +1,7 @@
 import {View, Text, SafeAreaView, ScrollView, Image, TextInput, TouchableOpacity} from 'react-native'
-import React, {useState} from 'react'
+import React, {useEffect, useState} from 'react'
+
+
 
 import images from '@/constants/images'
 import {Link} from "expo-router";
@@ -10,9 +12,15 @@ const SignIn = () => {
     const [password, setPassword] = useState('');
 
 
+    const BASE_URL = process.env.REACT_APP_BASE_URL
+
+    console.log(BASE_URL)
+
+
+
+
     const handleLogin = () => {
-        // Add your login logic here
-        alert(`Username: ${username}, Password: ${password}`);
+
     };
     return (
        <SafeAreaView className='bg-white h-full'>
