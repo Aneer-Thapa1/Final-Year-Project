@@ -2,9 +2,10 @@ const express = require("express");
 const { createServer } = require("http");
 const { Server } = require("socket.io");
 const morgan = require("morgan");
-const {errorLogger} = require("./app/middleware/loggerMiddleware"); // Import Morgan
+const { errorLogger } = require("./app/middleware/loggerMiddleware"); // Import Morgan
 require("dotenv").config();
 const routes = require("./app/routes/route.js");
+var cors = require("cors");
 
 // Initialize the Express app
 const app = express();
@@ -15,8 +16,19 @@ app.use(morgan("dev"));
 // Middleware to parse JSON body
 app.use(express.json());
 
+app.use(
+  cors({
+    methods: ["GET", "POST"], // methods allowed
+    credentials: true,
+  })
+);
+
 // using route
-app.use('/api', routes);
+app.use("/api", routes);
+
+app.get("/", (req, res) => {
+  res.send("Hello World");
+});
 
 // Create an HTTP server from the Express app
 const httpServer = createServer(app);
@@ -43,13 +55,12 @@ io.on("connection", (socket) => {
   });
 });
 
-
-app.use(errorLogger)
+app.use(errorLogger);
 
 // Start the HTTP server listening for requests
 httpServer.listen(process.env.PORT, () => {
   console.log(`Server is running on http://localhost:${process.env.PORT}`);
 
-  console.log(process.env["NODE_MAILER_GMAIL"])
-  console.log(process.env["NODE_MAILER_PASSWORD"])
+  console.log(process.env["NODE_MAILER_GMAIL"]);
+  console.log(process.env["NODE_MAILER_PASSWORD"]);
 });
