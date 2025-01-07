@@ -51,16 +51,7 @@ const register = async (req, res) => {
         await sendMail(newUser.user_email, 'welcome', { user_name: newUser.user_name });
 
         // Generate JWT token
-        const token = jwt.sign(
-            {
-                id: newUser.user_id,
-                email: newUser.user_email
-            },
-            process.env.JWT_SECRET,
-            {
-                expiresIn: '30d' // Longer expiry for mobile apps
-            }
-        );
+
 
         // Remove sensitive data
         const { password: _, ...userData } = newUser;
@@ -70,7 +61,7 @@ const register = async (req, res) => {
             message: "Registration successful",
             data: {
                 user: userData,
-                token
+              =
             }
         });
     } catch (error) {
@@ -81,8 +72,6 @@ const register = async (req, res) => {
         });
     }
 };
-
-
 
 const login = async (req, res) => {
     const {user_email, password, device_token} = req.body;
