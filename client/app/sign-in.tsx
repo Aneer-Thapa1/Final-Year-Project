@@ -26,8 +26,8 @@ const SignIn = () => {
   const handleLogin = async () => {
     // response of login
     try{
-      const response = await axios.post(`${BASE_URL}/api/users/login`, { username, password });
-      alert(`Username: ${username}, Password: ${password}`);
+      const response = await axios.post(`https://bf0b-2400-74e0-10-31cd-ac35-4ecc-87c0-5e9b.ngrok-free.app/api/users/login`, { user_email: username, password });
+
 
     }catch (error) {
       console.log(error)

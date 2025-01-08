@@ -1,7 +1,7 @@
 import {View, Text, Image} from 'react-native'
 import React from 'react'
 import {Tabs} from "expo-router";
-import Home from "@/app/home";
+import Home from "@/app/(tabs)/home";
 
 
 const TabIcon = ({focused, icon, title } : {focused:boolean ; icon: any; title: string}) => (

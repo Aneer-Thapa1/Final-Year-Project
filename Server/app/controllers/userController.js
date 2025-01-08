@@ -11,6 +11,9 @@ const prisma = new PrismaClient();
 const register = async (req, res) => {
     const { user_name, user_email, gender, password } = req.body;
 
+    console.log(user_name, user_email, gender, password)
+
+
     // Input validation
     if (!user_name?.trim() || !user_email?.trim() || !gender || !password) {
         return res.status(400).json({
@@ -61,7 +64,7 @@ const register = async (req, res) => {
             message: "Registration successful",
             data: {
                 user: userData,
-              =
+
             }
         });
     } catch (error) {
@@ -103,16 +106,6 @@ const login = async (req, res) => {
                 error: "Invalid credentials"
             });
         }
-
-        // Update last login and device token
-        await prisma.user.update({
-            where: {user_id: user.user_id},
-            data: {
-                last_login: new Date(),
-                device_token: device_token || user.device_token
-            }
-        });
-
 
 
         const {password: _, ...userData} = user;
