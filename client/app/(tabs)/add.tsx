@@ -1,11 +1,11 @@
 import {View, Text} from 'react-native'
 import React from 'react'
 
-const Profile = () => {
+const AddPage = () => {
     return (
         <View>
-            <Text>Porfile</Text>
+            <Text>AddPage</Text>
         </View>
     )
 }
-export default Profile
+export default AddPage

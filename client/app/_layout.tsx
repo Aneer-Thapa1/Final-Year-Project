@@ -4,7 +4,7 @@ import * as SplashScreen from "expo-splash-screen";
 import "./global.css";
 import { useFonts } from "expo-font";
 import { useEffect } from "react";
-import CustomSplash from './components/SplashScreen';
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 SplashScreen.preventAutoHideAsync();
@@ -25,20 +25,16 @@ export default function RootLayout() {
       if (fontsLoaded) {
         await SplashScreen.hideAsync();
         const hasLaunched = await AsyncStorage.getItem('hasLaunched');
-        if (!hasLaunched) {
-          await AsyncStorage.setItem('hasLaunched', 'true');
-          router.replace('/(boarding)/step1');
-        } else {
-          router.replace('/tabs');
-        }
+
       }
     };
     initialize();
   }, [fontsLoaded]);
 
   if (!fontsLoaded) {
-    return <CustomSplash />;
+    return null
   }
 
   return <Stack screenOptions={{ headerShown: false }} />;
 }
+
