@@ -1,17 +1,17 @@
 import React from 'react'
 import { Text, PlatformPressable } from '@react-navigation/elements';
 import { icon } from "@/constants/icons";
-import { StyleProp, ViewStyle } from 'react-native';
+import {StyleProp, ViewStyle} from 'react-native';
 
 
 type TabBarButtonProps = {
-    onPress: Function;
-    onLongPress: Function;
+    onPress: Function;     // Changed to Function
+    onLongPress: Function; // Changed to Function
     isFocused: boolean;
-    routeName: string;
-    color: string;
-    label: string;
-
+    routeName: string;     // Changed to string
+    color: string;         // Already string
+    label: string;         // Already string
+    style?: StyleProp<ViewStyle>;
 }
 
 const TabBarButton = ({
@@ -23,6 +23,7 @@ const TabBarButton = ({
                           label,
                           style
                       }: TabBarButtonProps) => {
+
     return (
         <PlatformPressable
             onPress={onPress}
@@ -32,7 +33,7 @@ const TabBarButton = ({
             {icon[routeName]({
                 color: color
             })}
-            <Text style={{color: isFocused ? 'blue' : 'black'}}>
+            <Text style={{color: isFocused ? 'red' : 'black'}}>
                 {label}
             </Text>
         </PlatformPressable>

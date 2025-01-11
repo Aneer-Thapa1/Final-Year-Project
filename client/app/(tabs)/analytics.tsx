@@ -1,11 +1,12 @@
 import {View, Text} from 'react-native'
 import React from 'react'
 
-const AnalyticsJsx = () => {
+const Analytics = () => {
     return (
         <View>
-            <Text>AnalyticsJsx</Text>
+            <Text>Analytics</Text>
         </View>
     )
 }
-export default AnalyticsJsx
+
+export default Analytics

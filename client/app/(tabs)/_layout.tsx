@@ -1,16 +1,20 @@
 import {View, Text} from 'react-native'
 import React from 'react'
 import {Tabs} from 'expo-router'
-import Explore from "@/app/(tabs)/explore";
 import {TabBar} from "@/components/TabBar";
+import Header from "@/components/Header";
 
 const TabsLayout = () => {
     return (
         <View className='flex h-screen w-screen '>
-           <Tabs tabBar={props => <TabBar children={undefined} {...props} />} >
-               <Tabs.Screen name='index' options={{title: 'Home'}}/>
-               <Tabs.Screen name='add' options={{title: 'Add'}}/>
-               <Tabs.Screen name='explore' options={{title: 'Explore'}}/>
+<Header/>
+           <Tabs tabBar={props => <TabBar  {...props} options={{ headerShown: false }} />} >
+               <Tabs.Screen name='index' options={{title: 'Home', headerShown: false}}/>
+               <Tabs.Screen name='explore' options={{title: 'Explore', headerShown: false}}/>
+               <Tabs.Screen name='add' options={{title: 'Add', headerShown: false}}/>
+               <Tabs.Screen name='analytics' options={{title: 'Analytics', headerShown: false}}/>
+               <Tabs.Screen name='leaderbaord' options={{title: 'Leaderboard', headerShown: false}}/>
+
            </Tabs>
         </View>
     )

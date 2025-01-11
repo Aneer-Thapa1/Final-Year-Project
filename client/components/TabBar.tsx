@@ -1,11 +1,11 @@
 import {View, Platform, StyleSheet} from 'react-native';
 import {useLinkBuilder, useTheme} from '@react-navigation/native';
 
-import {createBottomTabNavigator, BottomTabBarButtonProps} from '@react-navigation/bottom-tabs';
+import { BottomTabBarProps} from '@react-navigation/bottom-tabs';
 
 import TabBarButton from "@/components/TabBarButton";
 
-export function TabBar({state, descriptors, navigation}: BottomTabBarButtonProps) {
+export function TabBar({state, descriptors, navigation}: BottomTabBarProps) {
     const {colors} = useTheme();
     const {buildHref} = useLinkBuilder();
 
@@ -66,7 +66,7 @@ const styles = StyleSheet.create({
         bottom: 50,
         alignItems: 'center',
         justifyContent: "space-between",
-        marginHorizontal: 80,
+        marginHorizontal: 20,
         backgroundColor: '#fff',
         borderRadius: 35,
         shadowColor: '#000',
