@@ -77,9 +77,12 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-    const {user_email, password, device_token} = req.body;
+    const {userEmail, password} = req.body;
 
-    if (!user_email?.trim() || !password) {
+
+    console.log(userEmail, password)
+
+    if (!userEmail?.trim() || !password) {
         return res.status(400).json({
             success: false,
             error: "Email and password are required"
@@ -88,7 +91,7 @@ const login = async (req, res) => {
 
     try {
         const user = await prisma.user.findFirst({
-            where: {user_email: user_email.toLowerCase().trim()}
+            where: {user_email: userEmail.toLowerCase().trim()}
         });
 
         if (!user) {

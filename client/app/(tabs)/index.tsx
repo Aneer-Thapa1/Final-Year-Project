@@ -11,11 +11,9 @@ const Home = () => {
             <Text className='flex justify-center items-center font-bold text-sm text-blue-800' > VIEW ALL</Text>
             </View>
 
-            <View className='flex flex-row justify-between w-screen p-4 '>
-                <View className='flex flex-col gap-4 bg-green-400 h-fit w-fit'>
-                    <Text className='font-medium text-3xl'>Title here</Text>
-                </View>
-            </View>
+         <View>
+             <Text>Hi</Text>
+         </View>
         </View>
     )
 }

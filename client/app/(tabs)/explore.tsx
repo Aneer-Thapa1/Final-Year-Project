@@ -15,7 +15,6 @@ const Explore = () => {
 
             <View className='overflow-y-scroll h-60vh'>
                 <Blogs/>
-
             </View>
 
         </View>
