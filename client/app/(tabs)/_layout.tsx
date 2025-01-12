@@ -13,7 +13,7 @@ const TabsLayout = () => {
                <Tabs.Screen name='explore' options={{title: 'Explore', headerShown: false}}/>
                <Tabs.Screen name='add' options={{title: 'Add', headerShown: false}}/>
                <Tabs.Screen name='analytics' options={{title: 'Analytics', headerShown: false}}/>
-               <Tabs.Screen name='leaderbaord' options={{title: 'Leaderboard', headerShown: false}}/>
+               <Tabs.Screen name='rank' options={{title: 'Rank', headerShown: false}}/>
 
            </Tabs>
         </View>
