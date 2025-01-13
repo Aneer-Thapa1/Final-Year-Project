@@ -93,6 +93,7 @@ const login = async (req, res) => {
         const user = await prisma.user.findFirst({
             where: {user_email: userEmail.toLowerCase().trim()}
         });
+        console.log(user)
 
         if (!user) {
             return res.status(401).json({
@@ -102,6 +103,7 @@ const login = async (req, res) => {
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.password);
+        console.log(isPasswordValid)
 
         if (!isPasswordValid) {
             return res.status(401).json({

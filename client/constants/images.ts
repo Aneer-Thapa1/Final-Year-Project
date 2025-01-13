@@ -4,8 +4,9 @@ import logo from  '@/assets/images/logo.png'
 import chatBotIcon from '@/assets/images/chatbot.png'
 import blogImage from '@/assets/images/blogImage.png'
 import notificationIcon from '@/assets/images/notification.png'
+import maleProfile from '@/assets/images/maleProfile.png'
 
 export default {
-icon, onBoarding,logo, chatBotIcon, blogImage, notificationIcon
+icon, onBoarding,logo, chatBotIcon, blogImage, notificationIcon,maleProfile
 
 }

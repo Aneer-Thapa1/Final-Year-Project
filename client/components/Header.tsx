@@ -1,37 +1,145 @@
-import {Image, Text, TouchableOpacity, View} from 'react-native'
-import React from 'react'
-import images from "../constants/images";
-import {router} from "expo-router/build/rsc/exports";
+import { Image, Text, TouchableOpacity, View, Animated } from 'react-native'
+import React, { useRef, useEffect } from 'react'
+import { router } from "expo-router"
+import { LinearGradient } from 'expo-linear-gradient'
+import { Bell } from 'lucide-react-native'  // Import Bell icon
+import images from "../constants/images"
 
 const Header = () => {
-    return (// main container of header
-        <View className='h-22 bg-white flex w-screen flwx-column'>
-            {/* name, notification and chatbot icon section */}
-            <View className='bg-white p-6 flex flex-row justify-between w-screen'>
-                {/* profile and name */}
-                <View className='flex flex-row gap-3'>
-                    <Image source={images.blogImage} className='w-9 h-9 rounded-full'/>
-                    <Text className='text-xl font-medium'>Hi, Anir</Text>
-                </View>
-                {/* profile and name ends here */}
+    // Animation controllers for notification
+    const notificationScale = useRef(new Animated.Value(1)).current;
+    const notificationShake = useRef(new Animated.Value(0)).current;
 
-                {/*chatbot and notifications*/}
-                <View className='flex flex-row gap-3'>
-                    {/*view for adding number of notification*/}
-                    <TouchableOpacity className='flex flex-row gap-3 '  >
-                        {/*notification icons*/}
-                        <Image source={images.notificationIcon} className='w-7 h-7 rounded-full relative'/>
-                        <View className='absolute -top-2 left-4 bg-red-500 rounded-full  w-5 h-5 flex justify-center items-center'>
-                            <Text
-                                className='text-white font-bold text-xs'>3</Text>
-                        </View>
-                    </TouchableOpacity>
-                    {/*view for adding number of notification ends here */}
+    // Animation controllers for quote card
+    const quoteOpacity = useRef(new Animated.Value(0)).current;
+    const quoteSlide = useRef(new Animated.Value(10)).current;
+
+    useEffect(() => {
+        // Initial animation sequence
+        Animated.sequence([
+            // Pop notification badge
+            Animated.spring(notificationScale, {
+                toValue: 1.2,
+                tension: 100,
+                friction: 5,
+                useNativeDriver: true,
+            }),
+            // Show quote with combined animations
+            Animated.parallel([
+                Animated.timing(quoteOpacity, {
+                    toValue: 1,
+                    duration: 600,
+                    useNativeDriver: true,
+                }),
+                Animated.spring(quoteSlide, {
+                    toValue: 0,
+                    tension: 50,
+                    friction: 7,
+                    useNativeDriver: true,
+                })
+            ])
+        ]).start();
+
+        // Setup notification shake animation
+        const shakeAnimation = Animated.sequence([
+            Animated.timing(notificationShake, {
+                toValue: 3,
+                duration: 100,
+                useNativeDriver: true,
+            }),
+            Animated.timing(notificationShake, {
+                toValue: -3,
+                duration: 100,
+                useNativeDriver: true,
+            }),
+            Animated.timing(notificationShake, {
+                toValue: 3,
+                duration: 100,
+                useNativeDriver: true,
+            }),
+            Animated.timing(notificationShake, {
+                toValue: 0,
+                duration: 100,
+                useNativeDriver: true,
+            })
+        ]);
+
+        // Repeat shake every 5 seconds
+        const intervalId = setInterval(() => {
+            shakeAnimation.start();
+        }, 5000);
+
+        // Cleanup interval on unmount
+        return () => clearInterval(intervalId);
+    }, []);
+
+    return (
+        <View className="bg-white rounded-b-[60px] h-[135px] relative mb-6">
+            {/* Header row */}
+            <View className="p-6 flex-row items-center justify-between">
+                {/* Profile section */}
+                <View className="flex-row items-center space-x-3 gap-3">
+                    <Image
+                        source={images.blogImage}
+                        className="w-9 h-9 rounded-full"
+                    />
+                    <Text className="text-xl font-medium text-gray-800">
+                        Hi, Anir
+                    </Text>
                 </View>
-                {/*chatbot and notifications ends here*/}
+
+                {/* Notification bell with animated badge */}
+                <TouchableOpacity
+                    onPress={() => router.push('/notifications')}
+                    className="relative p-2 active:opacity-70"
+                >
+                    <Bell
+                        size={24}
+                        className="text-gray-700"
+                        strokeWidth={2}
+                    />
+                    <Animated.View
+                        className="absolute -top-2 -right-1 bg-primary-500 rounded-full w-5 h-5 items-center justify-center"
+                        style={{
+                            transform: [
+                                { scale: notificationScale },
+                                { translateX: notificationShake }
+                            ]
+                        }}
+                    >
+                        <Text className="text-white font-bold text-xs">3</Text>
+                    </Animated.View>
+                </TouchableOpacity>
             </View>
-            {/* name, notification and chatbot icon section ends here*/}
-        </View>)
+
+            {/* Animated quote card */}
+            <Animated.View
+                style={{
+                    opacity: quoteOpacity,
+                    transform: [{ translateY: quoteSlide }]
+                }}
+                className='absolute -bottom-10 z-10'
+            >
+                <View className="mx-6 mb-4 rounded-2xl">
+                    <LinearGradient
+                        colors={['#F3E8FF', '#E4D0FF']}
+                        className="rounded-2xl overflow-hidden"
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                    >
+                        <View className="p-4">
+                            <Text className="text-primary-700 text-sm font-medium italic leading-6 ml-3 border-l-2 border-primary-300 pl-3">
+                                "The only thing necessary for the triumph of evil is for good men to do nothing"
+                            </Text>
+                            <Text className="text-primary-500 text-xs font-medium mt-2 text-right">
+                                - Edmund Burke
+                            </Text>
+                        </View>
+                    </LinearGradient>
+                </View>
+            </Animated.View>
+        </View>
+    )
 }
 
 export default Header
