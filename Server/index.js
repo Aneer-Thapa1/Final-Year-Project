@@ -60,7 +60,4 @@ app.use(errorLogger);
 // Start the HTTP server listening for requests
 httpServer.listen(process.env.PORT, () => {
   console.log(`Server is running on http://localhost:${process.env.PORT}`);
-
-  console.log(process.env["NODE_MAILER_GMAIL"]);
-  console.log(process.env["NODE_MAILER_PASSWORD"]);
 });

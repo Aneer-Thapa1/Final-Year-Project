@@ -1,110 +1,298 @@
-import {Text, TextInput, TouchableOpacity, View, Alert} from 'react-native';
+import {
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    ScrollView,
+    ActivityIndicator,
+    Dimensions
+} from 'react-native';
+import {
+    Target,
+    Mail,
+    Lock,
+    Eye,
+    EyeOff,
+    ArrowRight,
+    Github,
+    Chrome,
+    AlertCircle,
+    CheckCircle2
+} from 'lucide-react-native';
 import React from 'react';
 import axios from "axios";
-import {router} from "expo-router";
+import { router } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
+
+const { width } = Dimensions.get('window');
 
 const Login = () => {
     const baseURL = process.env.REACT_APP_BASE_URL;
-    const [userEmail, setUserEmail] = React.useState<string>('');
-    const [password, setPassword] = React.useState<string>('');
-    const [isLoading, setIsLoading] = React.useState<boolean>(false);
+    const [userEmail, setUserEmail] = React.useState('');
+    const [password, setPassword] = React.useState('');
+    const [isLoading, setIsLoading] = React.useState(false);
+    const [showPassword, setShowPassword] = React.useState(false);
+    const [errors, setErrors] = React.useState({
+        email: '',
+        password: '',
+        general: ''
+    });
+    const [isSuccess, setIsSuccess] = React.useState(false);
+
+    // Email validation
+    const validateEmail = (email: string) => {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email) {
+            setErrors(prev => ({ ...prev, email: 'Email is required' }));
+            return false;
+        }
+        if (!emailRegex.test(email)) {
+            setErrors(prev => ({ ...prev, email: 'Please enter a valid email' }));
+            return false;
+        }
+        setErrors(prev => ({ ...prev, email: '' }));
+        return true;
+    };
+
+    // Password validation
+    const validatePassword = (password: string) => {
+        if (!password) {
+            setErrors(prev => ({ ...prev, password: 'Password is required' }));
+            return false;
+        }
+        if (password.length < 6) {
+            setErrors(prev => ({ ...prev, password: 'Password must be at least 6 characters' }));
+            return false;
+        }
+        setErrors(prev => ({ ...prev, password: '' }));
+        return true;
+    };
 
     const handleLogin = async () => {
-        if (!userEmail || !password) {
-            Alert.alert("Error", "Please fill in all fields");
+        // Reset all errors
+        setErrors({ email: '', password: '', general: '' });
+        setIsSuccess(false);
+
+        // Validate inputs
+        const isEmailValid = validateEmail(userEmail);
+        const isPasswordValid = validatePassword(password);
+
+        if (!isEmailValid || !isPasswordValid) {
             return;
         }
 
         try {
             setIsLoading(true);
             const response = await axios.post(`${baseURL}/api/users/login`, {
-                userEmail,
+                userEmail: userEmail,  // Make sure this matches your API expectations
                 password
             });
-            Alert.alert("Success", `Welcome back, ${userEmail}!`);
 
-        } catch (error: any) {
-            Alert.alert(
-                "Success",
-                `Welcome back, ${userEmail}!`,
-                [
-                    {
-                        text: "OK",
-                        onPress: () => {
-                            // Redirect to index after user clicks OK on alert
-                            router.replace("/index)");  // or router.replace("/index")
-                        }
-                    }
-                ]
-            );
+            // Show success state
+            setIsSuccess(true);
+
+            // Navigate after delay
+            setTimeout(() => {
+                router.replace("/(tabs)");
+            }, 1500);
+
+        } catch (error) {
+            const errorMsg = error.response?.data?.message || "Connection error. Please try again.";
+            setErrors(prev => ({ ...prev, general: errorMsg }));
         } finally {
             setIsLoading(false);
         }
     };
 
     return (
-        <View className='flex-1 bg-white p-6'>
-            {/* Header Section */}
-            <View className='mt-20 mb-10'>
-                <Text className='text-4xl font-bold text-gray-800 mb-2'>Welcome Back</Text>
-                <Text className='text-lg text-gray-600'>Login to Habit Pulse!</Text>
-            </View>
+        <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            className="flex-1"
+        >
+            <ScrollView
+                className="flex-1 bg-background-light"
+                contentContainerStyle={{ flexGrow: 1 }}
+            >
+                {/* Top Gradient Section */}
+                <LinearGradient
+                    colors={['#7C3AED', '#9D6FFF']}
+                    className="h-72 w-full absolute top-0 rounded-b-[50px]"
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                />
 
-            {/* Form Section */}
-            <View className='space-y-6'>
-                {/* Email Input */}
-                <View>
-                    <Text className='text-sm font-semibold text-gray-700 mb-2'>Email Address</Text>
-                    <TextInput
-                        className='bg-gray-50 rounded-xl p-4 text-gray-800 border border-gray-200'
-                        placeholder="Enter your email"
-                        onChangeText={setUserEmail}
-                        value={userEmail}
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                    />
+                {/* Main Content Container */}
+                <View className="flex-1 px-6">
+                    {/* Logo and Welcome Section */}
+                    <View className="items-center mt-16 mb-8">
+                        <View className="bg-white/20 p-5 rounded-3xl mb-4">
+                            <Target className="w-16 h-16 text-white" />
+                        </View>
+                        <Text className="text-white text-3xl font-bold mb-1">
+                            Welcome Back!
+                        </Text>
+                        <Text className="text-white/80 text-base">
+                            Your habits journey continues here
+                        </Text>
+                    </View>
+
+                    {/* Login Card */}
+                    <View className="bg-white rounded-3xl p-6 shadow-lg mt-4">
+                        {/* Email Input */}
+                        <View className="mb-5">
+                            <Text className="text-gray-700 text-sm font-medium mb-2 ml-1">
+                                Email Address
+                            </Text>
+                            <View className={`bg-gray-50 rounded-xl flex-row items-center border ${errors.email ? 'border-error-500' : 'border-gray-100'}`}>
+                                <Mail className={`w-5 h-5 ml-3 ${errors.email ? 'text-error-500' : 'text-gray-400'}`} />
+                                <TextInput
+                                    className="flex-1 px-3 py-3 text-gray-800"
+                                    placeholder="Enter your email"
+                                    onChangeText={(text) => {
+                                        setUserEmail(text);
+                                        validateEmail(text);
+                                    }}
+                                    value={userEmail}
+                                    keyboardType="email-address"
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                />
+                            </View>
+                            {errors.email && (
+                                <View className="flex-row items-center mt-2">
+                                    <AlertCircle className="w-4 h-4 text-error-500 mr-1" />
+                                    <Text className="text-error-500 text-sm">{errors.email}</Text>
+                                </View>
+                            )}
+                        </View>
+
+                        {/* Password Input */}
+                        <View className="mb-5">
+                            <Text className="text-gray-700 text-sm font-medium mb-2 ml-1">
+                                Password
+                            </Text>
+                            <View className={`bg-gray-50 rounded-xl flex-row items-center border ${errors.password ? 'border-error-500' : 'border-gray-100'}`}>
+                                <Lock className={`w-5 h-5 ml-3 ${errors.password ? 'text-error-500' : 'text-gray-400'}`} />
+                                <TextInput
+                                    className="flex-1 px-3 py-3 text-gray-800"
+                                    placeholder="Enter your password"
+                                    secureTextEntry={!showPassword}
+                                    onChangeText={(text) => {
+                                        setPassword(text);
+                                        validatePassword(text);
+                                    }}
+                                    value={password}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                />
+                                <TouchableOpacity
+                                    onPress={() => setShowPassword(!showPassword)}
+                                    className="px-4"
+                                >
+                                    {showPassword ?
+                                        <EyeOff className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-gray-400'}`} /> :
+                                        <Eye className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-gray-400'}`} />
+                                    }
+                                </TouchableOpacity>
+                            </View>
+                            {errors.password && (
+                                <View className="flex-row items-center mt-2">
+                                    <AlertCircle className="w-4 h-4 text-error-500 mr-1" />
+                                    <Text className="text-error-500 text-sm">{errors.password}</Text>
+                                </View>
+                            )}
+                        </View>
+
+                        {/* Success Message */}
+                        {isSuccess && (
+                            <View className="bg-success-100 p-4 rounded-xl mb-6 flex-row items-center">
+                                <CheckCircle2 className="w-5 h-5 text-success-500 mr-2" />
+                                <Text className="text-success-500 font-medium flex-1">
+                                    Login successful! Redirecting to home page...
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* General Error Message */}
+                        {errors.general && (
+                            <View className="bg-error-100 p-4 rounded-xl mb-6 flex-row items-center">
+                                <AlertCircle className="w-5 h-5 text-error-500 mr-2" />
+                                <Text className="text-error-500 font-medium flex-1">
+                                    {errors.general}
+                                </Text>
+                            </View>
+                        )}
+                        <TouchableOpacity className="self-end mb-6">
+                            <Text className="text-primary-500 font-medium">
+                                Forgot Password?
+                            </Text>
+                        </TouchableOpacity>
+
+                        {/* Login Button */}
+                        <TouchableOpacity
+                            onPress={handleLogin}
+                            disabled={isLoading}
+                            className={`
+                                bg-primary-500 
+                                py-4 
+                                rounded-xl 
+                                shadow-sm
+                                ${isLoading ? 'opacity-70' : ''}
+                            `}
+                        >
+                            <View className="flex-row items-center justify-center space-x-2">
+                                {isLoading ? (
+                                    <ActivityIndicator color="white" />
+                                ) : (
+                                    <>
+                                        <Text className="text-white text-center font-semibold text-lg">
+                                            Sign In
+                                        </Text>
+                                        <ArrowRight className="w-5 h-5 text-white" />
+                                    </>
+                                )}
+                            </View>
+                        </TouchableOpacity>
+
+                        {/* Social Login Options */}
+                        <View className="mt-8">
+                            <View className="flex-row items-center mb-6">
+                                <View className="flex-1 h-[1px] bg-gray-200" />
+                                <Text className="mx-4 text-gray-500">
+                                    Or continue with
+                                </Text>
+                                <View className="flex-1 h-[1px] bg-gray-200" />
+                            </View>
+
+                            <View className="flex-row justify-center space-x-4">
+                                {/* Social Login Buttons */}
+                                <TouchableOpacity className="bg-gray-50 p-4 rounded-full w-14 h-14 items-center justify-center">
+                                    <Chrome className="w-6 h-6 text-gray-700" />
+                                </TouchableOpacity>
+                                <TouchableOpacity className="bg-gray-50 p-4 rounded-full w-14 h-14 items-center justify-center">
+                                    <Github className="w-6 h-6 text-gray-700" />
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+
+                    {/* Sign Up Link */}
+                    <View className="flex-row justify-center mt-6 mb-8">
+                        <Text className="text-gray-600">
+                            Don't have an account?{" "}
+                        </Text>
+                        <TouchableOpacity onPress={() => router.push("/signup")}>
+                            <Text className="text-primary-500 font-semibold">
+                                Sign Up
+                            </Text>
+                        </TouchableOpacity>
+                    </View>
                 </View>
-
-                {/* Password Input */}
-                <View>
-                    <Text className='text-sm font-semibold text-gray-700 mb-2'>Password</Text>
-                    <TextInput
-                        className='bg-gray-50 rounded-xl p-4 text-gray-800 border border-gray-200'
-                        placeholder="Enter your password"
-                        secureTextEntry
-                        onChangeText={setPassword}
-                        value={password}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                    />
-                </View>
-
-                {/* Forgot Password */}
-                <TouchableOpacity className='self-end'>
-                    <Text className='text-blue-600 font-semibold'>Forgot Password?</Text>
-                </TouchableOpacity>
-
-                {/* Login Button */}
-                <TouchableOpacity
-                    onPress={handleLogin}
-                    disabled={isLoading}
-                    className={`bg-blue-600 py-4 rounded-xl mt-4 ${isLoading ? 'opacity-70' : ''}`}
-                >
-                    <Text className='text-white text-center font-semibold text-lg'>
-                        {isLoading ? 'Logging in...' : 'Login'}
-                    </Text>
-                </TouchableOpacity>
-
-                {/* Sign Up Link */}
-                <View className='flex-row justify-center mt-6'>
-                    <Text className='text-gray-600'>Don't have an account? </Text>
-                    <TouchableOpacity>
-                        <Text className='text-blue-600 font-semibold'>Sign Up</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </View>
+            </ScrollView>
+        </KeyboardAvoidingView>
     );
 };
 
