@@ -1,11 +1,12 @@
 import {View, Text} from 'react-native'
 import React from 'react'
 
-const Signup = () => {
+const Notifications = () => {
     return (
         <View>
-            <Text>Signup</Text>
+            <Text>Notifications</Text>
         </View>
     )
 }
-export default Signup
+
+export default Notifications

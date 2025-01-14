@@ -7,15 +7,15 @@ import Header from "@/components/Header";
 const TabsLayout = () => {
     return (
         <View className='flex h-screen w-screen '>
-<Header/>
-           <Tabs tabBar={props => <TabBar  {...props} options={{ headerShown: false }} />} >
-               <Tabs.Screen name='index' options={{title: 'Home', headerShown: false}}/>
-               <Tabs.Screen name='explore' options={{title: 'Explore', headerShown: false}}/>
-               <Tabs.Screen name='add' options={{title: 'Add', headerShown: false}}/>
-               <Tabs.Screen name='analytics' options={{title: 'Analytics', headerShown: false}}/>
-               <Tabs.Screen name='rank' options={{title: 'Rank', headerShown: false}}/>
+            <Header/>
+            <Tabs tabBar={props => <TabBar  {...props} options={{ headerShown: false }} />} >
+                <Tabs.Screen name='index' options={{title: 'Home', headerShown: false}}/>
+                <Tabs.Screen name='explore' options={{title: 'Explore', headerShown: false}}/>
+                <Tabs.Screen name='add' options={{title: 'Add', headerShown: false}}/>
+                <Tabs.Screen name='analytics' options={{title: 'Analytics', headerShown: false}}/>
+                <Tabs.Screen name='rank' options={{title: 'Rank', headerShown: false}}/>
 
-           </Tabs>
+            </Tabs>
         </View>
     )
 }
