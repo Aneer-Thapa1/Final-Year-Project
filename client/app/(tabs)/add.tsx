@@ -4,7 +4,7 @@ import React from 'react'
 const AddPage = () => {
     return (
         <View>
-            <Text>AddPage</Text>
+            <Text>Add New Habit</Text>
         </View>
     )
 }
