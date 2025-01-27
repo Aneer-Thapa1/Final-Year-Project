@@ -15,5 +15,5 @@ const addFriend = async (req, res) => {
         return res.status(402).json({error: 'No reciver or sender found.'});
     }
 
-
+const sendRequest = await prisma.user.findFirst(sender_id)
 }
