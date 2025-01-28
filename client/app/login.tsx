@@ -1,79 +1,104 @@
 import {
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
-    Alert,
+    ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
-    ActivityIndicator,
-    Dimensions
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View
 } from 'react-native';
 import {
-    Target,
-    Mail,
-    Lock,
+    AlertCircle,
+    ArrowRight,
+    CheckCircle2,
+    Chrome,
     Eye,
     EyeOff,
-    ArrowRight,
     Github,
-    Chrome,
-    AlertCircle,
-    CheckCircle2
+    Lock,
+    Mail,
+    Target
 } from 'lucide-react-native';
-import React from 'react';
+import React, {useEffect} from 'react';
 import axios from "axios";
-import { router } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
+import {router} from 'expo-router';
+import {LinearGradient} from 'expo-linear-gradient';
+import {loginUser} from "@/services/userService";
+import {useDispatch, useSelector} from 'react-redux'
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import {loginSuccess} from "@/store/slices/userSlice";
 
-const { width } = Dimensions.get('window');
+// Types
+interface LoginErrors {
+    email: string;
+    password: string;
+    general: string;
+}
+
+interface LoginResponse {
+    success: boolean;
+    token?: string;
+    message?: string;
+}
 
 const Login = () => {
-    const baseURL = process.env.REACT_APP_BASE_URL;
     const [userEmail, setUserEmail] = React.useState('');
     const [password, setPassword] = React.useState('');
     const [isLoading, setIsLoading] = React.useState(false);
     const [showPassword, setShowPassword] = React.useState(false);
-    const [errors, setErrors] = React.useState({
-        email: '',
-        password: '',
-        general: ''
+    const [errors, setErrors] = React.useState<LoginErrors>({
+        email: '', password: '', general: ''
     });
     const [isSuccess, setIsSuccess] = React.useState(false);
 
+
+    const dispatch = useDispatch();
+    const user = useSelector((state) => state.user.user);
+
+    // Handle navigation after successful login
+    useEffect(() => {
+        let timeoutId: NodeJS.Timeout;
+        if (isSuccess) {
+            timeoutId = setTimeout(() => {
+                router.replace("/(tabs)");
+            }, 1500);
+        }
+        return () => clearTimeout(timeoutId);
+    }, [isSuccess]);
+
     // Email validation
-    const validateEmail = (email: string) => {
+    const validateEmail = (email: string): boolean => {
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!email) {
-            setErrors(prev => ({ ...prev, email: 'Email is required' }));
+            setErrors(prev => ({...prev, email: 'Email is required'}));
             return false;
         }
         if (!emailRegex.test(email)) {
-            setErrors(prev => ({ ...prev, email: 'Please enter a valid email' }));
+            setErrors(prev => ({...prev, email: 'Please enter a valid email'}));
             return false;
         }
-        setErrors(prev => ({ ...prev, email: '' }));
+        setErrors(prev => ({...prev, email: ''}));
         return true;
     };
 
     // Password validation
-    const validatePassword = (password: string) => {
+    const validatePassword = (password: string): boolean => {
         if (!password) {
-            setErrors(prev => ({ ...prev, password: 'Password is required' }));
+            setErrors(prev => ({...prev, password: 'Password is required'}));
             return false;
         }
         if (password.length < 6) {
-            setErrors(prev => ({ ...prev, password: 'Password must be at least 6 characters' }));
+            setErrors(prev => ({...prev, password: 'Password must be at least 6 characters'}));
             return false;
         }
-        setErrors(prev => ({ ...prev, password: '' }));
+        setErrors(prev => ({...prev, password: ''}));
         return true;
     };
 
     const handleLogin = async () => {
         // Reset all errors
-        setErrors({ email: '', password: '', general: '' });
+        setErrors({email: '', password: '', general: ''});
         setIsSuccess(false);
 
         // Validate inputs
@@ -86,42 +111,41 @@ const Login = () => {
 
         try {
             setIsLoading(true);
-            const response = await axios.post(`${baseURL}/api/users/login`, {
-                userEmail: userEmail,  // Make sure this matches your API expectations
-                password
-            });
+            const response = await loginUser({userEmail: userEmail, password: password});
 
-            // Show success state
-            setIsSuccess(true);
+            console.log(response)
 
-            // Navigate after delay
-            setTimeout(() => {
-                router.replace("/(tabs)");
-            }, 1500);
-
+            if (response.success) {
+                await AsyncStorage.setItem('token', response.data.token);
+                setIsSuccess(true);
+                dispatch(loginSuccess({ name: response.data.user.user_name, email: response.data.user.user_email }));
+                
+            } else {
+                setErrors(prev => ({...prev, general: response.message || 'Login failed'}));
+            }
         } catch (error) {
-            const errorMsg = error.response?.data?.message || "Connection error. Please try again.";
-            setErrors(prev => ({ ...prev, general: errorMsg }));
+            const errorMsg = error ? error.response?.data?.message : "Connection error. Please try again.";
+            setErrors(prev => ({...prev, general: errorMsg}));
         } finally {
             setIsLoading(false);
         }
     };
 
-    return (
-        <KeyboardAvoidingView
+    return (<KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : "height"}
             className="flex-1"
         >
             <ScrollView
                 className="flex-1 bg-background-light"
-                contentContainerStyle={{ flexGrow: 1 }}
+                contentContainerStyle={{flexGrow: 1}}
+                keyboardShouldPersistTaps="handled"
             >
                 {/* Top Gradient Section */}
                 <LinearGradient
                     colors={['#7C3AED', '#9D6FFF']}
                     className="h-72 w-full absolute top-0 rounded-b-[50px]"
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
+                    start={{x: 0, y: 0}}
+                    end={{x: 1, y: 1}}
                 />
 
                 {/* Main Content Container */}
@@ -129,7 +153,7 @@ const Login = () => {
                     {/* Logo and Welcome Section */}
                     <View className="items-center mt-16 mb-8">
                         <View className="bg-white/20 p-5 rounded-3xl mb-4">
-                            <Target className="w-16 h-16 text-white" />
+                            <Target className="w-16 h-16 text-white"/>
                         </View>
                         <Text className="text-white text-3xl font-bold mb-1">
                             Welcome Back!
@@ -146,8 +170,9 @@ const Login = () => {
                             <Text className="text-gray-700 text-sm font-medium mb-2 ml-1">
                                 Email Address
                             </Text>
-                            <View className={`bg-gray-50 rounded-xl flex-row items-center border ${errors.email ? 'border-error-500' : 'border-gray-100'}`}>
-                                <Mail className={`w-5 h-5 ml-3 ${errors.email ? 'text-error-500' : 'text-gray-400'}`} />
+                            <View
+                                className={`bg-gray-50 rounded-xl flex-row items-center border ${errors.email ? 'border-error-500' : 'border-gray-100'}`}>
+                                <Mail className={`w-5 h-5 ml-3 ${errors.email ? 'text-error-500' : 'text-gray-400'}`}/>
                                 <TextInput
                                     className="flex-1 px-3 py-3 text-gray-800"
                                     placeholder="Enter your email"
@@ -159,14 +184,14 @@ const Login = () => {
                                     keyboardType="email-address"
                                     autoCapitalize="none"
                                     autoCorrect={false}
+                                    returnKeyType="next"
+                                    accessibilityLabel="Email input"
                                 />
                             </View>
-                            {errors.email && (
-                                <View className="flex-row items-center mt-2">
-                                    <AlertCircle className="w-4 h-4 text-error-500 mr-1" />
+                            {errors.email && (<View className="flex-row items-center mt-2">
+                                    <AlertCircle className="w-4 h-4 text-error-500 mr-1"/>
                                     <Text className="text-error-500 text-sm">{errors.email}</Text>
-                                </View>
-                            )}
+                                </View>)}
                         </View>
 
                         {/* Password Input */}
@@ -174,8 +199,10 @@ const Login = () => {
                             <Text className="text-gray-700 text-sm font-medium mb-2 ml-1">
                                 Password
                             </Text>
-                            <View className={`bg-gray-50 rounded-xl flex-row items-center border ${errors.password ? 'border-error-500' : 'border-gray-100'}`}>
-                                <Lock className={`w-5 h-5 ml-3 ${errors.password ? 'text-error-500' : 'text-gray-400'}`} />
+                            <View
+                                className={`bg-gray-50 rounded-xl flex-row items-center border ${errors.password ? 'border-error-500' : 'border-gray-100'}`}>
+                                <Lock
+                                    className={`w-5 h-5 ml-3 ${errors.password ? 'text-error-500' : 'text-gray-400'}`}/>
                                 <TextInput
                                     className="flex-1 px-3 py-3 text-gray-800"
                                     placeholder="Enter your password"
@@ -187,45 +214,49 @@ const Login = () => {
                                     value={password}
                                     autoCapitalize="none"
                                     autoCorrect={false}
+                                    returnKeyType="go"
+                                    onSubmitEditing={handleLogin}
+                                    accessibilityLabel="Password input"
                                 />
                                 <TouchableOpacity
                                     onPress={() => setShowPassword(!showPassword)}
                                     className="px-4"
+                                    accessibilityLabel={showPassword ? "Hide password" : "Show password"}
+                                    accessibilityRole="button"
                                 >
-                                    {showPassword ?
-                                        <EyeOff className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-gray-400'}`} /> :
-                                        <Eye className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-gray-400'}`} />
-                                    }
+                                    {showPassword ? (<EyeOff
+                                            className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-gray-400'}`}/>) : (
+                                        <Eye
+                                            className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-gray-400'}`}/>)}
                                 </TouchableOpacity>
                             </View>
-                            {errors.password && (
-                                <View className="flex-row items-center mt-2">
-                                    <AlertCircle className="w-4 h-4 text-error-500 mr-1" />
+                            {errors.password && (<View className="flex-row items-center mt-2">
+                                    <AlertCircle className="w-4 h-4 text-error-500 mr-1"/>
                                     <Text className="text-error-500 text-sm">{errors.password}</Text>
-                                </View>
-                            )}
+                                </View>)}
                         </View>
 
                         {/* Success Message */}
-                        {isSuccess && (
-                            <View className="bg-success-100 p-4 rounded-xl mb-6 flex-row items-center">
-                                <CheckCircle2 className="w-5 h-5 text-success-500 mr-2" />
+                        {isSuccess && (<View className="bg-success-100 p-4 rounded-xl mb-6 flex-row items-center">
+                                <CheckCircle2 className="w-5 h-5 text-success-500 mr-2"/>
                                 <Text className="text-success-500 font-medium flex-1">
                                     Login successful! Redirecting to home page...
                                 </Text>
-                            </View>
-                        )}
+                            </View>)}
 
                         {/* General Error Message */}
-                        {errors.general && (
-                            <View className="bg-error-100 p-4 rounded-xl mb-6 flex-row items-center">
-                                <AlertCircle className="w-5 h-5 text-error-500 mr-2" />
+                        {errors.general && (<View className="bg-error-100 p-4 rounded-xl mb-6 flex-row items-center">
+                                <AlertCircle className="w-5 h-5 text-error-500 mr-2"/>
                                 <Text className="text-error-500 font-medium flex-1">
                                     {errors.general}
                                 </Text>
-                            </View>
-                        )}
-                        <TouchableOpacity className="self-end mb-6">
+                            </View>)}
+
+                        <TouchableOpacity
+                            className="self-end mb-6"
+                            accessibilityLabel="Forgot password"
+                            accessibilityRole="button"
+                        >
                             <Text className="text-primary-500 font-medium">
                                 Forgot Password?
                             </Text>
@@ -242,38 +273,43 @@ const Login = () => {
                                 shadow-sm
                                 ${isLoading ? 'opacity-70' : ''}
                             `}
+                            accessibilityLabel="Sign in button"
+                            accessibilityRole="button"
                         >
                             <View className="flex-row items-center justify-center space-x-2">
-                                {isLoading ? (
-                                    <ActivityIndicator color="white" />
-                                ) : (
-                                    <>
+                                {isLoading ? (<ActivityIndicator color="white"/>) : (<>
                                         <Text className="text-white text-center font-semibold text-lg">
                                             Sign In
                                         </Text>
-                                        <ArrowRight className="w-5 h-5 text-white" />
-                                    </>
-                                )}
+                                        <ArrowRight className="w-5 h-5 text-white"/>
+                                    </>)}
                             </View>
                         </TouchableOpacity>
 
                         {/* Social Login Options */}
                         <View className="mt-8">
                             <View className="flex-row items-center mb-6">
-                                <View className="flex-1 h-[1px] bg-gray-200" />
+                                <View className="flex-1 h-[1px] bg-gray-200"/>
                                 <Text className="mx-4 text-gray-500">
                                     Or continue with
                                 </Text>
-                                <View className="flex-1 h-[1px] bg-gray-200" />
+                                <View className="flex-1 h-[1px] bg-gray-200"/>
                             </View>
 
                             <View className="flex-row justify-center space-x-4">
-                                {/* Social Login Buttons */}
-                                <TouchableOpacity className="bg-gray-50 p-4 rounded-full w-14 h-14 items-center justify-center">
-                                    <Chrome className="w-6 h-6 text-gray-700" />
+                                <TouchableOpacity
+                                    className="bg-gray-50 p-4 rounded-full w-14 h-14 items-center justify-center"
+                                    accessibilityLabel="Sign in with Google"
+                                    accessibilityRole="button"
+                                >
+                                    <Chrome className="w-6 h-6 text-gray-700"/>
                                 </TouchableOpacity>
-                                <TouchableOpacity className="bg-gray-50 p-4 rounded-full w-14 h-14 items-center justify-center">
-                                    <Github className="w-6 h-6 text-gray-700" />
+                                <TouchableOpacity
+                                    className="bg-gray-50 p-4 rounded-full w-14 h-14 items-center justify-center"
+                                    accessibilityLabel="Sign in with GitHub"
+                                    accessibilityRole="button"
+                                >
+                                    <Github className="w-6 h-6 text-gray-700"/>
                                 </TouchableOpacity>
                             </View>
                         </View>
@@ -284,7 +320,11 @@ const Login = () => {
                         <Text className="text-gray-600">
                             Don't have an account?{" "}
                         </Text>
-                        <TouchableOpacity onPress={() => router.push("/signup")}>
+                        <TouchableOpacity
+                            onPress={() => router.push("/signup")}
+                            accessibilityLabel="Sign up"
+                            accessibilityRole="button"
+                        >
                             <Text className="text-primary-500 font-semibold">
                                 Sign Up
                             </Text>
@@ -292,8 +332,7 @@ const Login = () => {
                     </View>
                 </View>
             </ScrollView>
-        </KeyboardAvoidingView>
-    );
+        </KeyboardAvoidingView>);
 };
 
 export default Login;
