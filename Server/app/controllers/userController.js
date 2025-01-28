@@ -4,6 +4,7 @@ const jwt = require("jsonwebtoken");
 
 
 const {sendMail} = require('../utils/emailService')
+const {token} = require("morgan");
 
 
 const prisma = new PrismaClient();
@@ -64,7 +65,7 @@ const register = async (req, res) => {
             message: "Registration successful",
             data: {
                 user: userData,
-
+                token: token,
             }
         });
     } catch (error) {
@@ -111,7 +112,7 @@ const login = async (req, res) => {
                 error: "Invalid credentials"
             });
         }
-
+const token = jwt.sign(user.user_id, process.env.JWT_SECRET)
 
         const {password: _, ...userData} = user;
 
@@ -120,6 +121,7 @@ const login = async (req, res) => {
             message: "Login successful",
             data: {
                 user: userData,
+                token:token
             }
         });
     } catch (error) {
