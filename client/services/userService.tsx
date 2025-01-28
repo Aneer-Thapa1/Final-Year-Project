@@ -23,7 +23,7 @@ export const loginUser = async (credentials: { userEmail: string; password: stri
 // Function to fetch the current user's profile
 export const fetchUserProfile = async () => {
     try {
-        return await fetchData('/profile'); // Used the `fetchData` utility from userService
+        return await fetchData('/api/users/profile'); // Used the `fetchData` utility from userService
     } catch (error: any) {
         throw error.response?.data?.message || 'Failed to fetch profile';
     }
