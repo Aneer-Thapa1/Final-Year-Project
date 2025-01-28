@@ -4,12 +4,13 @@ import * as SplashScreen from "expo-splash-screen";
 import "./global.css";
 import { useFonts } from "expo-font";
 import { useEffect } from "react";
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Provider } from 'react-redux';
+import { store } from '../store/store';
 
 SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
+function RootLayoutNav() {
   const router = useRouter();
   const [fontsLoaded] = useFonts({
     'Montserrat-Bold': require('../assets/fonts/Montserrat-Bold.ttf'),
@@ -25,15 +26,24 @@ export default function RootLayout() {
       if (fontsLoaded) {
         await SplashScreen.hideAsync();
         const hasLaunched = await AsyncStorage.getItem('hasLaunched');
-
+        // You can use the value of hasLaunched here
       }
     };
     initialize();
   }, [fontsLoaded]);
 
   if (!fontsLoaded) {
-    return null
+    return null;
   }
 
   return <Stack screenOptions={{ headerShown: false }} />;
+}
+
+// Wrap the root component with Provider
+export default function RootLayout() {
+  return (
+      <Provider store={store}>
+        <RootLayoutNav />
+      </Provider>
+  );
 }

@@ -1,30 +1,28 @@
 import axios from 'axios';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Set up a basic configuration for making API requests
 const api = axios.create({
-    baseURL: 'https://your-api-url.com/api', // The main URL of API
+    baseURL: 'https://cd54-2400-74e0-10-31cd-ad21-170b-a83-75fb.ngrok-free.app', // The main URL of API
     headers: {
         'Content-Type': 'application/json', // Tell the server we're sending JSON data
     },
 });
 
+
 // Before sending a request, add the user's token if they are logged in
-api.interceptors.request.use(
-    (config) => {
-        const token = localStorage.getItem('token'); // Get the token from local storage
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`; // Add the token to the request
-        }
-        return config;
-    },
-    (error) => {
-        return Promise.reject(error); // If something goes wrong, stop and show the error
+api.interceptors.request.use( async (config) => {
+    const token = await AsyncStorage.getItem('token'); // Get the token from Async storage
+    if (token) {
+        config.headers.Authorization = `Bearer ${token}`; // Add the token to the request
     }
-);
+    return config;
+}, (error) => {
+    return Promise.reject(error); // If something goes wrong, stop and show the error
+});
 
 // After receiving a response, check for errors and handle them
-api.interceptors.response.use(
-    (response) => response, // If the response is good, just return it
+api.interceptors.response.use( async (response) => response, // If the response is good, just return it
     (error) => {
         if (error.response) {
             // Handle different types of errors based on the status code
@@ -41,6 +39,10 @@ api.interceptors.response.use(
                     // If there's a server error, let the user know
                     console.error('Something went wrong on the server. Please try again later.');
                     break;
+                case 422:
+                    // Handle validation errors
+                    console.error('Validation failed:', error.response.data);
+                    break;
                 default:
                     // For any other error, show a generic message
                     console.error('An error occurred:', error.message);
@@ -50,8 +52,7 @@ api.interceptors.response.use(
             console.error('There was a network error. Please check your connection.');
         }
         return Promise.reject(error); // Pass the error along
-    }
-);
+    });
 
 // Function to fetch data from the API
 export const fetchData = async (endpoint: string) => {
