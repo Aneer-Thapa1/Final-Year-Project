@@ -1,4 +1,18 @@
-import { createSlice } from '@reduxjs/toolkit';
+import {createAsyncThunk, createSlice} from '@reduxjs/toolkit';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Async function to load user data from AsyncStorage
+export const loadUser = createAsyncThunk('user/loadUser', async (_, {rejectWithValue}) => {
+    try {
+        const userData = await AsyncStorage.getItem('user');
+        if (userData) {
+            return JSON.parse(userData);
+        }
+        return null;
+    } catch (error) {
+        return rejectWithValue('Failed to load user data');
+    }
+});
 
 // Define the initial state for the user slice
 const initialState = {
@@ -23,6 +37,7 @@ const userSlice = createSlice({
             state.user = action.payload; // Set user data
             state.isAuthenticated = true; // Mark user as authenticated
             state.loading = false; // Stop loading
+            AsyncStorage.setItem('user', JSON.stringify(action.payload));
         },
         // Action: Login failed
         loginFailure(state, action) {
@@ -38,14 +53,14 @@ const userSlice = createSlice({
         // Action: Update user profile
         updateProfile(state, action) {
             if (state.user) {
-                state.user = { ...state.user, ...action.payload }; // Merge new data with existing user data
+                state.user = {...state.user, ...action.payload}; // Merge new data with existing user data
             }
         },
     },
 });
 
 // Export the actions
-export const { loginStart, loginSuccess, loginFailure, logout, updateProfile } = userSlice.actions;
+export const {loginStart, loginSuccess, loginFailure, logout, updateProfile} = userSlice.actions;
 
 // Export the reducer
 export default userSlice.reducer;
