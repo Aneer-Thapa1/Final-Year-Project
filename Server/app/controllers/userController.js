@@ -171,4 +171,32 @@ const refreshToken = async (req, res) => {
     }
 };
 
-module.exports = {register, login, refreshToken};
+const changePassword = async (req, res) => {
+    // Get the new password from the request
+    const {currentPassword, newPassword} = req.body;
+
+    try {
+        // Get user from their authentication token
+        const user = req.user;
+
+        // Check if current password matches
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ message: "Current password is incorrect" });
+        }
+
+        // Convert new password into secure format
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Save new password
+        user.password = hashedPassword;
+        await user.save();
+
+        res.status(200).json({ message: "Password updated successfully" });
+
+    } catch (error) {
+        res.status(500).json({ message: "Something went wrong, please try again" });
+    }
+}
+
+module.exports = {register, login, refreshToken, changePassword};
