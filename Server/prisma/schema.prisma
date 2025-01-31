@@ -19,8 +19,10 @@ model User {
   registeredAt DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
 
-  blogs Blog[]
-  likes Like[]
+  blogs            Blog[]
+  likes            Like[]
+  sentRequests     FriendRequest[] @relation("sentRequests") // Friend requests sent by this user
+  receivedRequests FriendRequest[] @relation("receivedRequests") // Friend requests received by this user
 }
 
 model Blog {
@@ -28,8 +30,8 @@ model Blog {
   blog_title       String?
   blog_description String?
   blog_image       String
-  created_at       DateTime @default(now())
-  updated_at       DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   category_id Int
   category    Category @relation(fields: [category_id], references: [category_id])
@@ -49,9 +51,26 @@ model Category {
 model Like {
   like_id Int @id @default(autoincrement())
 
-  liked_by   Int // User who liked the blog
-  user       User     @relation(fields: [liked_by], references: [user_id])
-  blog_id    Int // Blog that was liked
-  blog       Blog     @relation(fields: [blog_id], references: [blog_id])
-  created_at DateTime @default(now()) // Timestamp for when the like was made
+  liked_by  Int // User who liked the blog
+  user      User     @relation(fields: [liked_by], references: [user_id])
+  blog_id   Int // Blog that was liked
+  blog      Blog     @relation(fields: [blog_id], references: [blog_id])
+  createdAt DateTime @default(now()) // Timestamp for when the like was made
+}
+
+model FriendRequest {
+  request_id     Int           @id @default(autoincrement())
+  sender_id      Int
+  receiver_id    Int
+  request_status RequestStatus @default(PENDING)
+  createdAt      DateTime      @default(now())
+
+  sender   User @relation(fields: [sender_id], references: [user_id], name: "sentRequests")
+  receiver User @relation(fields: [receiver_id], references: [user_id], name: "receivedRequests")
+}
+
+enum RequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
 }
