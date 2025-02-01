@@ -199,4 +199,59 @@ const changePassword = async (req, res) => {
     }
 }
 
-module.exports = {register, login, refreshToken, changePassword};
+const forgotPassword = async (req, res) => {
+    try {
+        // Get email from request
+        const { email } = req.body;
+
+        // Check if user exists in database using Prisma
+        const user = await prisma.user.findUnique({
+            where: { user_email: email }
+        });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Generate 1-hour valid reset token
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetTokenExpiry = new Date(Date.now() + 3600000); // 1 hour ahead
+
+        // Save hashed token in database
+        await prisma.user.update({
+            where: { id: user.id },
+            data: {
+                resetPasswordToken: crypto.createHash('sha256').update(resetToken).digest('hex'),
+                resetPasswordExpiry
+            }
+        });
+
+        // Create reset password link
+        const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+        // Send reset email to user
+        await sendEmail({
+            email: user.user_email,
+            subject: 'Password Reset Request',
+            message: `To reset your password, click: ${resetUrl}\nExpires in 1 hour.`
+        });
+
+        res.status(200).json({ message: 'Reset email sent' });
+
+    } catch (error) {
+        // If error occurs, clear reset token data
+        if (user?.user_id) {
+            await prisma.user.update({
+                where: { user_id: user.user_id },
+                data: {
+                    resetPasswordToken: null,
+                    resetPasswordExpiry: null
+                }
+            });
+        }
+
+        console.error(error);
+        res.status(500).json({ error: 'Error sending reset email' });
+    }
+};
+
+module.exports = {register, login, refreshToken, changePassword,forgotPassword};
