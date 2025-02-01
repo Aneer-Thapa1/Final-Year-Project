@@ -16,4 +16,7 @@ router.post('/login', userController.login);
 // User details route
 router.post('/changePassword', userController.changePassword);
 
+//forgot password route
+router.post('/forgotPassword', userController.forgotPassword);
+
 module.exports = router;
