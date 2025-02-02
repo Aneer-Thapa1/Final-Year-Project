@@ -78,54 +78,63 @@ const register = async (req, res) => {
 };
 
 const login = async (req, res) => {
-    const {userEmail, password} = req.body;
+    // Extract the email and password from the request body (the data sent by the user)
+    const { userEmail, password } = req.body;
 
-
-    console.log(userEmail, password)
-
+    // Check if email and password are provided
     if (!userEmail?.trim() || !password) {
-        return res.status(400).json({
+        return res.status(400).json({ // If not, return an error
             success: false,
             error: "Email and password are required"
         });
     }
 
     try {
+        // Look for the user in the database using their email
         const user = await prisma.user.findFirst({
-            where: {user_email: userEmail.toLowerCase().trim()}
+            where: { user_email: userEmail.toLowerCase().trim() } // Convert email to lowercase and remove extra spaces
         });
-        console.log(user)
+        console.log(user); // Print the user details in the console (for debugging)
 
+        // If the user is not found, return an error
         if (!user) {
             return res.status(401).json({
                 success: false,
-                error: "Invalid credentials"
+                error: "Invalid credentials" // User does not exist
             });
         }
 
+        // Compare the provided password with the stored hashed password
         const isPasswordValid = await bcrypt.compare(password, user.password);
-        console.log(isPasswordValid)
+        console.log(isPasswordValid); // Print whether the password is correct (for debugging)
 
+        // If the password is incorrect, return an error
         if (!isPasswordValid) {
             return res.status(401).json({
                 success: false,
-                error: "Invalid credentials"
+                error: "Invalid credentials" // Wrong password
             });
         }
-const token = jwt.sign(user.user_id, process.env.JWT_SECRET)
 
-        const {password: _, ...userData} = user;
+        // Generate a token to authenticate the user (used for secure access)
+        const token = jwt.sign(user.user_id, process.env.JWT_SECRET);
 
+        // Remove the password field from the user data before sending the response
+        const { password: _, ...userData } = user;
+
+        // Send a success response with the user details and token
         return res.status(200).json({
             success: true,
             message: "Login successful",
             data: {
-                user: userData,
-                token:token
+                user: userData, // Send user data (excluding password)
+                token: token // Send the authentication token
             }
         });
     } catch (error) {
-        console.error('Login error:', error);
+        console.error('Login error:', error); // Print the error if something goes wrong
+
+        // Return an error response if there's a server issue
         return res.status(500).json({
             success: false,
             error: "Unable to complete login"
@@ -254,4 +263,5 @@ const forgotPassword = async (req, res) => {
     }
 };
 
+// exporting all the api related to users
 module.exports = {register, login, refreshToken, changePassword,forgotPassword};
