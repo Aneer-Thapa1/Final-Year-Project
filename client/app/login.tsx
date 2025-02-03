@@ -118,7 +118,7 @@ const Login = () => {
             if (response.success) {
                 await AsyncStorage.setItem('token', response.data.token);
                 setIsSuccess(true);
-                dispatch(loginSuccess({ user: response.data.user}));
+                dispatch(loginSuccess(response?.data.user));
             } else {
                 setErrors(prev => ({...prev, general: response.message || 'Login failed'}));
             }
