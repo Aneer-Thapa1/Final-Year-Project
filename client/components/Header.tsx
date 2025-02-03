@@ -14,6 +14,8 @@ const Header = () => {
 
     const userDetails = useSelector((state) => state.user);
 
+    console.log(userDetails)
+
 
     // Animation controllers for quote card
     const quoteOpacity = useRef(new Animated.Value(0)).current;
@@ -59,12 +61,12 @@ const Header = () => {
                     onPress={() => router.push('/profile')}
                     className="flex-row items-center space-x-3 gap-3">
                     <Image
-                        source={userDetails?.user?.avatar ? userDetails.user.avatar : (userDetails?.user?.gender?.toLowerCase() === "male" ? images.maleProfile : images.blogImage)}
+                        source={userDetails?.user?.avatar ? userDetails.user?.avatar : (userDetails?.user?.gender?.toLowerCase() === "male" ? images.maleProfile : images.blogImage)}
 
                         className="w-9 h-9 rounded-full"
                     />
                     <Text className="text-xl font-medium text-gray-800">
-                        Hi, {userDetails?.user?.name}
+                        Hi, {userDetails?.user?.user_name}
                     </Text>
                 </TouchableOpacity>
 
