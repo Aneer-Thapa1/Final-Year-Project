@@ -16,7 +16,7 @@ const Profile = () => {
             <Text className=' font-bold'>Back</Text>
             <Text className='text-2xl font-bold'>Profile</Text>
         </View>
-        <View className='flex flex-col  p-4 w-[95%] bg-primary-500 mx-auto rounded-sm'>
+        <View className='flex flex-col  p-4 w-[95%] bg-primary-200 mx-auto rounded-lg '>
             <View className='flex flex-row items-center'>
                 <Image source={images.maleProfile} className='h-24 w-24'/>
                 <View className='flex justify-between'>
@@ -29,10 +29,21 @@ const Profile = () => {
                     </View>
                     {/*    add settings or edit icon here*/}
                 </View>
-                {/* options to view various info of profile*/}
-                <View className='flex justify-between bg-primary-200 h-8 w[80%]'>
-
+            </View>
+            {/* options to view various info of profile*/}
+            <View className='flex justify-between items-center bg-white h-8 w-[99%] rounded-3xl '>
+                <View className='flex flex-row justify-between items-center h-full w-full px-3 py-2'>
+                    <Text className=' font-montserrat-light text-x text-center bg-primary-200 px-8 rounded-3xl'>
+                        Activity
+                    </Text>
+                    <Text className=' font-montserrat-light text-x text-center'>
+                        Achievements
+                    </Text>
+                    <Text className=' font-montserrat-light text-x text-center'>
+                        Friends
+                    </Text>
                 </View>
+
             </View>
         </View>
 

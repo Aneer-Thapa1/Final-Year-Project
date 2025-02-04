@@ -113,8 +113,6 @@ const Login = () => {
             setIsLoading(true);
             const response = await loginUser({userEmail: userEmail, password: password});
 
-            console.log(response)
-
             if (response.success) {
                 await AsyncStorage.setItem('token', response.data.token);
                 setIsSuccess(true);
