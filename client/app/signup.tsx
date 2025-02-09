@@ -1,11 +1,11 @@
 import {View, Text} from 'react-native'
 import React from 'react'
 
-const Chatbot = () => {
+const Signup = () => {
     return (
         <View>
-            <Text>Chatbot</Text>
+            <Text>Signup</Text>
         </View>
     )
 }
-export default Chatbot
+export default Signup

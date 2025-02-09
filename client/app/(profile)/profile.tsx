@@ -22,7 +22,7 @@ const Profile = () => {
                 <View className='flex justify-between'>
                     <View className='flex flex-col gap-2'>
                         <Text className=' font-medium text-xl'>{userDetails?.user?.user_name}</Text>
-                        <View className='flex flex-row gap-2  '>
+                        <View className='flex flex-row gap-2 bg-secondary-400 rounded-md w-full h-fit '>
                             <Image source={images.maleProfile} className='h-6 w-6'/>
                             <Text className='font-light'>{userDetails?.user?.points_gained}</Text>
                         </View>
@@ -31,15 +31,15 @@ const Profile = () => {
                 </View>
             </View>
             {/* options to view various info of profile*/}
-            <View className='flex justify-between items-center bg-white h-8 w-[99%] rounded-3xl '>
-                <View className='flex flex-row justify-between items-center h-full w-full px-3 py-2'>
-                    <Text className=' font-montserrat-light text-x text-center bg-primary-200 px-8 rounded-3xl'>
+            <View className='flex justify-between items-center bg-white h-9 w-[99%] rounded-3xl '>
+                <View className='flex flex-row justify-between items-center h-full px-3  w-full'>
+                    <Text className=' font-montserrat-light text-x text-center '>
                         Activity
                     </Text>
-                    <Text className=' font-montserrat-light text-x text-center'>
+                    <Text className=' font-montserrat-light text-x text-center bg-primary-200 px-8 rounded-3xl'>
                         Achievements
                     </Text>
-                    <Text className=' font-montserrat-light text-x text-center'>
+                    <Text className=' font-montserrat-light text-x text-center '>
                         Friends
                     </Text>
                 </View>
