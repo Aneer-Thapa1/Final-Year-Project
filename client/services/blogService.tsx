@@ -1,4 +1,4 @@
-import {postData} from "@/services/api";
+import {fetchData, postData, updateData} from './api';
 
 export const addBlog = async (blogData: {
     blogTitle: string, blogDescription: string, blogImage: string;
