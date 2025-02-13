@@ -8,4 +8,4 @@ export const addBlog = async (blogData: {
     }catch (error: any) {
         throw error.response?.data?.message || 'Adding new blog failed';
     }
-}
+}1
