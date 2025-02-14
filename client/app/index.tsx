@@ -4,7 +4,7 @@ import {Link} from "expo-router";
 
 const Index = () => {
     return (
-        <View>
+        <View className=' mt-32 '>
             <Link href='/login'>Login Now</Link>
             <Link href='/explore'>Explore Now</Link>
         </View>

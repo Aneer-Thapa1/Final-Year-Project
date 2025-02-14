@@ -6,6 +6,9 @@
   "scripts": {
     "start": "nodemon index.js"
   },
+  "prisma": {
+    "seed": "node prisma/dataSeed.js"
+  },
   "author": "",
   "license": "ISC",
   "description": "",
