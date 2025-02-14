@@ -7,24 +7,32 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Stores user information and their relationships
 model User {
   user_id       Int     @id @default(autoincrement())
   user_email    String  @unique
   user_name     String
   gender        String
   avatar        String?
-  points_gained Int?
+  points_gained Int?    @default(0)
   password      String
 
   registeredAt DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
 
+  // User's content and social connections
   blogs            Blog[]
   likes            Like[]
-  sentRequests     FriendRequest[] @relation("sentRequests") // Friend requests sent by this user
-  receivedRequests FriendRequest[] @relation("receivedRequests") // Friend requests received by this user
+  sentRequests     FriendRequest[] @relation("sentRequests")
+  receivedRequests FriendRequest[] @relation("receivedRequests")
+
+  // Habit tracking related connections
+  habits       Habit[] // List of habits created by the user
+  habitLogs    HabitLog[] // Record of completed habits
+  habitStreaks HabitStreak[] // Tracking of habit streaks
 }
 
+// Existing blog-related models
 model Blog {
   blog_id          Int      @id @default(autoincrement())
   blog_title       String?
@@ -51,11 +59,11 @@ model Category {
 model Like {
   like_id Int @id @default(autoincrement())
 
-  liked_by  Int // User who liked the blog
+  liked_by  Int
   user      User     @relation(fields: [liked_by], references: [user_id])
-  blog_id   Int // Blog that was liked
+  blog_id   Int
   blog      Blog     @relation(fields: [blog_id], references: [blog_id])
-  createdAt DateTime @default(now()) // Timestamp for when the like was made
+  createdAt DateTime @default(now())
 }
 
 model FriendRequest {
@@ -73,4 +81,111 @@ enum RequestStatus {
   PENDING
   ACCEPTED
   REJECTED
+}
+
+// ============= HABIT TRACKING MODELS =============
+
+// Different areas of life a habit can belong to (Health, Finance, etc.)
+model HabitDomain {
+  domain_id   Int      @id @default(autoincrement())
+  name        String // Name of the domain (e.g., "Health", "Finance")
+  description String? // Optional description of what this domain covers
+  icon        String? // Icon for the domain
+  createdAt   DateTime @default(now())
+
+  habits Habit[] // Habits that belong to this domain
+}
+
+// Types of habit frequency (daily, weekly, monthly, etc.)
+model FrequencyType {
+  frequency_type_id Int     @id @default(autoincrement())
+  name              String // Name of frequency type (e.g., "Daily", "Weekly")
+  description       String? // Explanation of the frequency type
+
+  habits Habit[] // Habits using this frequency type
+}
+
+// Main habits table - stores all habit information
+model Habit {
+  habit_id    Int       @id @default(autoincrement())
+  name        String // Name of the habit
+  description String? // Detailed description of the habit
+  start_date  DateTime // When to start tracking this habit
+  end_date    DateTime? // Optional end date for temporary habits
+  is_active   Boolean   @default(true) // Whether the habit is currently active
+
+  // How often the habit should be done
+  frequency_value    Int // Number of times (e.g., 2 times per week)
+  frequency_interval Int // Days between repetitions (7 for weekly, 30 for monthly)
+
+  // Dates and timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Connections to other tables
+  user_id           Int
+  user              User          @relation(fields: [user_id], references: [user_id])
+  domain_id         Int
+  domain            HabitDomain   @relation(fields: [domain_id], references: [domain_id])
+  frequency_type_id Int
+  frequencyType     FrequencyType @relation(fields: [frequency_type_id], references: [frequency_type_id])
+
+  // Related records
+  schedules HabitSchedule[] // Specific schedule settings
+  logs      HabitLog[] // Completion records
+  streak    HabitStreak? // Current streak information
+  reminders HabitReminder[] // Reminder settings
+}
+
+// Specific schedule settings for habits
+model HabitSchedule {
+  schedule_id   Int       @id @default(autoincrement())
+  day_of_week   Int? // 1-7 for weekly habits (null if not weekly)
+  day_of_month  Int? // 1-31 for monthly habits (null if not monthly)
+  specific_time DateTime? // Optional specific time for the habit
+  createdAt     DateTime  @default(now())
+
+  habit_id Int
+  habit    Habit @relation(fields: [habit_id], references: [habit_id])
+}
+
+// Records of completed habits
+model HabitLog {
+  log_id       Int      @id @default(autoincrement())
+  completed_at DateTime // When the habit was completed
+  notes        String? // Optional notes about completion
+  mood_rating  Int? // Optional mood rating (1-5)
+  createdAt    DateTime @default(now())
+
+  habit_id Int
+  habit    Habit @relation(fields: [habit_id], references: [habit_id])
+  user_id  Int
+  user     User  @relation(fields: [user_id], references: [user_id])
+}
+
+// Tracks streak information for habits
+model HabitStreak {
+  streak_id         Int      @id @default(autoincrement())
+  current_streak    Int      @default(1)
+  longest_streak    Int      @default(1)
+  start_date        DateTime // When the current streak started
+  last_completed_at DateTime // Last completion date
+  updated_at        DateTime @updatedAt
+
+  habit_id Int   @unique // One streak record per habit
+  habit    Habit @relation(fields: [habit_id], references: [habit_id])
+  user_id  Int
+  user     User  @relation(fields: [user_id], references: [user_id])
+}
+
+// Reminder settings for habits
+model HabitReminder {
+  reminder_id   Int      @id @default(autoincrement())
+  reminder_time DateTime // When to send the reminder
+  is_enabled    Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  habit_id Int
+  habit    Habit @relation(fields: [habit_id], references: [habit_id])
 }
