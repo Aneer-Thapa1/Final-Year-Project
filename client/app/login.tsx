@@ -1,33 +1,31 @@
 import {
-    ActivityIndicator,
     KeyboardAvoidingView,
     Platform,
-    ScrollView,
     Text,
     TextInput,
     TouchableOpacity,
-    View
+    View,
+    ActivityIndicator,
+    StatusBar,
+    useColorScheme,
+    Keyboard,
+    Alert,
+    BackHandler,
+    NativeEventSubscription
 } from 'react-native';
-import {
-    AlertCircle,
-    ArrowRight,
-    CheckCircle2,
-    Chrome,
-    Eye,
-    EyeOff,
-    Github,
-    Lock,
-    Mail,
-    Target
-} from 'lucide-react-native';
-import React, {useEffect} from 'react';
-import axios from "axios";
-import {router} from 'expo-router';
-import {LinearGradient} from 'expo-linear-gradient';
-import {loginUser} from "@/services/userService";
-import {useDispatch, useSelector} from 'react-redux'
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { MotiView } from 'moti';
+import * as Haptics from 'expo-haptics';
+import { loginUser } from "@/services/userService";
+import { useDispatch } from 'react-redux';
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {loginSuccess} from "@/store/slices/userSlice";
+import { loginSuccess } from "@/store/slices/userSlice";
+import NetInfo from '@react-native-community/netinfo';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import debounce from 'lodash/debounce';
 
 // Types
 interface LoginErrors {
@@ -38,43 +36,143 @@ interface LoginErrors {
 
 interface LoginResponse {
     success: boolean;
-    token?: string;
+    data: {
+        token: string;
+        user: UserData;
+    };
     message?: string;
 }
 
+interface UserData {
+    id: string;
+    email: string;
+    name: string;
+    createdAt: string;
+}
+
+interface LoginCredentials {
+    userEmail: string;
+    password: string;
+}
+
+// Constants
+const EMAIL_REGEX = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
+const PASSWORD_MIN_LENGTH = 6;
+const MAX_LOGIN_ATTEMPTS = 3;
+const LOCKOUT_DURATION = 2 * 60 * 1000; // 5 minutes in milliseconds
+
 const Login = () => {
-    const [userEmail, setUserEmail] = React.useState('');
-    const [password, setPassword] = React.useState('');
-    const [isLoading, setIsLoading] = React.useState(false);
-    const [showPassword, setShowPassword] = React.useState(false);
-    const [errors, setErrors] = React.useState<LoginErrors>({
-        email: '', password: '', general: ''
-    });
-    const [isSuccess, setIsSuccess] = React.useState(false);
-
-
+    // Theme and System
+    const colorScheme = useColorScheme();
+    const isDark = colorScheme === 'dark';
     const dispatch = useDispatch();
-    const user = useSelector((state) => state.user.user);
 
-    // Handle navigation after successful login
+    // Form State
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [showPassword, setShowPassword] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isKeyboardVisible, setKeyboardVisible] = useState(false);
+    const [loginAttempts, setLoginAttempts] = useState(0);
+    const [lockoutEndTime, setLockoutEndTime] = useState<number | null>(null);
+
+    // Error and Success States
+    const [errors, setErrors] = useState<LoginErrors>({
+        email: '',
+        password: '',
+        general: ''
+    });
+    const [isSuccess, setIsSuccess] = useState(false);
+    const [isOnline, setIsOnline] = useState(true);
+
+    // Refs
+    const passwordRef = useRef<TextInput>(null);
+    const backHandlerRef = useRef<NativeEventSubscription>();
+    const loginTimeoutRef = useRef<NodeJS.Timeout>();
+
+    // Network Connectivity
     useEffect(() => {
-        let timeoutId: NodeJS.Timeout;
-        if (isSuccess) {
-            timeoutId = setTimeout(() => {
-                router.replace("/(tabs)");
-            }, 1500);
-        }
-        return () => clearTimeout(timeoutId);
-    }, [isSuccess]);
+        const unsubscribe = NetInfo.addEventListener(state => {
+            setIsOnline(state.isConnected ?? true);
+        });
 
-    // Email validation
+        return () => unsubscribe();
+    }, []);
+
+    // Keyboard Listeners
+    useEffect(() => {
+        const keyboardDidShowListener = Keyboard.addListener(
+            'keyboardDidShow',
+            () => setKeyboardVisible(true)
+        );
+        const keyboardDidHideListener = Keyboard.addListener(
+            'keyboardDidHide',
+            () => setKeyboardVisible(false)
+        );
+
+        return () => {
+            keyboardDidShowListener.remove();
+            keyboardDidHideListener.remove();
+        };
+    }, []);
+
+    // Back Handler
+    useEffect(() => {
+        backHandlerRef.current = BackHandler.addEventListener(
+            'hardwareBackPress',
+            () => {
+                if (isLoading) {
+                    Alert.alert(
+                        'Cancel Login?',
+                        'Are you sure you want to cancel the login process?',
+                        [
+                            { text: 'No', style: 'cancel' },
+                            {
+                                text: 'Yes',
+                                style: 'destructive',
+                                onPress: () => {
+                                    setIsLoading(false);
+                                    return true;
+                                }
+                            }
+                        ]
+                    );
+                    return true;
+                }
+                return false;
+            }
+        );
+
+        return () => {
+            backHandlerRef.current?.remove();
+        };
+    }, [isLoading]);
+
+    // Cleanup
+    useEffect(() => {
+        return () => {
+            if (loginTimeoutRef.current) {
+                clearTimeout(loginTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    // Reset form on screen focus
+    useFocusEffect(
+        useCallback(() => {
+            return () => {
+                clearForm();
+            };
+        }, [])
+    );
+
+    // Form Validation
     const validateEmail = (email: string): boolean => {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!email) {
             setErrors(prev => ({...prev, email: 'Email is required'}));
             return false;
         }
-        if (!emailRegex.test(email)) {
+        if (!EMAIL_REGEX.test(email)) {
             setErrors(prev => ({...prev, email: 'Please enter a valid email'}));
             return false;
         }
@@ -82,254 +180,362 @@ const Login = () => {
         return true;
     };
 
-    // Password validation
     const validatePassword = (password: string): boolean => {
         if (!password) {
             setErrors(prev => ({...prev, password: 'Password is required'}));
             return false;
         }
-        if (password.length < 6) {
-            setErrors(prev => ({...prev, password: 'Password must be at least 6 characters'}));
+        if (password.length < PASSWORD_MIN_LENGTH) {
+            setErrors(prev => ({
+                ...prev,
+                password: `Password must be at least ${PASSWORD_MIN_LENGTH} characters`
+            }));
             return false;
         }
         setErrors(prev => ({...prev, password: ''}));
         return true;
     };
 
+    // Handle Login Process
     const handleLogin = async () => {
-        // Reset all errors
-        setErrors({email: '', password: '', general: ''});
+        // Check network connectivity
+        if (!isOnline) {
+            setErrors(prev => ({
+                ...prev,
+                general: 'No internet connection. Please check your network.'
+            }));
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            return;
+        }
+
+        // Check lockout
+        if (lockoutEndTime && Date.now() < lockoutEndTime) {
+            const remainingTime = Math.ceil((lockoutEndTime - Date.now()) / 1000 / 60);
+            setErrors(prev => ({
+                ...prev,
+                general: `Too many login attempts. Please try again in ${remainingTime} minutes.`
+            }));
+            return;
+        }
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        Keyboard.dismiss();
+
+        // Reset errors
+        setErrors({ email: '', password: '', general: '' });
         setIsSuccess(false);
 
         // Validate inputs
-        const isEmailValid = validateEmail(userEmail);
+        const isEmailValid = validateEmail(email.trim());
         const isPasswordValid = validatePassword(password);
 
         if (!isEmailValid || !isPasswordValid) {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             return;
         }
 
         try {
             setIsLoading(true);
-            const response = await loginUser({userEmail: userEmail, password: password});
+
+            const loginCredentials: LoginCredentials = {
+                userEmail: email.trim().toLowerCase(),
+                password: password
+            };
+
+            const response: LoginResponse = await loginUser(loginCredentials);
 
             if (response.success) {
+                // Reset login attempts on success
+                setLoginAttempts(0);
+                setLockoutEndTime(null);
+
+                // Store user data
                 await AsyncStorage.setItem('token', response.data.token);
+                await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
+
+                // Update Redux state
+                dispatch(loginSuccess(response.data.user));
+
+                // Show success state
                 setIsSuccess(true);
-                dispatch(loginSuccess(response?.data.user));
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+                // Navigate after delay
+                loginTimeoutRef.current = setTimeout(() => {
+                    router.replace("/(tabs)");
+                }, 1500);
             } else {
-                setErrors(prev => ({...prev, general: response.message || 'Login failed'}));
+                handleLoginError(response.message || 'Login failed');
             }
-        } catch (error) {
-            const errorMsg = error ? error.response?.data?.message : "Connection error. Please try again.";
-            setErrors(prev => ({...prev, general: errorMsg}));
+        } catch (error: any) {
+            const errorMsg = error?.response?.data?.message ||
+                "Connection error. Please try again.";
+            handleLoginError(errorMsg);
         } finally {
             setIsLoading(false);
         }
     };
 
-    return (<KeyboardAvoidingView
-            behavior={Platform.OS === "ios" ? "padding" : "height"}
-            className="flex-1"
-        >
-            <ScrollView
-                className="flex-1 bg-background-light"
-                contentContainerStyle={{flexGrow: 1}}
-                keyboardShouldPersistTaps="handled"
+    const handleLoginError = (errorMessage: string) => {
+        setLoginAttempts(prev => {
+            const newAttempts = prev + 1;
+            if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+                setLockoutEndTime(Date.now() + LOCKOUT_DURATION);
+                setErrors(prev => ({
+                    ...prev,
+                    general: `Too many login attempts. Please try again in 5 minutes.`
+                }));
+            } else {
+                setErrors(prev => ({
+                    ...prev,
+                    general: errorMessage
+                }));
+            }
+            return newAttempts;
+        });
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    };
+
+    // Helper Functions
+    const clearForm = () => {
+        setEmail('');
+        setPassword('');
+        setErrors({ email: '', password: '', general: '' });
+        setIsSuccess(false);
+        setIsLoading(false);
+        setLoginAttempts(0);
+        setLockoutEndTime(null);
+    };
+
+    const handleForgotPassword = debounce(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push('/forgot-password');
+    }, 300, { leading: true, trailing: false });
+
+    const togglePasswordVisibility = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setShowPassword(!showPassword);
+    };
+
+    const handleSignUpPress = debounce(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        router.push('/signup');
+    }, 300, { leading: true, trailing: false });
+
+    return (
+        <SafeAreaView className="flex-1">
+            <KeyboardAvoidingView
+                behavior={Platform.OS === "ios" ? "padding" : "height"}
+                className="flex-1 bg-theme-background-dark"
             >
-                {/* Top Gradient Section */}
+                <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+
+                {/* Network Status Warning */}
+                {!isOnline && (
+                    <MotiView
+                        from={{ opacity: 0, translateY: -50 }}
+                        animate={{ opacity: 1, translateY: 0 }}
+                        transition={{ type: 'timing', duration: 500 }}
+                        className="absolute top-0 left-0 right-0 z-50 bg-error-500 py-2"
+                    >
+                        <Text className="text-white text-center font-montserrat-medium">
+                            No internet connection
+                        </Text>
+                    </MotiView>
+                )}
+
+                {/* Background Gradient */}
                 <LinearGradient
-                    colors={['#7C3AED', '#9D6FFF']}
-                    className="h-72 w-full absolute top-0 rounded-b-[50px]"
-                    start={{x: 0, y: 0}}
-                    end={{x: 1, y: 1}}
-                />
-
-                {/* Main Content Container */}
-                <View className="flex-1 px-6">
-                    {/* Logo and Welcome Section */}
-                    <View className="items-center mt-16 mb-8">
-                        <View className="bg-white/20 p-5 rounded-3xl mb-4">
-                            <Target className="w-16 h-16 text-white"/>
-                        </View>
-                        <Text className="text-white text-3xl font-bold mb-1">
-                            Welcome Back!
-                        </Text>
-                        <Text className="text-white/80 text-base">
-                            Your habits journey continues here
-                        </Text>
+                    colors={['#7C3AED', '#6D28D9']}
+                    className={`absolute top-0 left-0 right-0 ${
+                        isKeyboardVisible ? 'h-1/2' : 'h-2/3'
+                    }`}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                >
+                    <View className="absolute bottom-0 left-0 right-0 h-32">
+                        <View className="absolute bottom-0 left-0 right-0 h-32 rounded-t-[60px] bg-theme-background-dark" />
                     </View>
+                </LinearGradient>
 
+                {/* Main Content */}
+                <MotiView
+                    from={{ opacity: 0, translateY: 50 }}
+                    animate={{ opacity: 1, translateY: 0 }}
+                    transition={{ type: 'timing', duration: 1000 }}
+                    className="flex-1 justify-center px-6"
+                >
                     {/* Login Card */}
-                    <View className="bg-white rounded-3xl p-6 shadow-lg mt-4">
-                        {/* Email Input */}
-                        <View className="mb-5">
-                            <Text className="text-gray-700 text-sm font-medium mb-2 ml-1">
-                                Email Address
+                    <View className="bg-theme-card-dark/90 backdrop-blur-xl rounded-3xl p-6 shadow-card-dark">
+                        {/* Header */}
+                        <View className="mb-8">
+                            <Text className="text-3xl font-montserrat-bold text-center mb-2 text-theme-text-primary-dark">
+                                Welcome Back
                             </Text>
-                            <View
-                                className={`bg-gray-50 rounded-xl flex-row items-center border ${errors.email ? 'border-error-500' : 'border-gray-100'}`}>
-                                <Mail className={`w-5 h-5 ml-3 ${errors.email ? 'text-error-500' : 'text-gray-400'}`}/>
+                            <Text className="text-base font-montserrat text-center text-theme-text-secondary-dark">
+                                Build better habits, achieve your goals
+                            </Text>
+                        </View>
+
+                        {/* Email Input */}
+                        <View className="mb-4">
+                            <View className={`flex-row items-center bg-theme-input-dark rounded-2xl px-4 border ${
+                                errors.email ? 'border-error-500' : 'border-theme-border-dark'
+                            }`}>
+                                <Mail className={`w-5 h-5 ${errors.email ? 'text-error-500' : 'text-primary-400'}`} />
                                 <TextInput
-                                    className="flex-1 px-3 py-3 text-gray-800"
-                                    placeholder="Enter your email"
+                                    className="flex-1 py-4 px-3 font-montserrat text-theme-text-primary-dark"
+                                    placeholder="Email"
+                                    placeholderTextColor="#94A3B8"
+                                    value={email}
                                     onChangeText={(text) => {
-                                        setUserEmail(text);
-                                        validateEmail(text);
+                                        setEmail(text);
+                                        if (text) validateEmail(text);
                                     }}
-                                    value={userEmail}
+                                    onBlur={() => validateEmail(email)}
                                     keyboardType="email-address"
                                     autoCapitalize="none"
+                                    autoComplete="email"
                                     autoCorrect={false}
                                     returnKeyType="next"
+                                    onSubmitEditing={() => passwordRef.current?.focus()}
+                                    blurOnSubmit={false}
                                     accessibilityLabel="Email input"
+                                    accessibilityHint="Enter your email address"
                                 />
                             </View>
-                            {errors.email && (<View className="flex-row items-center mt-2">
-                                    <AlertCircle className="w-4 h-4 text-error-500 mr-1"/>
-                                    <Text className="text-error-500 text-sm">{errors.email}</Text>
-                                </View>)}
+                            {errors.email && (
+                                <MotiView
+                                    from={{ opacity: 0, scale: 0.95 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    className="mt-1 ml-4"
+                                >
+                                    <Text className="text-error-500 text-sm font-montserrat">
+                                        {errors.email}
+                                    </Text>
+                                </MotiView>
+                            )}
                         </View>
 
                         {/* Password Input */}
-                        <View className="mb-5">
-                            <Text className="text-gray-700 text-sm font-medium mb-2 ml-1">
-                                Password
-                            </Text>
-                            <View
-                                className={`bg-gray-50 rounded-xl flex-row items-center border ${errors.password ? 'border-error-500' : 'border-gray-100'}`}>
-                                <Lock
-                                    className={`w-5 h-5 ml-3 ${errors.password ? 'text-error-500' : 'text-gray-400'}`}/>
+                        <View className="mb-6">
+                            <View className={`flex-row items-center bg-theme-input-dark rounded-2xl px-4 border ${
+                                errors.password ? 'border-error-500' : 'border-theme-border-dark'
+                            }`}>
+                                <Lock className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-primary-400'}`} />
                                 <TextInput
-                                    className="flex-1 px-3 py-3 text-gray-800"
-                                    placeholder="Enter your password"
-                                    secureTextEntry={!showPassword}
+                                    ref={passwordRef}
+                                    className="flex-1 py-4 px-3 font-montserrat text-theme-text-primary-dark"
+                                    placeholder="Password"
+                                    placeholderTextColor="#94A3B8"
+                                    value={password}
                                     onChangeText={(text) => {
                                         setPassword(text);
-                                        validatePassword(text);
+                                        if (text) validatePassword(text);
                                     }}
-                                    value={password}
+                                    onBlur={() => validatePassword(password)}
+                                    secureTextEntry={!showPassword}
                                     autoCapitalize="none"
-                                    autoCorrect={false}
+                                    autoComplete="password"
                                     returnKeyType="go"
                                     onSubmitEditing={handleLogin}
-                                    accessibilityLabel="Password input"
                                 />
                                 <TouchableOpacity
-                                    onPress={() => setShowPassword(!showPassword)}
-                                    className="px-4"
-                                    accessibilityLabel={showPassword ? "Hide password" : "Show password"}
-                                    accessibilityRole="button"
+                                    onPress={togglePasswordVisibility}
+                                    className="p-2"
                                 >
-                                    {showPassword ? (<EyeOff
-                                            className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-gray-400'}`}/>) : (
-                                        <Eye
-                                            className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-gray-400'}`}/>)}
+                                    {showPassword ? (
+                                        <EyeOff className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-primary-400'}`} />
+                                    ) : (
+                                        <Eye className={`w-5 h-5 ${errors.password ? 'text-error-500' : 'text-primary-400'}`} />
+                                    )}
                                 </TouchableOpacity>
                             </View>
-                            {errors.password && (<View className="flex-row items-center mt-2">
-                                    <AlertCircle className="w-4 h-4 text-error-500 mr-1"/>
-                                    <Text className="text-error-500 text-sm">{errors.password}</Text>
-                                </View>)}
+                            {errors.password && (
+                                <MotiView
+                                    from={{ opacity: 0, scale: 0.95 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    className="mt-1 ml-4"
+                                >
+                                    <Text className="text-error-500 text-sm font-montserrat">
+                                        {errors.password}
+                                    </Text>
+                                </MotiView>
+                            )}
                         </View>
 
-                        {/* Success Message */}
-                        {isSuccess && (<View className="bg-success-100 p-4 rounded-xl mb-6 flex-row items-center">
-                                <CheckCircle2 className="w-5 h-5 text-success-500 mr-2"/>
-                                <Text className="text-success-500 font-medium flex-1">
-                                    Login successful! Redirecting to home page...
-                                </Text>
-                            </View>)}
-
-                        {/* General Error Message */}
-                        {errors.general && (<View className="bg-error-100 p-4 rounded-xl mb-6 flex-row items-center">
-                                <AlertCircle className="w-5 h-5 text-error-500 mr-2"/>
-                                <Text className="text-error-500 font-medium flex-1">
+                        {/* Error Message */}
+                        {errors.general && (
+                            <MotiView
+                                from={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="mb-6 p-4 bg-error-500/20 rounded-xl"
+                            >
+                                <Text className="text-error-500 text-sm font-montserrat text-center">
                                     {errors.general}
                                 </Text>
-                            </View>)}
+                            </MotiView>
+                        )}
 
+                        {/* Success Message */}
+                        {isSuccess && (
+                            <MotiView
+                                from={{ opacity: 0, scale: 0.95 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                className="mb-6 p-4 bg-success-100 rounded-xl"
+                            >
+                                <Text className="text-success-600 text-sm font-montserrat text-center">
+                                    Login successful! Redirecting...
+                                </Text>
+                            </MotiView>
+                        )}
+
+                        {/* Forgot Password */}
                         <TouchableOpacity
-                            className="self-end mb-6"
-                            accessibilityLabel="Forgot password"
-                            accessibilityRole="button"
+                            onPress={handleForgotPassword}
+                            className="mb-4"
                         >
-                            <Text className="text-primary-500 font-medium">
+                            <Text className="text-right font-montserrat-medium text-sm text-primary-400">
                                 Forgot Password?
                             </Text>
                         </TouchableOpacity>
 
-                        {/* Login Button */}
+                        {/* Sign In Button */}
                         <TouchableOpacity
+                            className={`bg-primary-500 rounded-2xl py-4 mb-6 shadow-button-light ${
+                                isLoading ? 'opacity-70' : ''
+                            }`}
                             onPress={handleLogin}
-                            disabled={isLoading}
-                            className={`
-                                bg-primary-500 
-                                py-4 
-                                rounded-xl 
-                                shadow-sm
-                                ${isLoading ? 'opacity-70' : ''}
-                            `}
-                            accessibilityLabel="Sign in button"
-                            accessibilityRole="button"
+                            disabled={isLoading || !isOnline}
+                            activeOpacity={0.8}
                         >
-                            <View className="flex-row items-center justify-center space-x-2">
-                                {isLoading ? (<ActivityIndicator color="white"/>) : (<>
-                                        <Text className="text-white text-center font-semibold text-lg">
-                                            Sign In
-                                        </Text>
-                                        <ArrowRight className="w-5 h-5 text-white"/>
-                                    </>)}
+                            <View className="flex-row justify-center items-center">
+                                {isLoading ? (
+                                    <ActivityIndicator color="white" />
+                                ) : (
+                                    <Text className="text-white text-center text-lg font-montserrat-bold">
+                                        Sign In
+                                    </Text>
+                                )}
                             </View>
                         </TouchableOpacity>
 
-                        {/* Social Login Options */}
-                        <View className="mt-8">
-                            <View className="flex-row items-center mb-6">
-                                <View className="flex-1 h-[1px] bg-gray-200"/>
-                                <Text className="mx-4 text-gray-500">
-                                    Or continue with
+                        {/* Sign Up Link */}
+                        <View className="flex-row justify-center">
+                            <Text className="font-montserrat text-theme-text-muted-dark">
+                                Don't have an account?{' '}
+                            </Text>
+                            <TouchableOpacity onPress={handleSignUpPress}>
+                                <Text className="font-montserrat-bold text-primary-400">
+                                    Sign Up
                                 </Text>
-                                <View className="flex-1 h-[1px] bg-gray-200"/>
-                            </View>
-
-                            <View className="flex-row justify-center space-x-4">
-                                <TouchableOpacity
-                                    className="bg-gray-50 p-4 rounded-full w-14 h-14 items-center justify-center"
-                                    accessibilityLabel="Sign in with Google"
-                                    accessibilityRole="button"
-                                >
-                                    <Chrome className="w-6 h-6 text-gray-700"/>
-                                </TouchableOpacity>
-                                <TouchableOpacity
-                                    className="bg-gray-50 p-4 rounded-full w-14 h-14 items-center justify-center"
-                                    accessibilityLabel="Sign in with GitHub"
-                                    accessibilityRole="button"
-                                >
-                                    <Github className="w-6 h-6 text-gray-700"/>
-                                </TouchableOpacity>
-                            </View>
+                            </TouchableOpacity>
                         </View>
                     </View>
-
-                    {/* Sign Up Link */}
-                    <View className="flex-row justify-center mt-6 mb-8">
-                        <Text className="text-gray-600">
-                            Don't have an account?{" "}
-                        </Text>
-                        <TouchableOpacity
-                            onPress={() => router.push("/signup")}
-                            accessibilityLabel="Sign up"
-                            accessibilityRole="button"
-                        >
-                            <Text className="text-primary-500 font-semibold">
-                                Sign Up
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </ScrollView>
-        </KeyboardAvoidingView>);
+                </MotiView>
+            </KeyboardAvoidingView>
+        </SafeAreaView>
+    );
 };
 
 export default Login;
