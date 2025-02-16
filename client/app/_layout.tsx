@@ -3,15 +3,22 @@ import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import "./global.css";
 import { useFonts } from "expo-font";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Provider } from 'react-redux';
+import { Provider, useDispatch } from 'react-redux';
 import { store } from '../store/store';
+import { checkAuthStatus } from '@/services/userService';
+import { loginSuccess } from '@/store/slices/userSlice';
+import { View, ActivityIndicator } from 'react-native';
 
+// Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
   const router = useRouter();
+  const dispatch = useDispatch();
+  const [isInitializing, setIsInitializing] = useState(true);
+
   const [fontsLoaded] = useFonts({
     'Montserrat-Bold': require('../assets/fonts/Montserrat-Bold.ttf'),
     'Montserrat-ExtraBold': require('../assets/fonts/Montserrat-ExtraBold.ttf'),
@@ -23,27 +30,97 @@ function RootLayoutNav() {
 
   useEffect(() => {
     const initialize = async () => {
-      if (fontsLoaded) {
-        await SplashScreen.hideAsync();
-        const hasLaunched = await AsyncStorage.getItem('hasLaunched');
-        // You can use the value of hasLaunched here
+      try {
+        if (fontsLoaded) {
+          // Check both onboarding and auth status
+          const [hasCompletedOnboarding, userData] = await Promise.all([
+            AsyncStorage.getItem('hasCompletedOnboarding'),
+            checkAuthStatus()
+          ]);
+
+          // Determine the initial route
+          let initialRoute = '/onboarding';
+
+          if (userData) {
+            // User is authenticated
+            initialRoute = '/(tabs)';
+          } else if (hasCompletedOnboarding) {
+            // User has seen onboarding but isn't authenticated
+            initialRoute = '/login';
+          }
+          // else keep initialRoute as '/onboarding'
+
+          // If user is authenticated, update Redux state
+          if (userData) {
+            dispatch(loginSuccess(userData));
+          }
+
+          // Navigate to the determined route
+          router.replace(initialRoute);
+
+          // Hide splash screen
+          await SplashScreen.hideAsync();
+        }
+      } catch (error) {
+        console.error('Initialization error:', error);
+        // On error, default to login screen
+        router.replace('/login');
+      } finally {
+        setIsInitializing(false);
       }
     };
-    initialize();
-  }, [fontsLoaded]);
 
-  if (!fontsLoaded) {
-    return null;
+    initialize();
+  }, [fontsLoaded, dispatch, router]);
+
+
+  // In React Native Debugger console
+  const getAllKeys = async () => {
+    const keys = await AsyncStorage.getAllKeys();
+    const items = await AsyncStorage.multiGet(keys);
+    console.table(items);
+  };
+  getAllKeys();
+
+  // Show loading screen while initializing or fonts are loading
+  if (!fontsLoaded || isInitializing) {
+    return (
+        <View className="flex-1 justify-center items-center bg-white">
+          <ActivityIndicator size="large" color="#7C3AED" />
+        </View>
+    );
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  // Define the stack navigator
+  return (
+      <Stack
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+          }}
+      >
+        <Stack.Screen name="onboarding" />
+        <Stack.Screen name="login" />
+        <Stack.Screen name="signup" />
+        <Stack.Screen
+            name="(tabs)"
+            options={{
+              animation: 'fade',
+            }}
+        />
+      </Stack>
+  );
 }
 
 // Wrap the root component with Provider
-export default function RootLayout() {
+function AuthenticatedLayout() {
   return (
       <Provider store={store}>
         <RootLayoutNav />
       </Provider>
   );
+}
+
+export default function RootLayout() {
+  return <AuthenticatedLayout />;
 }
