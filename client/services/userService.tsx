@@ -1,11 +1,12 @@
 import {fetchData, postData, updateData} from './api';
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // Function to register a new user
 export const registerUser = async (userData: {
     name: string; email: string; password: string;
 }) => {
     try {
-        return await postData('/register', userData); // Used the `postData` utility from userService
+        return await postData('/api/users/register', userData); // Used the `postData` utility from userService
     } catch (error: any) {
         throw error.response?.data?.message || 'Registration failed';
     }
@@ -46,3 +47,24 @@ export const logoutUser = async () => {
         throw error.response?.data?.message || 'Logout failed';
     }
 };
+
+export const checkAuthStatus = async () => {
+    try {
+        const token = await AsyncStorage.getItem('token');
+        if (!token) return null;
+
+        // Validate token with your backend
+        const response = await fetchData('/api/users/profile');
+
+        if (response.success) {
+            return response.data;
+        } else {
+            await AsyncStorage.removeItem('token'); // Clear invalid token
+            return null;
+        }
+    } catch (error) {
+        await AsyncStorage.removeItem('token');
+        return null;
+    }
+};
+

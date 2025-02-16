@@ -1,12 +1,14 @@
-import {View, Text} from 'react-native'
+import {View, Text, useColorScheme} from 'react-native'
 import React from 'react'
 import {Tabs} from 'expo-router'
 import {TabBar} from "@/components/TabBar";
 import Header from "@/components/Header";
 
 const TabsLayout = () => {
+    const colorScheme = useColorScheme();
+    const isDark = colorScheme === 'dark';
     return (
-        <View className='flex h-screen w-screen '>
+        <View className={`flex h-screen w-screen ${isDark ? 'bg-theme-background-dark' : 'bg-white'}`} >
             <Header/>
             <Tabs tabBar={props => <TabBar  {...props} options={{ headerShown: false }} />} >
                 <Tabs.Screen name='index' options={{title: 'Home', headerShown: false}}/>
