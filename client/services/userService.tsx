@@ -21,14 +21,6 @@ export const loginUser = async (credentials: { userEmail: string; password: stri
     }
 };
 
-// Function to fetch the current user's profile
-export const fetchUserProfile = async () => {
-    try {
-        return await fetchData('/api/users/profile'); // Used the `fetchData` utility from userService
-    } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to fetch profile';
-    }
-};
 
 // Function to update the user's profile
 export const updateUserProfile = async (updatedData: { name?: string; email?: string }) => {
@@ -51,13 +43,16 @@ export const logoutUser = async () => {
 export const checkAuthStatus = async () => {
     try {
         const token = await AsyncStorage.getItem('token');
+        console.log(token);
         if (!token) return null;
 
-        // Validate token with your backend
-        const response = await fetchData('/api/users/profile');
 
-        if (response.success) {
-            return response.data;
+        // Validate token with your backend
+        const response = await fetchData('/api/users/verifyUser');
+
+        console.log("res from services", response.user);
+        if (response) {
+            return response;
         } else {
             await AsyncStorage.removeItem('token'); // Clear invalid token
             return null;

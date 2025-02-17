@@ -239,5 +239,30 @@ const forgotPassword = async (req, res) => {
     }
 };
 
+const verifyUser = async (req, res) => {
+    try {
+        const user_id = parseInt(req.user);
+
+        console.log("user id: ", user_id);
+
+        if (!user_id) {
+            return res.status(401).json({ error: 'User ID not found' });
+        }
+
+        const user = await prisma.user.findUnique({
+            where: { user_id: user_id }
+        });
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        return res.status(200).json({ message: 'User verified', user });
+    } catch (error) {
+        console.error('Error verifying user:', error);
+        return res.status(500).json({ error: 'Internal server error' });
+    }
+};
+
 // exporting all the api related to users
-module.exports = {register, login, refreshToken, changePassword, forgotPassword};
+module.exports = {register, login, refreshToken, changePassword, forgotPassword, verifyUser};

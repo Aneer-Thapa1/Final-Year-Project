@@ -8,7 +8,7 @@ const TabsLayout = () => {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     return (
-        <View className={`flex h-screen w-screen ${isDark ? 'bg-theme-background-dark' : 'bg-white'}`} >
+        <View className={`flex h-screen w-screen ${isDark ? 'bg-theme-background-dark' : 'bg-gray-50'}`} >
             <Header/>
             <Tabs tabBar={props => <TabBar  {...props} options={{ headerShown: false }} />} >
                 <Tabs.Screen name='index' options={{title: 'Home', headerShown: false}}/>

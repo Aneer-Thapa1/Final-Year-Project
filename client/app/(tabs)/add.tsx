@@ -117,7 +117,7 @@ const AddHabit = () => {
                 {/* Submit Button */}
                 <TouchableOpacity
                     className="bg-primary-500 rounded-button py-4 mb-8"
-                    onPress={handleSubmit}
+
                 >
                     <Text className="text-white font-montserrat-semibold text-center text-lg">
                         Create Habit

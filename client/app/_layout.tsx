@@ -14,13 +14,6 @@ import { StatusBar } from 'expo-status-bar';
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
 
-useEffect(() => {
-  const clearStorage = async () => {
-    await AsyncStorage.clear();
-  };
-  clearStorage();
-}, []);
-
 function RootLayoutNav() {
   const router = useRouter();
   const dispatch = useDispatch();
@@ -46,6 +39,8 @@ function RootLayoutNav() {
             AsyncStorage.getItem('hasCompletedOnboarding'),
             checkAuthStatus()
           ]);
+
+          console.log("from layout", userData);
 
           // Determine the initial route
           let initialRoute = '/onboarding';

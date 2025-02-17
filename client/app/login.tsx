@@ -57,9 +57,9 @@ interface LoginCredentials {
 
 // Constants
 const EMAIL_REGEX = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
-const PASSWORD_MIN_LENGTH = 6;
+const PASSWORD_MIN_LENGTH = 8;
 const MAX_LOGIN_ATTEMPTS = 3;
-const LOCKOUT_DURATION = 2 * 60 * 1000; // 5 minutes in milliseconds
+const LOCKOUT_DURATION = 2 * 60 * 1000; // 2 minutes in milliseconds
 
 const Login = () => {
     // Theme and System
@@ -198,103 +198,100 @@ const Login = () => {
 
     // Handle Login Process
     const handleLogin = async () => {
-        // Check network connectivity
-        if (!isOnline) {
-            setErrors(prev => ({
-                ...prev,
-                general: 'No internet connection. Please check your network.'
-            }));
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            return;
-        }
-
-        // Check lockout
-        if (lockoutEndTime && Date.now() < lockoutEndTime) {
-            const remainingTime = Math.ceil((lockoutEndTime - Date.now()) / 1000 / 60);
-            setErrors(prev => ({
-                ...prev,
-                general: `Too many login attempts. Please try again in ${remainingTime} minutes.`
-            }));
-            return;
-        }
-
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        Keyboard.dismiss();
-
-        // Reset errors
-        setErrors({ email: '', password: '', general: '' });
-        setIsSuccess(false);
-
-        // Validate inputs
-        const isEmailValid = validateEmail(email.trim());
-        const isPasswordValid = validatePassword(password);
-
-        if (!isEmailValid || !isPasswordValid) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-            return;
-        }
-
         try {
+            // Check if user is locked out
+            if (lockoutEndTime && Date.now() < lockoutEndTime) {
+                const remainingMinutes = Math.ceil((lockoutEndTime - Date.now()) / 1000 / 60);
+                setErrors(prev => ({
+                    ...prev,
+                    general: `Too many failed attempts. Please try again in ${remainingMinutes} minutes.`
+                }));
+                return;
+            }
+
+            // Reset errors
+            setErrors({ email: '', password: '', general: '' });
             setIsLoading(true);
 
-            const loginCredentials: LoginCredentials = {
+            const response = await loginUser({
                 userEmail: email.trim().toLowerCase(),
                 password: password
-            };
-
-            const response: LoginResponse = await loginUser(loginCredentials);
+            });
 
             if (response.success) {
-                // Reset login attempts on success
+                // Reset attempts on successful login
                 setLoginAttempts(0);
                 setLockoutEndTime(null);
 
-                // Store user data
+                // Handle successful login
                 await AsyncStorage.setItem('token', response.data.token);
-                await AsyncStorage.setItem('user', JSON.stringify(response.data.user));
-
-                // Update Redux state
                 dispatch(loginSuccess(response.data.user));
-
-                // Show success state
                 setIsSuccess(true);
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
                 // Navigate after delay
-                loginTimeoutRef.current = setTimeout(() => {
-                    router.replace("/(tabs)");
+                setTimeout(() => {
+                    router.replace('/(tabs)');
                 }, 1500);
             } else {
-                handleLoginError(response.message || 'Login failed');
+                // Handle invalid credentials
+                handleInvalidCredentials();
             }
         } catch (error: any) {
-            const errorMsg = error?.response?.data?.message ||
-                "Connection error. Please try again.";
-            handleLoginError(errorMsg);
+            // Handle server/connection errors separately
+            if (error?.response?.status === 401) {
+                handleInvalidCredentials();
+            } else {
+                setErrors(prev => ({
+                    ...prev,
+                    general: "Connection error. Please check your internet and try again."
+                }));
+            }
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleLoginError = (errorMessage: string) => {
-        setLoginAttempts(prev => {
-            const newAttempts = prev + 1;
-            if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
-                setLockoutEndTime(Date.now() + LOCKOUT_DURATION);
-                setErrors(prev => ({
-                    ...prev,
-                    general: `Too many login attempts. Please try again in 5 minutes.`
-                }));
-            } else {
-                setErrors(prev => ({
-                    ...prev,
-                    general: errorMessage
-                }));
-            }
-            return newAttempts;
-        });
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    // New function to handle invalid credentials
+    const handleInvalidCredentials = () => {
+        const newAttempts = loginAttempts + 1;
+        setLoginAttempts(newAttempts);
+
+        if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+            // Lock the user out
+            setLockoutEndTime(Date.now() + LOCKOUT_DURATION);
+            setErrors(prev => ({
+                ...prev,
+                general: "Too many failed attempts. Please try again in 2 minutes."
+            }));
+        } else {
+            // Show remaining attempts
+            setErrors(prev => ({
+                ...prev,
+                general: `Invalid email or password. ${MAX_LOGIN_ATTEMPTS - newAttempts} attempts remaining.`
+            }));
+        }
     };
+
+
+    // const handleLoginError = (errorMessage: string) => {
+    //     setLoginAttempts(prev => {
+    //         const newAttempts = prev + 1;
+    //         if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
+    //             setLockoutEndTime(Date.now() + LOCKOUT_DURATION);
+    //             setErrors(prev => ({
+    //                 ...prev,
+    //                 general: `Too many login attempts. Please try again in 5 minutes.`
+    //             }));
+    //         } else {
+    //             setErrors(prev => ({
+    //                 ...prev,
+    //                 general: errorMessage
+    //             }));
+    //         }
+    //         return newAttempts;
+    //     });
+    //     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    // };
 
     // Helper Functions
     const clearForm = () => {

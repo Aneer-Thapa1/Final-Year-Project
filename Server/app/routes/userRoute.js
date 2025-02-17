@@ -16,4 +16,7 @@ router.post('/changePassword',validateToken, userController.changePassword);
 //forgot password route (/api/users/forgotPassword)
 router.post('/forgotPassword', userController.forgotPassword);
 
+//forgot password route (/api/users/verifyUser)
+router.get('/verifyUser',validateToken, userController.verifyUser);
+
 module.exports = router;
