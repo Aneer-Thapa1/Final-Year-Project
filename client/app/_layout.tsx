@@ -1,4 +1,3 @@
-// app/_layout.tsx
 import { Stack, useRouter } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import "./global.css";
@@ -9,15 +8,25 @@ import { Provider, useDispatch } from 'react-redux';
 import { store } from '../store/store';
 import { checkAuthStatus } from '@/services/userService';
 import { loginSuccess } from '@/store/slices/userSlice';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, useColorScheme } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 
 // Prevent splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
+
+useEffect(() => {
+  const clearStorage = async () => {
+    await AsyncStorage.clear();
+  };
+  clearStorage();
+}, []);
 
 function RootLayoutNav() {
   const router = useRouter();
   const dispatch = useDispatch();
   const [isInitializing, setIsInitializing] = useState(true);
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
 
   const [fontsLoaded] = useFonts({
     'Montserrat-Bold': require('../assets/fonts/Montserrat-Bold.ttf'),
@@ -48,7 +57,6 @@ function RootLayoutNav() {
             // User has seen onboarding but isn't authenticated
             initialRoute = '/login';
           }
-          // else keep initialRoute as '/onboarding'
 
           // If user is authenticated, update Redux state
           if (userData) {
@@ -63,7 +71,6 @@ function RootLayoutNav() {
         }
       } catch (error) {
         console.error('Initialization error:', error);
-        // On error, default to login screen
         router.replace('/login');
       } finally {
         setIsInitializing(false);
@@ -73,46 +80,39 @@ function RootLayoutNav() {
     initialize();
   }, [fontsLoaded, dispatch, router]);
 
-
-  // In React Native Debugger console
-  const getAllKeys = async () => {
-    const keys = await AsyncStorage.getAllKeys();
-    const items = await AsyncStorage.multiGet(keys);
-    console.table(items);
-  };
-  getAllKeys();
-
   // Show loading screen while initializing or fonts are loading
   if (!fontsLoaded || isInitializing) {
     return (
-        <View className="flex-1 justify-center items-center bg-white">
-          <ActivityIndicator size="large" color="#7C3AED" />
+        <View className={`flex-1 justify-center items-center ${isDark ? 'bg-theme-background-dark' : 'bg-white'}`}>
+          <StatusBar style={isDark ? 'light' : 'dark'} />
+          <ActivityIndicator size="large" color={isDark ? '#22C55E' : '#7C3AED'} />
         </View>
     );
   }
 
-  // Define the stack navigator
   return (
-      <Stack
-          screenOptions={{
-            headerShown: false,
-            animation: 'slide_from_right',
-          }}
-      >
-        <Stack.Screen name="onboarding" />
-        <Stack.Screen name="login" />
-        <Stack.Screen name="signup" />
-        <Stack.Screen
-            name="(tabs)"
-            options={{
-              animation: 'fade',
+      <View className="flex-1">
+        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <Stack
+            screenOptions={{
+              headerShown: false,
+              animation: 'slide_from_right',
             }}
-        />
-      </Stack>
+        >
+          <Stack.Screen name="onboarding" />
+          <Stack.Screen name="login" />
+          <Stack.Screen name="signup" />
+          <Stack.Screen
+              name="(tabs)"
+              options={{
+                animation: 'fade',
+              }}
+          />
+        </Stack>
+      </View>
   );
 }
 
-// Wrap the root component with Provider
 function AuthenticatedLayout() {
   return (
       <Provider store={store}>
@@ -122,5 +122,5 @@ function AuthenticatedLayout() {
 }
 
 export default function RootLayout() {
-  return <AuthenticatedLayout />;
+  return <AuthenticatedLayout />
 }
