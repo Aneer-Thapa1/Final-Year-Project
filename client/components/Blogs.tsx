@@ -5,7 +5,9 @@ import { MotiView, AnimatePresence } from 'moti'
 import * as Haptics from 'expo-haptics'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Comment from './Comment'
-import {images} from '../constants/images'
+import icons from '../constants/images'
+
+
 
 const Blog = () => {
     const colorScheme = useColorScheme();
@@ -70,6 +72,7 @@ const Blog = () => {
 
     const CommentsModal = () => (
         <Modal
+            options={{ headerShown: false }}
             animationType="slide"
             visible={showComments}
             onRequestClose={() => setShowComments(false)}
@@ -122,16 +125,16 @@ const Blog = () => {
         >
             {/* Author Info */}
             <View className="p-4 flex-row items-center justify-between">
-                <View className="flex-row items-center space-x-3">
+                <View className="flex-row items-center space-x-3 gap-2">
                     <Image
-                        source={{ uri: 'https://your-image-url.com/blog-image' }}
+                        source={icons.maleProfile}
                         className="w-10 h-10 rounded-full"
                     />
                     <View>
                         <Text className={`font-semibold ${
                             isDark ? 'text-theme-text-primary-dark' : 'text-gray-900'
                         }`}>
-                            Anir Jung Thapaz
+                            Anir Jung Thapa
                         </Text>
                         <Text className={`text-sm ${
                             isDark ? 'text-theme-text-muted-dark' : 'text-gray-500'
@@ -157,7 +160,7 @@ const Blog = () => {
 
             {/* Blog Image */}
             <Image
-                source={{ uri: 'https://your-image-url.com/blog-image' }}
+                source={icons.blogImage}
                 className="w-full h-64"
                 resizeMode="cover"
             />
