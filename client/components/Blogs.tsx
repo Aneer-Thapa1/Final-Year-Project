@@ -124,7 +124,7 @@ const Blog = () => {
             <View className="p-4 flex-row items-center justify-between">
                 <View className="flex-row items-center space-x-3">
                     <Image
-                        source={im}
+                        source={{ uri: 'https://your-image-url.com/blog-image' }}
                         className="w-10 h-10 rounded-full"
                     />
                     <View>

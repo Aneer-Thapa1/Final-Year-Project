@@ -1,19 +1,38 @@
-import {View, Platform, StyleSheet} from 'react-native';
-import {useLinkBuilder, useTheme} from '@react-navigation/native';
-
-import { BottomTabBarProps} from '@react-navigation/bottom-tabs';
-
+import { View, Platform, useColorScheme } from 'react-native';
+import { useLinkBuilder, useTheme } from '@react-navigation/native';
+import { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import TabBarButton from "@/components/TabBarButton";
 
-export function TabBar({state, descriptors, navigation}: BottomTabBarProps) {
-    const {colors} = useTheme();
-    const {buildHref} = useLinkBuilder();
-
+export function TabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+    const { colors } = useTheme();
+    const { buildHref } = useLinkBuilder();
+    const colorScheme = useColorScheme();
+    const isDark = colorScheme === 'dark';
+    const isIOS = Platform.OS === 'ios';
 
     return (
-        <View style={styles.tabBar}>
+        <View className={`
+            absolute
+            flex-row
+            ${isIOS ? 'bottom-12' : 'bottom-8'}
+            mx-5
+            items-center
+            justify-between
+            ${isDark ? 'bg-gray-800' : 'bg-white'}
+            rounded-[35px]
+            py-4
+            px-3
+        `}
+              style={{
+                  shadowColor: isDark ? '#000' : colors.primary,
+                  shadowOffset: { width: 0, height: 10 },
+                  shadowOpacity: isDark ? 0.3 : 0.1,
+                  shadowRadius: 10,
+                  elevation: 8
+              }}
+        >
             {state.routes.map((route, index) => {
-                const {options} = descriptors[route.key];
+                const { options } = descriptors[route.key];
                 const label =
                     options.tabBarLabel !== undefined
                         ? options.tabBarLabel
@@ -50,33 +69,17 @@ export function TabBar({state, descriptors, navigation}: BottomTabBarProps) {
                         isFocused={isFocused}
                         routeName={route.name}
                         color={isFocused ? colors.primary : colors.text}
-                        label={label}
-                        style={styles.tabBarItems}
+                        label={label.toString()}
+                        style={{
+                            overflow: 'hidden',
+                            flex: 1,
+                            justifyContent: 'center',
+                            alignItems: 'center',
+                            gap: 5
+                        }}
                     />
                 );
             })}
         </View>
     );
 }
-
-const styles = StyleSheet.create({
-    tabBar: {
-        position: "absolute",
-        flexDirection: 'row',
-        bottom: 50,
-        alignItems: 'center',
-        justifyContent: "space-between",
-        marginHorizontal: 20,
-        backgroundColor: '#fff',
-        borderRadius: 35,
-        shadowColor: '#000',
-        shadowOffset: {width: 0, height: 10},
-        shadowOpacity: 0.1,
-        paddingVertical: 15,
-        shadowRadius: 10,
-    }, tabBarItems: {
-        overflow: 'hidden',
-        flex: 1, justifyContent: 'center', alignItems: 'center', gap: 5,
-    }
-
-})
