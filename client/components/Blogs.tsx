@@ -19,20 +19,20 @@ const Blog = () => {
         {
             id: '1',
             user: {
-                name: 'John Doe',
+                name: 'Anshu Karki',
                 avatar: 'https://your-avatar-url.com/1',
             },
-            text: 'This is such a great insight! Ive been using these techniques and they really work.',
+            text: 'This is so beautiful!',
             time: '2h ago',
             likes: 24,
             replies: [
                 {
                     id: '1.1',
                     user: {
-                        name: 'Jane Smith',
+                        name: 'Anir Jung Thapa',
                         avatar: 'https://your-avatar-url.com/2',
                     },
-                    text: 'Totally agree! The daily tracking feature is amazing.',
+                    text: 'Totally agree, but you are more beautiful!',
                     time: '1h ago',
                     likes: 12,
                 }
