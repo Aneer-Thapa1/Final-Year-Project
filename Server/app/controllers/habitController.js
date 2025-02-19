@@ -1,5 +1,6 @@
 const {PrismaClient} = require('@prisma/client');
 const res = require("express/lib/response");
+const {createLogger} = require("winston");
 const prisma = new PrismaClient();
 
 // Utility function to validate dates
@@ -39,30 +40,39 @@ const addHabit = async (req, res) => {
             specific_time = null,
             days_of_week = [], // For weekly habits [1,3,5] = Mon,Wed,Fri
             days_of_month = [], // For monthly habits [1,15] = 1st and 15th
-            reminder_time = null,
-
+            reminder_time = [],
         } = req.body;
 
-        const user_id = req.user.id;
-
+        const user_id = req.user;
 
         // Basic validation
-        if (!name || !domain_id || !frequency_type_id || !frequency_value || !frequency_interval || !start_date) {
+        if (!name || !domain_id || !frequency_type_id || !frequency_value || !frequency_interval || !start_date || !Array.isArray(reminder_time)) {
             return res.status(400).json({
                 success: false,
-                message: "Missing required fields",
-                required: ['name', 'domain_id', 'frequency_type_id', 'frequency_value', 'frequency_interval', 'start_date']
+                message: "Missing required fields or invalid format",
+                required: ['name', 'domain_id', 'frequency_type_id', 'frequency_value', 'frequency_interval', 'start_date', 'reminder_time (array)']
             });
         }
 
-        //  Validate dates
+        // Validate dates
         if (!isValidDate(start_date) || (end_date && !isValidDate(end_date))) {
             return res.status(400).json({
                 success: false, message: "Invalid date format", tip: "Use ISO date format (YYYY-MM-DD)"
             });
         }
 
-        //  Check if dates are logical
+        // Validate reminder times
+        for (let time of reminder_time) {
+            if (!isValidDate(time)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid reminder time format",
+                    tip: "Use ISO date format for reminder times"
+                });
+            }
+        }
+
+        // Check if dates are logical
         const startDateObj = new Date(start_date);
         const endDateObj = end_date ? new Date(end_date) : null;
         if (endDateObj && startDateObj >= endDateObj) {
@@ -71,7 +81,7 @@ const addHabit = async (req, res) => {
             });
         }
 
-        //  Verify domain exists
+        // Verify domain exists
         const domain = await prisma.habitDomain.findUnique({
             where: {domain_id: parseInt(domain_id)}
         });
@@ -81,7 +91,7 @@ const addHabit = async (req, res) => {
             });
         }
 
-        //  Verify frequency type exists
+        // Verify frequency type exists
         const frequencyType = await prisma.frequencyType.findUnique({
             where: {frequency_type_id: parseInt(frequency_type_id)}
         });
@@ -102,7 +112,16 @@ const addHabit = async (req, res) => {
             });
         }
 
-        //  Create or update the habit
+        // Check number of reminders for daily habits
+        if (frequencyType.name.toLowerCase() === 'daily' && reminder_time.length > frequency_value) {
+            return res.status(400).json({
+                success: false,
+                message: "Number of reminders exceeds daily frequency",
+                tip: `For daily habits, ensure number of reminders doesn't exceed ${frequency_value}`
+            });
+        }
+
+        // Create or update the habit
         const habit = await prisma.habit.create({
             data: {
                 name,
@@ -122,7 +141,7 @@ const addHabit = async (req, res) => {
         if (days_of_week.length > 0 || days_of_month.length > 0 || specific_time) {
             await prisma.habitSchedule.create({
                 data: {
-                    habit: {connect: {habit_id: habit.habit_id}},
+                    habit_id: habit.habit_id,
                     day_of_week: days_of_week.length > 0 ? days_of_week : null,
                     day_of_month: days_of_month.length > 0 ? days_of_month : null,
                     specific_time: specific_time ? new Date(specific_time) : null
@@ -130,18 +149,20 @@ const addHabit = async (req, res) => {
             });
         }
 
-        // Create reminder if specified
-        if (reminder_time) {
-            await prisma.habitReminder.create({
-                data: {
-                    habit: {connect: {habit_id: habit.habit_id}},
-                    reminder_time: new Date(reminder_time),
-                    is_enabled: true
-                }
+        // Create reminders if specified
+        if (reminder_time.length > 0) {
+            const reminderData = reminder_time.map(time => ({
+                habit_id:  habit.habit_id,
+                reminder_time: new Date(time),
+                is_enabled: true
+            }));
+
+            await prisma.habitReminder.createMany({
+                data: reminderData
             });
         }
 
-        //  Create initial streak record
+        // Create initial streak record
         await prisma.habitStreak.create({
             data: {
                 habit: {connect: {habit_id: habit.habit_id}},
@@ -158,7 +179,8 @@ const addHabit = async (req, res) => {
                 habit_id: habit.habit_id,
                 name: habit.name,
                 start_date: habit.start_date,
-                frequency: `${frequency_value} times per ${frequencyType.name.toLowerCase()}`
+                frequency: `${frequency_value} times per ${frequencyType.name.toLowerCase()}`,
+                reminders: reminder_time.length
             }
         });
 
@@ -176,7 +198,7 @@ const addHabit = async (req, res) => {
 const getUserHabits = async (req, res) => {
     try {
         // Extract user_id from request parameters
-        const {user_id} = req.params;
+        const user_id = req.user;
 
         // Fetch habits from the database for the given user_id
         const habits = await prisma.habit.findMany({
@@ -186,7 +208,7 @@ const getUserHabits = async (req, res) => {
             }, include: {
                 domain: true,         // Include associated domain details
                 frequencyType: true,  // Include frequency type details
-                schedule: true,       // Include habit schedule details
+                schedules: true,       // Include habit schedule details
                 streak: true,         // Include habit streak details
                 reminders: true,      // Include associated reminders
                 logs: {
@@ -531,7 +553,7 @@ const updateHabit = async (req, res) => {
 // Main handler to get user's upcoming habits for today and tomorrow
 const getUpcomingHabits = async (req, res) => {
     try {
-        const user_id = req.user.id;  // Get authenticated user's ID
+        const user_id = req?.user;  // Get authenticated user's ID
         const today = new Date();
         const tomorrow = new Date(today);
         tomorrow.setDate(tomorrow.getDate() + 1);
@@ -545,7 +567,7 @@ const getUpcomingHabits = async (req, res) => {
                     {end_date: {gte: today}}  // Not yet ended habits
                 ]
             }, include: {
-                domain: true, frequencyType: true, schedule: true, reminders: true
+                domain: true, frequencyType: true, schedules: true, reminders: true
             }
         });
 

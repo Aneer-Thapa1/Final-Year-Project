@@ -243,7 +243,6 @@ const verifyUser = async (req, res) => {
     try {
         const user_id = parseInt(req.user);
 
-        console.log("user id: ", user_id);
 
         if (!user_id) {
             return res.status(401).json({ error: 'User ID not found' });

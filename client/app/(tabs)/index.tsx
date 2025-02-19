@@ -1,10 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, FlatList, TouchableOpacity, useColorScheme, Image } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Swipeable } from 'react-native-gesture-handler';
 import { getUserHabits, logHabitCompletion, getUpcomingHabits } from '../../services/habitService';
-import { MotiView } from 'moti';
-import { Feather } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 
 const Home = () => {
     const [habits, setHabits] = useState([]);
@@ -18,10 +16,8 @@ const Home = () => {
 
     const fetchHabits = async () => {
         try {
-            const [habitsResponse, upcomingResponse] = await Promise.all([
-                getUserHabits(),
-                getUpcomingHabits()
-            ]);
+            const habitsResponse = await getUserHabits();
+            const upcomingResponse = await getUpcomingHabits();
             setHabits(habitsResponse.data);
             setUpcomingHabits(upcomingResponse.data);
         } catch (error) {
@@ -38,86 +34,69 @@ const Home = () => {
         }
     };
 
-    const renderHabitItem = ({ item }) => (
-        <Swipeable
-            renderRightActions={() => (
-                <TouchableOpacity
-                    onPress={() => handleCompleteHabit(item.habit_id)}
-                    className={`justify-center items-center w-20 ${isDark ? 'bg-green-700' : 'bg-green-500'} rounded-r-lg`}
-                >
-                    <Feather name="check" size={24} color="white" />
-                </TouchableOpacity>
-            )}
+    const renderHabitItem = (item) => (
+        <TouchableOpacity
+            key={item.habit_id}
+            onPress={() => handleCompleteHabit(item.habit_id)}
+            className={`p-4 mb-4 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-white'} shadow-md`}
         >
-            <MotiView
-                from={{ opacity: 0, translateY: 50 }}
-                animate={{ opacity: 1, translateY: 0 }}
-                transition={{ type: 'timing', duration: 500 }}
-                className={`p-4 mb-3 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-white'} shadow-md`}
-            >
-                <View className="flex-row justify-between items-center mb-2">
-                    <Text className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>{item.name}</Text>
-                    <View className={`px-2 py-1 rounded-full ${isDark ? 'bg-blue-700' : 'bg-blue-100'}`}>
-                        <Text className={`text-xs ${isDark ? 'text-blue-200' : 'text-blue-800'}`}>
-                            {item.frequencyType.name}
-                        </Text>
-                    </View>
-                </View>
-                <Text className={`mb-2 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{item.description}</Text>
-                <View className="flex-row justify-between">
-                    <Text className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                        Frequency: {item.frequency_value} times
+            <View className="flex-row justify-between items-center mb-2">
+                <Text className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>{item.name}</Text>
+                <View className={`px-3 py-1 rounded-full ${isDark ? 'bg-blue-900' : 'bg-blue-100'}`}>
+                    <Text className={`text-xs ${isDark ? 'text-blue-200' : 'text-blue-800'}`}>
+                        {item.frequencyType?.name}
                     </Text>
-                    <View className="flex-row items-center">
-                        <Feather name="trending-up" size={16} color={isDark ? '#60A5FA' : '#3B82F6'} />
-                        <Text className={`ml-1 ${isDark ? 'text-blue-400' : 'text-blue-600'}`}>
-                            Streak: {item.streak?.current_streak || 0} days
-                        </Text>
-                    </View>
                 </View>
-            </MotiView>
-        </Swipeable>
+            </View>
+            <Text className={`mb-3 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>{item.description}</Text>
+            <View className="flex-row justify-between items-center">
+                <View className="flex-row items-center">
+                    <Ionicons name="time-outline" size={16} color={isDark ? '#9CA3AF' : '#4B5563'} />
+                    <Text className={`ml-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                        {item.frequency_value} times {item.frequencyType?.name.toLowerCase()}
+                    </Text>
+                </View>
+                <View className="flex-row items-center">
+                    <Ionicons name="flame" size={16} color={isDark ? '#F59E0B' : '#D97706'} />
+                    <Text className={`ml-1 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
+                        {item.streak?.current_streak || 0} day streak
+                    </Text>
+                </View>
+            </View>
+        </TouchableOpacity>
     );
 
     return (
         <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-            <View className="px-4 py-6">
-                <Text className={`text-3xl font-bold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>Your Habits</Text>
-                <Text className={`mb-4 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Swipe right to complete a habit</Text>
-            </View>
+            <ScrollView className="flex-1"  contentContainerStyle={{ padding: 16 }}>
+                <View className="mb-6">
+                    <Text className={`text-3xl font-bold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>Your Habits</Text>
+                    <Text className={`${isDark ? 'text-gray-400' : 'text-gray-600'}`}>Tap to complete a habit</Text>
+                </View>
 
-            <FlatList
-                data={habits}
-                renderItem={renderHabitItem}
-                keyExtractor={(item) => item.habit_id.toString()}
-                className="px-4"
-                showsVerticalScrollIndicator={false}
-            />
+                {habits.map(renderHabitItem)}
 
-            <View className="p-4 mt-4">
-                <Text className={`text-xl font-semibold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>Upcoming Habits</Text>
-                <FlatList
-                    data={upcomingHabits.slice(0, 3)}
-                    horizontal
-                    showsHorizontalScrollIndicator={false}
-                    renderItem={({ item }) => (
-                        <View className={`mr-4 p-3 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-white'} shadow-sm`}>
-                            <Text className={`font-medium ${isDark ? 'text-white' : 'text-gray-800'}`}>{item.name}</Text>
-                            <Text className={`text-xs mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                {new Date(item.next_due_date).toLocaleDateString()}
-                            </Text>
-                        </View>
-                    )}
-                    keyExtractor={(item) => item.habit_id.toString()}
-                />
-            </View>
+                <View className="mt-6 mb-4">
+                    <Text className={`text-xl font-semibold mb-3 ${isDark ? 'text-white' : 'text-gray-900'}`}>Upcoming Habits</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                        {upcomingHabits.slice(0, 3).map((item) => (
+                            <View key={item.habit_id} className={`mr-4 p-3 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-white'} shadow-sm`}>
+                                <Text className={`font-medium ${isDark ? 'text-white' : 'text-gray-800'}`}>{item.name}</Text>
+                                <Text className={`text-xs mt-1 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                    {new Date(item.next_due_date).toLocaleDateString()}
+                                </Text>
+                            </View>
+                        ))}
+                    </ScrollView>
+                </View>
 
-            <View className="p-4">
-                <Text className={`text-xl font-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>Suggestions for you</Text>
-                <TouchableOpacity>
-                    <Text className="font-bold text-sm text-blue-500 mt-2">VIEW ALL</Text>
-                </TouchableOpacity>
-            </View>
+                <View className="mt-2 ">
+                    <Text className={`text-xl font-semibold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>Suggestions for you</Text>
+                    <TouchableOpacity>
+                        <Text className="font-bold text-sm text-blue-500">VIEW ALL</Text>
+                    </TouchableOpacity>
+                </View>
+            </ScrollView>
         </SafeAreaView>
     );
 };

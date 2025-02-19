@@ -2,7 +2,7 @@ import {Animated, Image, Text, TouchableOpacity, useColorScheme, View, Platform}
 import React, {useEffect, useRef} from 'react'
 import {router} from "expo-router"
 import {LinearGradient} from 'expo-linear-gradient'
-import {Bell} from 'lucide-react-native'
+import {Bell, Brain} from 'lucide-react-native'
 import images from "../constants/images"
 import {useSelector} from 'react-redux'
 import {SafeAreaView} from 'react-native-safe-area-context'
@@ -145,34 +145,9 @@ const Header = React.memo(() => {
                                     onPress={() => router.push('/chatbot')}
                                     className={`p-2 ml-2 rounded-xl ${isDark ? 'bg-secondary-900/10' : 'bg-secondary-300/10'} ${Platform.OS === 'android' ? 'shadow' : ''}`}
                                 >
-                                    <Animated.View style={{ opacity: pulseOpacity }}>
-                                        <Svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-                                            <Path
-                                                d="M12 2L18 6V12L12 16L6 12V6L12 2Z"
-                                                stroke={isDark ? '#E2E8F0' : '#374151'}
-                                                strokeWidth={1.5}
-                                                fill="none"
-                                            />
-                                            <Circle
-                                                cx="9"
-                                                cy="9"
-                                                r="1.2"
-                                                fill={isDark ? '#7C3AED' : '#8B5CF6'}
-                                            />
-                                            <Circle
-                                                cx="15"
-                                                cy="9"
-                                                r="1.2"
-                                                fill={isDark ? '#7C3AED' : '#8B5CF6'}
-                                            />
-                                            <Path
-                                                d="M9 12H15"
-                                                stroke={isDark ? '#E2E8F0' : '#374151'}
-                                                strokeWidth={1.5}
-                                                strokeLinecap="round"
-                                            />
-                                        </Svg>
-                                    </Animated.View>
+                                    <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
+                                        <Brain size={18} color={isDark ? '#C4B5FD' : '#7C3AED'} />
+                                    </View>
                                 </TouchableOpacity>
                             </View>
                         </View>

@@ -16,6 +16,8 @@ model User {
   avatar        String?
   points_gained Int?    @default(0)
   password      String
+  timezone      String  @default("UTC") // User's timezone for accurate reminders
+  onVacation    Boolean @default(false) // Tracks user's vacation status
 
   registeredAt DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
@@ -118,6 +120,8 @@ model Habit {
   frequency_value    Int // Number of times (e.g., 2 times per week)
   frequency_interval Int // Days between repetitions (7 for weekly, 30 for monthly)
 
+  skip_on_vacation Boolean @default(false) // Whether to skip this habit during vacation
+
   // Dates and timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -139,11 +143,12 @@ model Habit {
 
 // Specific schedule settings for habits
 model HabitSchedule {
-  schedule_id   Int       @id @default(autoincrement())
-  day_of_week   Int? // 1-7 for weekly habits (null if not weekly)
-  day_of_month  Int? // 1-31 for monthly habits (null if not monthly)
-  specific_time DateTime? // Optional specific time for the habit
-  createdAt     DateTime  @default(now())
+  schedule_id  Int        @id @default(autoincrement())
+  day_of_week  Int[] // Array of days (1-7) for weekly habits
+  day_of_month Int[] // Array of days (1-31) for monthly habits
+  times_of_day DateTime[] // Array of times for daily habits
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
 
   habit_id Int
   habit    Habit @relation(fields: [habit_id], references: [habit_id])
@@ -155,6 +160,7 @@ model HabitLog {
   completed_at DateTime // When the habit was completed
   notes        String? // Optional notes about completion
   mood_rating  Int? // Optional mood rating (1-5)
+  skipped      Boolean  @default(false) // Whether this log entry represents a skipped habit
   createdAt    DateTime @default(now())
 
   habit_id Int
@@ -165,12 +171,12 @@ model HabitLog {
 
 // Tracks streak information for habits
 model HabitStreak {
-  streak_id         Int      @id @default(autoincrement())
-  current_streak    Int      @default(1)
-  longest_streak    Int      @default(1)
+  streak_id         Int       @id @default(autoincrement())
+  current_streak    Int       @default(1)
+  longest_streak    Int       @default(1)
   start_date        DateTime // When the current streak started
-  last_completed_at DateTime // Last completion date
-  updated_at        DateTime @updatedAt
+  last_completed_at DateTime? // Last completion date
+  updated_at        DateTime  @updatedAt
 
   habit_id Int   @unique // One streak record per habit
   habit    Habit @relation(fields: [habit_id], references: [habit_id])
@@ -180,11 +186,11 @@ model HabitStreak {
 
 // Reminder settings for habits
 model HabitReminder {
-  reminder_id   Int      @id @default(autoincrement())
-  reminder_time DateTime // When to send the reminder
-  is_enabled    Boolean  @default(true)
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  reminder_id    Int        @id @default(autoincrement())
+  reminder_times DateTime[] // Array of times to send reminders
+  is_enabled     Boolean    @default(true)
+  created_at     DateTime   @default(now())
+  updated_at     DateTime   @updatedAt
 
   habit_id Int
   habit    Habit @relation(fields: [habit_id], references: [habit_id])
