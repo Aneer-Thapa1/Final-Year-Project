@@ -1,344 +1,248 @@
-// AddHabit.js
-import React, { useState } from 'react';
-import { Alert, ScrollView, Text, TextInput, TouchableOpacity, View, useColorScheme, Modal, Platform } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, useColorScheme, Animated, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { Picker } from '@react-native-picker/picker';
-import { addHabit } from '../../services/habitService';
+import { getUserHabits, logHabitCompletion, getUpcomingHabits } from '../../services/habitService';
+import { Ionicons } from '@expo/vector-icons';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import Swipeable from 'react-native-gesture-handler/Swipeable';
 import { MotiView } from 'moti';
-import { ArrowLeft } from 'lucide-react-native';
-import { router } from "expo-router";
-import RenderFrequencyInput from '../../components/RenderFrequencyInput';
-import { domains } from '../../constants/domains';
+import * as Haptics from 'expo-haptics';
 
-const AddHabit = ({ navigation }) => {
+const Home = () => {
+    const [habits, setHabits] = useState([]);
+    const [upcomingHabits, setUpcomingHabits] = useState([]);
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
+    const swipeableRefs = useRef({});
+    const scrollY = useRef(new Animated.Value(0)).current;
 
-    const [habitData, setHabitData] = useState({
-        name: '',
-        description: '',
-        domain_id: '',
-        frequency_type_id: '1',
-        frequency_value: '1',
-        frequency_interval: '1',
-        start_date: new Date(),
-        end_date: null,
-        specific_time: null,
-        days_of_week: [],
-        days_of_month: [],
-        reminder_time: []
-    });
+    useEffect(() => {
+        fetchHabits();
+        StatusBar.setBarStyle(isDark ? 'light-content' : 'dark-content');
+    }, [isDark]);
 
-    const [showStartDate, setShowStartDate] = useState(false);
-    const [showEndDate, setShowEndDate] = useState(false);
-    const [showReminderTime, setShowReminderTime] = useState(false);
-    const [editingReminderIndex, setEditingReminderIndex] = useState(null);
-
-    const daysOfWeek = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-    const handleSubmit = async () => {
+    const fetchHabits = async () => {
         try {
-            const response = await addHabit(habitData);
-            Alert.alert('Success', 'Habit created successfully!');
-            navigation.goBack();
+            const habitsResponse = await getUserHabits();
+            const upcomingResponse = await getUpcomingHabits();
+            setHabits(habitsResponse.data);
+            setUpcomingHabits(upcomingResponse.data);
         } catch (error) {
-            Alert.alert('Error', error.message);
+            console.error("Error fetching habits:", error);
         }
     };
 
-    const handleDateChange = (event, selectedDate, dateType) => {
-        const currentDate = selectedDate || habitData[dateType];
-        setHabitData({ ...habitData, [dateType]: currentDate });
+    const handleCompleteHabit = async (habitId) => {
+        try {
+            await logHabitCompletion(habitId, { completed_at: new Date() });
+            if (swipeableRefs.current[habitId]) {
+                swipeableRefs.current[habitId].close();
+            }
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            fetchHabits();
+        } catch (error) {
+            console.error("Error completing habit:", error);
+        }
     };
 
-    const renderDatePicker = (visible, currentDate, onChange, onClose, mode = 'date') => {
-        if (Platform.OS === 'ios') {
-            return (
-                <Modal
-                    animationType="slide"
-                    transparent={true}
-                    visible={visible}
-                    onRequestClose={onClose}
+    const renderRightActions = (progress, dragX, habitId) => {
+        const scale = dragX.interpolate({
+            inputRange: [-100, 0],
+            outputRange: [1, 0.8],
+            extrapolate: 'clamp',
+        });
+
+        const opacity = dragX.interpolate({
+            inputRange: [-100, -50, 0],
+            outputRange: [1, 0.5, 0],
+            extrapolate: 'clamp',
+        });
+
+        return (
+            <Animated.View
+                style={[{ opacity }, { transform: [{ scale }] }]}
+                className="flex-row items-center justify-center pr-4"
+            >
+                <TouchableOpacity
+                    onPress={() => {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                        handleCompleteHabit(habitId);
+                    }}
+                    className="bg-primary-500 justify-center items-center p-6 rounded-2xl"
                 >
-                    <View style={{ flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' }}>
-                        <View style={{ backgroundColor: isDark ? '#1F2937' : 'white', padding: 20, borderTopLeftRadius: 20, borderTopRightRadius: 20 }}>
-                            <DateTimePicker
-                                value={currentDate}
-                                mode={mode}
-                                display="spinner"
-                                onChange={onChange}
-                                style={{ backgroundColor: isDark ? '#1F2937' : 'white' }}
-                                textColor={isDark ? 'white' : 'black'}
-                            />
-                            <TouchableOpacity onPress={onClose} style={{ marginTop: 10 }}>
-                                <Text style={{ color: '#007AFF', textAlign: 'center', fontSize: 18 }}>Done</Text>
-                            </TouchableOpacity>
+                    <Ionicons name="checkmark-circle" size={32} color="white" />
+                    <Text className="text-white font-montserrat-semibold text-sm mt-2">Complete</Text>
+                </TouchableOpacity>
+            </Animated.View>
+        );
+    };
+
+    const renderHabitItem = (item, index) => (
+        <MotiView
+            from={{ opacity: 0, translateY: 20 }}
+            animate={{ opacity: 1, translateY: 0 }}
+            transition={{ type: 'timing', duration: 500, delay: index * 100 }}
+            key={item.habit_id}
+        >
+            <Swipeable
+                ref={ref => swipeableRefs.current[item.habit_id] = ref}
+                renderRightActions={(progress, dragX) =>
+                    renderRightActions(progress, dragX, item.habit_id)
+                }
+                rightThreshold={40}
+                overshootRight={false}
+            >
+                <View className={`mb-4 rounded-3xl shadow-sm ${isDark ? 'bg-theme-background-dark' : 'bg-gray-50'}`}>
+                    <View className="p-4">
+                        <View className="flex-row justify-between items-center mb-3">
+                            <Text className={`text-lg font-montserrat-bold ${
+                                isDark ? 'text-white' : 'text-gray-900'
+                            }`}>
+                                {item.name}
+                            </Text>
+                            <View className={`px-4 py-1.5 rounded-full bg-primary-500/10`}>
+                                <Text className="text-xs font-montserrat-medium text-primary-500">
+                                    {item.frequencyType?.name}
+                                </Text>
+                            </View>
+                        </View>
+                        <Text className={`mb-4 text-sm font-montserrat ${
+                            isDark ? 'text-gray-400' : 'text-gray-600'
+                        }`}>
+                            {item.description}
+                        </Text>
+                        <View className="flex-row justify-between items-center">
+                            <View className="flex-row items-center">
+                                <View className="p-2 rounded-xl bg-primary-500/10">
+                                    <Ionicons
+                                        name="time-outline"
+                                        size={18}
+                                        color="#22C55E"
+                                    />
+                                </View>
+                                <Text className={`ml-2 text-sm font-montserrat ${
+                                    isDark ? 'text-gray-400' : 'text-gray-600'
+                                }`}>
+                                    {item.frequency_value} times {item.frequencyType?.name.toLowerCase()}
+                                </Text>
+                            </View>
+                            <View className="flex-row items-center px-3 py-1.5 rounded-full bg-accent-500/10">
+                                <Ionicons
+                                    name="flame"
+                                    size={18}
+                                    color="#F59E0B"
+                                />
+                                <Text className="ml-1 font-montserrat-semibold text-accent-500">
+                                    {item.streak?.current_streak || 0} days
+                                </Text>
+                            </View>
                         </View>
                     </View>
-                </Modal>
-            );
-        } else {
-            return visible && (
-                <DateTimePicker
-                    value={currentDate}
-                    mode={mode}
-                    display="default"
-                    onChange={(event, selectedDate) => {
-                        onChange(event, selectedDate);
-                        onClose();
-                    }}
-                />
-            );
-        }
-    };
+                </View>
+            </Swipeable>
+        </MotiView>
+    );
 
     return (
-        <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-            <ScrollView className="flex-1">
-                {/* Header */}
-                <View className={`px-4 pt-2 pb-4 flex-row items-center ${isDark ? 'bg-gray-900' : 'bg-white'}`}>
-                    <TouchableOpacity
-                        onPress={() => router.back()}
-                        className="mr-3 p-2 -ml-2"
+        <GestureHandlerRootView className={`flex-1 ${isDark ? 'bg-theme-background-dark' : 'bg-gray-50'}`}>
+            <SafeAreaView className="flex-1">
+                <MotiView
+                    from={{ opacity: 0, translateY: 10 }}
+                    animate={{ opacity: 1, translateY: 0 }}
+                    transition={{ type: 'timing', duration: 600 }}
+                    className="flex-1"
+                >
+                    <ScrollView
+                        className="flex-1"
+                        contentContainerStyle={{ padding: 16 }}
+                        showsVerticalScrollIndicator={false}
+                        onScroll={Animated.event(
+                            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                            { useNativeDriver: true }
+                        )}
                     >
-                        <ArrowLeft size={24} color={isDark ? '#E2E8F0' : '#374151'} />
-                    </TouchableOpacity>
-                    <View>
-                        <Text className={`text-xl font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            Create New Habit
-                        </Text>
-                        <Text className={`text-sm font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                            Build a new healthy habit
-                        </Text>
-                    </View>
-                </View>
-
-                {/* Form Sections */}
-                <View className="px-4 py-6">
-                    {/* Basic Info Section */}
-                    <MotiView
-                        from={{ opacity: 0, translateY: 50 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        transition={{ delay: 100 }}
-                        className={`mb-6 p-4 rounded-2xl ${isDark ? 'bg-gray-800' : 'bg-white'}`}
-                    >
-                        <Text className={`text-lg font-montserrat-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            Basic Information
-                        </Text>
-                        <TextInput
-                            className={`p-4 rounded-xl mb-4 font-montserrat ${
-                                isDark ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
-                            }`}
-                            placeholder="Habit Name"
-                            placeholderTextColor={isDark ? '#9CA3AF' : '#6B7280'}
-                            value={habitData.name}
-                            onChangeText={(text) => setHabitData({...habitData, name: text})}
-                        />
-                        <TextInput
-                            className={`p-4 rounded-xl mb-4 font-montserrat ${
-                                isDark ? 'bg-gray-700 text-white' : 'bg-gray-100 text-gray-900'
-                            }`}
-                            placeholder="Description"
-                            placeholderTextColor={isDark ? '#9CA3AF' : '#6B7280'}
-                            multiline
-                            numberOfLines={3}
-                            value={habitData.description}
-                            onChangeText={(text) => setHabitData({...habitData, description: text})}
-                        />
-                    </MotiView>
-
-                    {/* Domain Selection */}
-                    <MotiView
-                        from={{ opacity: 0, translateY: 50 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        transition={{ delay: 200 }}
-                        className={`mb-6 p-4 rounded-2xl ${isDark ? 'bg-gray-800' : 'bg-white'}`}
-                    >
-                        <Text className={`text-lg font-montserrat-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            Category
-                        </Text>
-                        <View className="flex-row flex-wrap gap-2">
-                            {domains.map((domain) => (
-                                <TouchableOpacity
-                                    key={domain.id}
-                                    className={`px-4 py-3 rounded-xl flex-row items-center ${
-                                        habitData.domain_id === domain.id
-                                            ? 'bg-primary-500'
-                                            : isDark ? 'bg-gray-700' : 'bg-gray-100'
-                                    }`}
-                                    onPress={() => setHabitData({...habitData, domain_id: domain.id})}
-                                >
-                                    <Text className={`font-montserrat ${
-                                        habitData.domain_id === domain.id || isDark
-                                            ? 'text-white'
-                                            : 'text-gray-900'
-                                    }`}>
-                                        {domain.icon} {domain.name}
-                                    </Text>
-                                </TouchableOpacity>
-                            ))}
+                        <View className="mb-8">
+                            <Text className={`text-3xl font-montserrat-bold mb-2 ${
+                                isDark ? 'text-white' : 'text-gray-900'
+                            }`}>
+                                Your Habits
+                            </Text>
+                            <Text className={`text-sm font-montserrat ${
+                                isDark ? 'text-gray-400' : 'text-gray-600'
+                            }`}>
+                                Swipe left to mark a habit as complete
+                            </Text>
                         </View>
-                    </MotiView>
 
-                    {/* Frequency Selection */}
-                    <MotiView
-                        from={{ opacity: 0, translateY: 50 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        transition={{ delay: 300 }}
-                        className={`mb-6 p-4 rounded-2xl ${isDark ? 'bg-gray-800' : 'bg-white'}`}
-                    >
-                        <Text className={`text-lg font-montserrat-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            Frequency
-                        </Text>
-                        <View className={`mb-4 rounded-xl ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                            <Picker
-                                selectedValue={habitData.frequency_type_id}
-                                onValueChange={(value) => setHabitData({...habitData, frequency_type_id: value})}
-                                style={{ color: isDark ? '#FFFFFF' : '#000000' }}
+                        {habits.map((item, index) => renderHabitItem(item, index))}
+
+                        <View className="mt-8 mb-6">
+                            <Text className={`text-xl font-montserrat-bold mb-4 ${
+                                isDark ? 'text-white' : 'text-gray-900'
+                            }`}>
+                                Coming Up Next
+                            </Text>
+                            <ScrollView
+                                horizontal
+                                showsHorizontalScrollIndicator={false}
+                                contentContainerStyle={{ paddingRight: 16 }}
+                                className="gap-4"
                             >
-                                <Picker.Item label="Daily" value="1" />
-                                <Picker.Item label="Weekly" value="2" />
-                                <Picker.Item label="Monthly" value="3" />
-                            </Picker>
+                                {upcomingHabits.slice(0, 3).map((item, index) => (
+                                    <MotiView
+                                        key={item.habit_id}
+                                        from={{ opacity: 0, translateX: 20 }}
+                                        animate={{ opacity: 1, translateX: 0 }}
+                                        transition={{ type: 'timing', duration: 500, delay: index * 100 }}
+                                    >
+                                        <View className={`p-4 rounded-2xl shadow-sm w-48 ${
+                                            isDark ? 'bg-theme-card-dark' : 'bg-white'
+                                        }`}>
+                                            <Text className={`font-montserrat-semibold mb-2 ${
+                                                isDark ? 'text-white' : 'text-gray-900'
+                                            }`}>
+                                                {item.name}
+                                            </Text>
+                                            <View className="flex-row items-center mt-2">
+                                                <View className="p-1.5 rounded-full bg-primary-500/10">
+                                                    <Ionicons
+                                                        name="calendar"
+                                                        size={14}
+                                                        color="#22C55E"
+                                                    />
+                                                </View>
+                                                <Text className={`text-xs ml-2 font-montserrat ${
+                                                    isDark ? 'text-gray-400' : 'text-gray-600'
+                                                }`}>
+                                                    {new Date(item.next_due_date).toLocaleDateString()}
+                                                </Text>
+                                            </View>
+                                        </View>
+                                    </MotiView>
+                                ))}
+                            </ScrollView>
                         </View>
-                        <RenderFrequencyInput
-                            habitData={habitData}
-                            setHabitData={setHabitData}
-                            isDark={isDark}
-                            daysOfWeek={daysOfWeek}
-                        />
-                    </MotiView>
 
-                    {/* Date Selection */}
-                    <MotiView
-                        from={{ opacity: 0, translateY: 50 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        transition={{ delay: 400 }}
-                        className={`mb-6 p-4 rounded-2xl ${isDark ? 'bg-gray-800' : 'bg-white'}`}
-                    >
-                        <Text className={`text-lg font-montserrat-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            Date Range
-                        </Text>
-                        <TouchableOpacity
-                            className={`p-4 rounded-xl mb-4 ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}
-                            onPress={() => setShowStartDate(true)}
-                        >
-                            <Text className={`font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                Start Date: {habitData.start_date.toDateString()}
+                        <View className="mt-2 flex-row justify-between items-center mb-8">
+                            <Text className={`text-xl font-montserrat-bold ${
+                                isDark ? 'text-white' : 'text-gray-900'
+                            }`}>
+                                Suggested Habits
                             </Text>
-                        </TouchableOpacity>
-                        {renderDatePicker(
-                            showStartDate,
-                            habitData.start_date,
-                            (event, selectedDate) => handleDateChange(event, selectedDate, 'start_date'),
-                            () => setShowStartDate(false)
-                        )}
-                        <TouchableOpacity
-                            className={`p-4 rounded-xl mb-4 ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}
-                            onPress={() => setShowEndDate(true)}
-                        >
-                            <Text className={`font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                End Date: {habitData.end_date ? habitData.end_date.toDateString() : 'Not set'}
-                            </Text>
-                        </TouchableOpacity>
-                        {renderDatePicker(
-                            showEndDate,
-                            habitData.end_date || new Date(),
-                            (event, selectedDate) => handleDateChange(event, selectedDate, 'end_date'),
-                            () => setShowEndDate(false)
-                        )}
-                    </MotiView>
-
-                    {/* Reminder */}
-                    <MotiView
-                        from={{ opacity: 0, translateY: 50 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        transition={{ delay: 500 }}
-                        className={`mb-6 p-4 rounded-2xl ${isDark ? 'bg-gray-800' : 'bg-white'}`}
-                    >
-                        <Text className={`text-lg font-montserrat-semibold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            Reminders
-                        </Text>
-                        {habitData.reminder_time.map((reminder, index) => (
-                            <View key={index} className="flex-row items-center justify-between mb-2">
-                                <Text className={`font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                    {reminder.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            <TouchableOpacity
+                                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                                className="px-4 py-2 rounded-xl bg-primary-500/10"
+                            >
+                                <Text className="font-montserrat-semibold text-sm text-primary-500">
+                                    View All
                                 </Text>
-                                <View className="flex-row">
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            setEditingReminderIndex(index);
-                                            setShowReminderTime(true);
-                                        }}
-                                        className="mr-2 bg-blue-500 px-3 py-1 rounded"
-                                    >
-                                        <Text className="text-white">Edit</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            const newReminders = [...habitData.reminder_time];
-                                            newReminders.splice(index, 1);
-                                            setHabitData({...habitData, reminder_time: newReminders});
-                                        }}
-                                        className="bg-red-500 px-3 py-1 rounded"
-                                    >
-                                        <Text className="text-white">Remove</Text>
-                                    </TouchableOpacity>
-                                </View>
-                            </View>
-                        ))}
-                        <TouchableOpacity
-                            onPress={() => {
-                                setEditingReminderIndex(null);
-                                setShowReminderTime(true);
-                            }}
-                            className="bg-primary-500 px-4 py-2 rounded mt-2"
-                        >
-                            <Text className="text-white text-center">Add Reminder</Text>
-                        </TouchableOpacity>
-                        {renderDatePicker(
-                            showReminderTime,
-                            editingReminderIndex !== null ? habitData.reminder_time[editingReminderIndex] : new Date(),
-                            (event, selectedTime) => {
-                                if (event.type === "set" && selectedTime) {
-                                    const newReminders = [...habitData.reminder_time];
-                                    if (editingReminderIndex !== null) {
-                                        newReminders[editingReminderIndex] = selectedTime;
-                                    } else {
-                                        newReminders.push(selectedTime);
-                                    }
-                                    setHabitData({...habitData, reminder_time: newReminders});
-                                    setShowReminderTime(false);
-                                    setEditingReminderIndex(null);
-                                } else {
-                                    setShowReminderTime(false);
-                                    setEditingReminderIndex(null);
-                                }
-                            },
-                            () => {
-                                setShowReminderTime(false);
-                                setEditingReminderIndex(null);
-                            },
-                            'time'
-                        )}
-                    </MotiView>
-
-                    {/* Submit Button */}
-                    <View className="pb-20">
-                        <TouchableOpacity
-                            className="bg-primary-500 rounded-xl py-4"
-                            onPress={handleSubmit}
-                        >
-                            <Text className="text-white font-montserrat-semibold text-center text-lg">
-                                Create Habit
-                            </Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </ScrollView>
-        </SafeAreaView>
+                            </TouchableOpacity>
+                        </View>
+                    </ScrollView>
+                </MotiView>
+            </SafeAreaView>
+        </GestureHandlerRootView>
     );
 };
 
-export default AddHabit;
+export default Home;

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Text, PlatformPressable } from '@react-navigation/elements';
 import { icon } from "@/constants/icons";
-import { StyleProp, ViewStyle, useColorScheme } from 'react-native';
+import { StyleProp, ViewStyle, useColorScheme, Platform } from 'react-native';
 import { MotiView } from 'moti';
 
 type TabBarButtonProps = {
@@ -25,6 +25,40 @@ const TabBarButton = ({
                       }: TabBarButtonProps) => {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
+    const isCreate = routeName === 'Create';
+    const isAndroid = Platform.OS === 'android';
+
+    if (isCreate) {
+        return (
+            <PlatformPressable
+                onPress={onPress}
+                onLongPress={onLongPress}
+                style={style}
+                className="items-center justify-center"
+            >
+                <MotiView
+                    animate={{ scale: isFocused ? 1.1 : 1 }}
+                    transition={{ type: 'spring', duration: 250 }}
+                    className={`
+                        items-center justify-center 
+                        rounded-full p-3 
+                        ${isDark ? 'bg-primary-400' : 'bg-primary-500'}
+                        ${isAndroid ? '-mt-4' : '-mt-6'}
+                    `}
+                    style={isAndroid ? {
+                        elevation: 4,
+                        backgroundColor: isDark ? '#22C55E' : '#7C3AED',
+                    } : {}}
+                >
+                    {icon[routeName]({
+                        color: '#FFFFFF',
+                        size: 24,
+                        strokeWidth: 2
+                    })}
+                </MotiView>
+            </PlatformPressable>
+        );
+    }
 
     return (
         <PlatformPressable
