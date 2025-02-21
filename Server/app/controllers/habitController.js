@@ -368,7 +368,7 @@ const logHabitCompletion = async (req, res) => {
     try {
         const {habit_id} = req.params; // getting data from params
         const {completed_at, notes, mood_rating} = req.body; // getting data from frontend
-        const user_id = req.user.id; // getting user_id from auth middleware
+        const user_id = req.user; // getting user_id from auth middleware
 
 
         // Validate habit ID
@@ -406,8 +406,10 @@ const logHabitCompletion = async (req, res) => {
             });
         }
 
+        console.log(habit)
+
         // For daily habits, check if already logged today
-        if (habit.frequencyType.name === 'Daily') {
+        if (habit.frequency_type_id === 1) {
             const existingLog = await prisma.habitLog.findFirst({
                 where: {
                     habit_id: parseInt(habit_id), user_id: parseInt(user_id), completed_at: {
@@ -450,6 +452,12 @@ const logHabitCompletion = async (req, res) => {
                 mood_rating: mood_rating ? parseInt(mood_rating) : null
             }
         });
+
+        const user = await prisma.user.update({
+            data:{
+                points_gained : + 30
+            }
+        })
 
         // Get current streak info
         const streak = await prisma.habitStreak.findUnique({

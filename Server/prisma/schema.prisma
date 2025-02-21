@@ -28,6 +28,11 @@ model User {
   sentRequests     FriendRequest[] @relation("sentRequests")
   receivedRequests FriendRequest[] @relation("receivedRequests")
 
+  // Chat system connections
+  chat_participants ChatParticipant[] // Chats the user participates in
+  sent_messages     Message[] // Messages sent by the user
+  message_reactions MessageReaction[] // User's emoji reactions to messages
+
   // Habit tracking related connections
   habits       Habit[] // List of habits created by the user
   habitLogs    HabitLog[] // Record of completed habits
@@ -84,8 +89,6 @@ enum RequestStatus {
   ACCEPTED
   REJECTED
 }
-
-// ============= HABIT TRACKING MODELS =============
 
 // Different areas of life a habit can belong to (Health, Finance, etc.)
 model HabitDomain {
@@ -194,4 +197,91 @@ model HabitReminder {
 
   habit_id Int
   habit    Habit @relation(fields: [habit_id], references: [habit_id])
+}
+
+// Represents a chat space where users can communicate
+// Can be either a direct message between two users or a group chat
+model ChatRoom {
+  room_id    Int      @id @default(autoincrement())
+  name       String? // Optional name for group chats (null for DMs)
+  type       ChatType @default(DIRECT) // Type of chat room (DIRECT or GROUP)
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  // Related records
+  messages     Message[] // All messages in this chat room
+  participants ChatParticipant[] // Users participating in this chat room
+
+  @@map("chat_rooms")
+}
+
+// Manages user participation in chat rooms and Creates many-to-many relationship between users and chat rooms with additional attributes
+model ChatParticipant {
+  participant_id Int      @id @default(autoincrement())
+  user_id        Int // Reference to the participating user
+  room_id        Int // Reference to the chat room
+  joined_at      DateTime @default(now()) // When user joined the chat
+  last_read_at   DateTime @default(now()) // Timestamp of user's last read
+  is_admin       Boolean  @default(false) // Whether user has admin privileges
+  is_muted       Boolean  @default(false) // Whether user has muted the chat
+
+  // Connections to other tables
+  user      User     @relation(fields: [user_id], references: [user_id])
+  chat_room ChatRoom @relation(fields: [room_id], references: [room_id])
+
+  @@unique([user_id, room_id]) // User can only be participant once per room
+  @@map("chat_participants")
+}
+
+// Stores individual chat messages and their metadata
+model Message {
+  message_id   Int         @id @default(autoincrement())
+  room_id      Int // Reference to the containing chat room
+  sender_id    Int // Reference to the message sender
+  content      String // Actual message content
+  message_type MessageType @default(TEXT) // Type of message content
+  is_edited    Boolean     @default(false) // Whether message has been edited
+  created_at   DateTime    @default(now())
+  updated_at   DateTime    @updatedAt
+
+  // Support for message replies
+  reply_to_id Int? // ID of message being replied to (if any)
+  reply_to    Message?  @relation("ReplyChain", fields: [reply_to_id], references: [message_id])
+  replies     Message[] @relation("ReplyChain") // Messages replying to this one
+
+  // Connections to other tables
+  chat_room ChatRoom          @relation(fields: [room_id], references: [room_id])
+  sender    User              @relation(fields: [sender_id], references: [user_id])
+  reactions MessageReaction[] // Emoji reactions to this message
+
+  @@map("messages")
+}
+
+// Tracks emoji reactions to messages and allows users to react to messages with emojis while ensuring unique reactions
+model MessageReaction {
+  reaction_id Int      @id @default(autoincrement())
+  message_id  Int // Reference to the reacted message
+  user_id     Int // Reference to the reacting user
+  emoji       String // The emoji used for the reaction
+  created_at  DateTime @default(now())
+
+  // Connections to other tables
+  message Message @relation(fields: [message_id], references: [message_id])
+  user    User    @relation(fields: [user_id], references: [user_id])
+
+  @@unique([message_id, user_id, emoji]) // User can only react once with each emoji
+  @@map("message_reactions")
+}
+
+// Chat system enums
+enum ChatType {
+  DIRECT // One-on-one chat between two users
+  GROUP // Chat room with multiple participants
+}
+
+enum MessageType {
+  TEXT // Regular text message
+  IMAGE // Image attachment
+  FILE // File attachment
+  SYSTEM // System-generated message
 }
