@@ -11,7 +11,7 @@ import { router } from "expo-router";
 import RenderFrequencyInput from '../../components/RenderFrequencyInput';
 import { domains } from '../../constants/domains';
 
-const AddHabit = ({ navigation }) => {
+const Add = () => {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
 
@@ -41,7 +41,7 @@ const AddHabit = ({ navigation }) => {
         try {
             const response = await addHabit(habitData);
             Alert.alert('Success', 'Habit created successfully!');
-            navigation.goBack();
+
         } catch (error) {
             Alert.alert('Error', error.message);
         }
@@ -341,4 +341,4 @@ const AddHabit = ({ navigation }) => {
     );
 };
 
-export default AddHabit;
+export default Add
