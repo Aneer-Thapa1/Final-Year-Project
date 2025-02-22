@@ -1,51 +1,102 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, useColorScheme, Animated, Dimensions, StatusBar } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, useColorScheme, Animated, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getUserHabits, logHabitCompletion, getUpcomingHabits } from '../../services/habitService';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
-import { BlurView } from 'expo-blur';
-
-const SCREEN_WIDTH = Dimensions.get('window').width;
+import { MotiView } from 'moti';
+import * as Haptics from 'expo-haptics';
+import HabitCard from '../../components/HabitCard';
+import EmptyState from '../../components/EmptyState';
+import UpcomingHabit from '../../components/UpcomingHabit';
 
 const Home = () => {
     const [habits, setHabits] = useState([]);
     const [upcomingHabits, setUpcomingHabits] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const swipeableRefs = useRef({});
-    const scrollY = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
         fetchHabits();
-        StatusBar.setBarStyle(isDark ? 'light-content' : 'dark-content');
-    }, [isDark]);
+    }, []);
+
+    useEffect(() => {
+        if (error) {
+            const timer = setTimeout(() => {
+                setError(null);
+            }, 3000);
+            return () => clearTimeout(timer);
+        }
+    }, [error]);
 
     const fetchHabits = async () => {
         try {
-            const habitsResponse = await getUserHabits();
-            const upcomingResponse = await getUpcomingHabits();
+            setIsLoading(true);
+            setError(null);
+            const [habitsResponse, upcomingResponse] = await Promise.all([
+                getUserHabits(),
+                getUpcomingHabits()
+            ]);
             setHabits(habitsResponse.data);
             setUpcomingHabits(upcomingResponse.data);
         } catch (error) {
-            console.error("Error fetching habits:", error);
+            setError(error.response?.data?.message || 'Failed to fetch habits');
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        } finally {
+            setIsLoading(false);
         }
+    };
+
+    const isHabitCompletedToday = (habitLogs) => {
+        if (!habitLogs?.length) return false;
+        const today = new Date();
+        return habitLogs.some(log => {
+            const logDate = new Date(log.completed_at);
+            return logDate.getDate() === today.getDate() &&
+                logDate.getMonth() === today.getMonth() &&
+                logDate.getFullYear() === today.getFullYear();
+        });
     };
 
     const handleCompleteHabit = async (habitId) => {
+        // First check if habit is already completed
+        const habit = habits.find(h => h.habit_id === habitId);
+        if (!habit || isHabitCompletedToday(habit.habitLogs)) {
+            return; // Early return if already completed
+        }
+
         try {
-            await logHabitCompletion(habitId, { completed_at: new Date() });
-            if (swipeableRefs.current[habitId]) {
-                swipeableRefs.current[habitId].close();
+            setError(null);
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+            const response = await logHabitCompletion(habitId, {
+                completed_at: new Date(),
+                mood_rating: 5
+            });
+
+            if (response.success) {
+                if (swipeableRefs.current[habitId]) {
+                    swipeableRefs.current[habitId].close();
+                }
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                fetchHabits();
+            } else {
+                throw new Error(response.message || 'Failed to complete habit');
             }
-            fetchHabits();
         } catch (error) {
-            console.error("Error completing habit:", error);
+            setError(error.message);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         }
     };
 
-    const renderRightActions = (progress, dragX, habitId) => {
+    const renderRightActions = (progress, dragX, habit) => {
+        // Don't render if completed
+        if (isHabitCompletedToday(habit.habitLogs)) return null;
+
         const scale = dragX.interpolate({
             inputRange: [-100, 0],
             outputRange: [1, 0.8],
@@ -60,179 +111,157 @@ const Home = () => {
 
         return (
             <Animated.View
-                style={[
-                    { opacity },
-                    { transform: [{ scale }] }
-                ]}
+                style={[{ opacity }, { transform: [{ scale }] }]}
                 className="flex-row items-center justify-center pr-4"
             >
                 <TouchableOpacity
-                    onPress={() => handleCompleteHabit(habitId)}
+                    onPress={() => handleCompleteHabit(habit.habit_id)}
                     className="bg-primary-500 justify-center items-center p-6 rounded-2xl"
                 >
                     <Ionicons name="checkmark-circle" size={32} color="white" />
-                    <Text className="text-white font-montserrat-semibold text-sm mt-2">Complete</Text>
+                    <Text className="text-white font-montserrat-medium text-sm mt-2">
+                        Complete
+                    </Text>
                 </TouchableOpacity>
             </Animated.View>
         );
     };
 
     const renderHabitItem = (item, index) => {
-        const scaleY = scrollY.interpolate({
-            inputRange: [-1, 0, 100 * index, 100 * (index + 2)],
-            outputRange: [1, 1, 1, 0.9],
-            extrapolate: 'clamp',
-        });
+        const isCompleted = isHabitCompletedToday(item.habitLogs);
 
         return (
-            <Animated.View
-                style={{ transform: [{ scaleY }] }}
+            <MotiView
+                from={{ opacity: 0, translateY: 20 }}
+                animate={{ opacity: 1, translateY: 0 }}
+                transition={{
+                    type: 'timing',
+                    duration: 500,
+                    delay: index * 100
+                }}
                 key={item.habit_id}
             >
                 <Swipeable
                     ref={ref => swipeableRefs.current[item.habit_id] = ref}
                     renderRightActions={(progress, dragX) =>
-                        renderRightActions(progress, dragX, item.habit_id)
+                        renderRightActions(progress, dragX, item)
                     }
+                    enabled={!isCompleted}
                     rightThreshold={40}
                     overshootRight={false}
+                    friction={2}
+                    onSwipeableWillOpen={() => {
+                        // Close other open swipeables
+                        Object.keys(swipeableRefs.current).forEach(key => {
+                            if (key !== item.habit_id && swipeableRefs.current[key]) {
+                                swipeableRefs.current[key].close();
+                            }
+                        });
+                    }}
                 >
-                    <View className={`mb-4 rounded-card shadow-card-${isDark ? 'dark' : 'light'} 
-                        ${isDark ? 'bg-theme-card-dark' : 'bg-theme-card'}`}>
-                        <View className="p-card-padding">
-                            <View className="flex-row justify-between items-center mb-element-gap">
-                                <Text className={`text-lg font-montserrat-bold 
-                                    ${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`}>
-                                    {item.name}
-                                </Text>
-                                <View className={`px-4 py-1.5 rounded-pill 
-                                    ${isDark ? 'bg-secondary-900' : 'bg-secondary-100'}`}>
-                                    <Text className={`text-xs font-montserrat-medium
-                                        ${isDark ? 'text-secondary-300' : 'text-secondary-700'}`}>
-                                        {item.frequencyType?.name}
-                                    </Text>
-                                </View>
-                            </View>
-                            <Text className={`mb-4 text-sm font-montserrat leading-relaxed
-                                ${isDark ? 'text-theme-text-secondary-dark' : 'text-theme-text-secondary'}`}>
-                                {item.description}
-                            </Text>
-                            <View className="flex-row justify-between items-center">
-                                <View className="flex-row items-center">
-                                    <View className={`p-2 rounded-full
-                                        ${isDark ? 'bg-primary-900' : 'bg-primary-100'}`}>
-                                        <Ionicons
-                                            name="time-outline"
-                                            size={18}
-                                            color={isDark ? '#86EFAC' : '#15803D'}
-                                        />
-                                    </View>
-                                    <Text className={`ml-2 text-sm font-montserrat
-                                        ${isDark ? 'text-theme-text-muted-dark' : 'text-theme-text-muted'}`}>
-                                        {item.frequency_value} times {item.frequencyType?.name.toLowerCase()}
-                                    </Text>
-                                </View>
-                                <View className={`flex-row items-center px-3 py-1.5 rounded-full
-                                    ${isDark ? 'bg-accent-900' : 'bg-accent-100'}`}>
-                                    <Ionicons
-                                        name="flame"
-                                        size={18}
-                                        color={isDark ? '#FCD34D' : '#B45309'}
-                                    />
-                                    <Text className={`ml-1 font-montserrat-semibold
-                                        ${isDark ? 'text-accent-300' : 'text-accent-700'}`}>
-                                        {item.streak?.current_streak || 0} days
-                                    </Text>
-                                </View>
-                            </View>
-                        </View>
-                    </View>
+                    <HabitCard
+                        habit={item}
+                        isCompleted={isCompleted}
+                        isDark={isDark}
+                    />
                 </Swipeable>
-            </Animated.View>
+            </MotiView>
         );
     };
 
+    if (isLoading) {
+        return (
+            <View className={`flex-1 justify-center items-center ${isDark ? 'bg-theme-background-dark' : 'bg-gray-50'}`}>
+                <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} />
+            </View>
+        );
+    }
+
     return (
-        <GestureHandlerRootView className={`flex-1 ${isDark ? 'bg-theme-background-dark' : 'bg-theme-background'}`}>
+        <GestureHandlerRootView className={`flex-1 ${isDark ? 'bg-theme-background-dark' : 'bg-gray-50'}`}>
             <SafeAreaView className="flex-1">
-                <Animated.ScrollView
+                <ScrollView
                     className="flex-1"
-                    contentContainerStyle={{ padding: 16 }}
                     showsVerticalScrollIndicator={false}
-                    onScroll={Animated.event(
-                        [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-                        { useNativeDriver: true }
-                    )}
                 >
-                    <View className="mb-section-spacing mt-4">
-                        <Text className={`text-3xl font-montserrat-bold mb-2
-                            ${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`}>
-                            Your Habits
-                        </Text>
-                        <Text className={`text-sm font-montserrat
-                            ${isDark ? 'text-theme-text-muted-dark' : 'text-theme-text-muted'}`}>
-                            Swipe left to mark a habit as complete
-                        </Text>
-                    </View>
+                    <MotiView
+                        from={{ opacity: 0, translateY: 10 }}
+                        animate={{ opacity: 1, translateY: 0 }}
+                        transition={{ type: 'timing', duration: 600 }}
+                        className="px-4"
+                    >
+                        {error && (
+                            <MotiView
+                                from={{ opacity: 0, translateY: -10 }}
+                                animate={{ opacity: 1, translateY: 0 }}
+                                exit={{ opacity: 0, translateY: -10 }}
+                                className="bg-error-500/10 px-4 py-3 rounded-xl mb-4"
+                            >
+                                <Text className="text-error-500 font-montserrat-medium text-sm">
+                                    {error}
+                                </Text>
+                            </MotiView>
+                        )}
 
-                    {habits.map((item, index) => renderHabitItem(item, index))}
-
-                    <View className="mt-section-spacing mb-6">
-                        <Text className={`text-xl font-montserrat-bold mb-4
-                            ${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`}>
-                            Coming Up Next
-                        </Text>
-                        <ScrollView
-                            horizontal
-                            showsHorizontalScrollIndicator={false}
-                            contentContainerStyle={{ paddingRight: 16 }}
-                            className="gap-4"
-                        >
-                            {upcomingHabits.slice(0, 3).map((item) => (
-                                <View
-                                    key={item.habit_id}
-                                    className={`p-4 rounded-lg shadow-md w-48
-                                        ${isDark ? 'bg-theme-card-dark' : 'bg-theme-card'}`}
-                                >
-                                    <Text className={`font-montserrat-semibold mb-2
-                                        ${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`}>
-                                        {item.name}
-                                    </Text>
-                                    <View className="flex-row items-center mt-2">
-                                        <View className={`p-1.5 rounded-full
-                                            ${isDark ? 'bg-secondary-900' : 'bg-secondary-100'}`}>
-                                            <Ionicons
-                                                name="calendar"
-                                                size={14}
-                                                color={isDark ? '#C4B5FD' : '#5B21B6'}
-                                            />
-                                        </View>
-                                        <Text className={`text-xs ml-2 font-montserrat
-                                            ${isDark ? 'text-theme-text-muted-dark' : 'text-theme-text-muted'}`}>
-                                            {new Date(item.next_due_date).toLocaleDateString()}
-                                        </Text>
-                                    </View>
-                                </View>
-                            ))}
-                        </ScrollView>
-                    </View>
-
-                    <View className="mt-2 flex-row justify-between items-center mb-8">
-                        <Text className={`text-xl font-montserrat-bold
-                            ${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`}>
-                            Suggested Habits
-                        </Text>
-                        <TouchableOpacity
-                            className={`px-4 py-2 rounded-button
-                                ${isDark ? 'bg-primary-900' : 'bg-primary-100'}`}
-                        >
-                            <Text className={`font-montserrat-semibold text-sm
-                                ${isDark ? 'text-primary-300' : 'text-primary-700'}`}>
-                                View All
+                        <View className="mb-8">
+                            <Text className={`text-3xl font-montserrat-bold mb-2
+                                ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                Your Habits
                             </Text>
-                        </TouchableOpacity>
-                    </View>
-                </Animated.ScrollView>
+                            <Text className={`text-sm font-montserrat
+                                ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                {habits.length > 0
+                                    ? 'Swipe left to mark a habit as complete'
+                                    : 'Add your first habit to get started'}
+                            </Text>
+                        </View>
+
+                        {habits.length === 0 ? (
+                            <EmptyState isDark={isDark} />
+                        ) : (
+                            habits.map((item, index) => renderHabitItem(item, index))
+                        )}
+
+                        {upcomingHabits.length > 0 && (
+                            <View className="mt-8 mb-6">
+                                <Text className={`text-xl font-montserrat-bold mb-4
+                                    ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                    Coming Up Next
+                                </Text>
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    contentContainerStyle={{ paddingRight: 16 }}
+                                    className="gap-4"
+                                >
+                                    {upcomingHabits.slice(0, 3).map((item, index) => (
+                                        <UpcomingHabit
+                                            key={item.habit_id}
+                                            habit={item}
+                                            index={index}
+                                            isDark={isDark}
+                                        />
+                                    ))}
+                                </ScrollView>
+                            </View>
+                        )}
+
+                        <View className="mt-2 flex-row justify-between items-center mb-8">
+                            <Text className={`text-xl font-montserrat-bold
+                                ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                Suggested Habits
+                            </Text>
+                            <TouchableOpacity
+                                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
+                                className="px-4 py-2 rounded-xl bg-primary-500/10"
+                            >
+                                <Text className="font-montserrat-medium text-sm text-primary-500">
+                                    View All
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+                    </MotiView>
+                </ScrollView>
             </SafeAreaView>
         </GestureHandlerRootView>
     );
