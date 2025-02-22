@@ -2,7 +2,7 @@ const express = require("express");
 const { createServer } = require("http");
 const morgan = require("morgan");
 const { errorLogger } = require("./app/middleware/loggerMiddleware");
-const initializeSocket = require("./app/config/socketConfig"); // Add this line
+const { initializeSocket } = require("./app/config/socketConfig");
 require("dotenv").config();
 const routes = require("./app/routes/route.js");
 var cors = require("cors");

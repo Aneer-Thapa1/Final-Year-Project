@@ -1,267 +1,223 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, useColorScheme, Animated, ActivityIndicator } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Text, ScrollView, useColorScheme, TouchableOpacity, Animated } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getUserHabits, logHabitCompletion, getUpcomingHabits } from '../../services/habitService';
-import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
-import { MotiView } from 'moti';
+import { Clock } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import HabitCard from '../../components/HabitCard';
-import EmptyState from '../../components/EmptyState';
-import UpcomingHabit from '../../components/UpcomingHabit';
 
-const Home = () => {
-    const [habits, setHabits] = useState([]);
-    const [upcomingHabits, setUpcomingHabits] = useState([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const colorScheme = useColorScheme();
-    const isDark = colorScheme === 'dark';
-    const swipeableRefs = useRef({});
+const HabitCard = ({ habit, isDark, onComplete, isCompleted }) => {
+    const swipeableRef = useRef(null);
 
-    useEffect(() => {
-        fetchHabits();
-    }, []);
-
-    useEffect(() => {
-        if (error) {
-            const timer = setTimeout(() => {
-                setError(null);
-            }, 3000);
-            return () => clearTimeout(timer);
-        }
-    }, [error]);
-
-    const fetchHabits = async () => {
-        try {
-            setIsLoading(true);
-            setError(null);
-            const [habitsResponse, upcomingResponse] = await Promise.all([
-                getUserHabits(),
-                getUpcomingHabits()
-            ]);
-            setHabits(habitsResponse.data);
-            setUpcomingHabits(upcomingResponse.data);
-        } catch (error) {
-            setError(error.response?.data?.message || 'Failed to fetch habits');
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const isHabitCompletedToday = (habitLogs) => {
-        if (!habitLogs?.length) return false;
-        const today = new Date();
-        return habitLogs.some(log => {
-            const logDate = new Date(log.completed_at);
-            return logDate.getDate() === today.getDate() &&
-                logDate.getMonth() === today.getMonth() &&
-                logDate.getFullYear() === today.getFullYear();
-        });
-    };
-
-    const handleCompleteHabit = async (habitId) => {
-        // First check if habit is already completed
-        const habit = habits.find(h => h.habit_id === habitId);
-        if (!habit || isHabitCompletedToday(habit.habitLogs)) {
-            return; // Early return if already completed
-        }
-
-        try {
-            setError(null);
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-            const response = await logHabitCompletion(habitId, {
-                completed_at: new Date(),
-                mood_rating: 5
-            });
-
-            if (response.success) {
-                if (swipeableRefs.current[habitId]) {
-                    swipeableRefs.current[habitId].close();
-                }
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                fetchHabits();
-            } else {
-                throw new Error(response.message || 'Failed to complete habit');
-            }
-        } catch (error) {
-            setError(error.message);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        }
-    };
-
-    const renderRightActions = (progress, dragX, habit) => {
-        // Don't render if completed
-        if (isHabitCompletedToday(habit.habitLogs)) return null;
-
+    const renderRightActions = (progress, dragX) => {
         const scale = dragX.interpolate({
             inputRange: [-100, 0],
-            outputRange: [1, 0.8],
-            extrapolate: 'clamp',
-        });
-
-        const opacity = dragX.interpolate({
-            inputRange: [-100, -50, 0],
-            outputRange: [1, 0.5, 0],
+            outputRange: [1, 0],
             extrapolate: 'clamp',
         });
 
         return (
-            <Animated.View
-                style={[{ opacity }, { transform: [{ scale }] }]}
-                className="flex-row items-center justify-center pr-4"
-            >
-                <TouchableOpacity
-                    onPress={() => handleCompleteHabit(habit.habit_id)}
-                    className="bg-primary-500 justify-center items-center p-6 rounded-2xl"
-                >
-                    <Ionicons name="checkmark-circle" size={32} color="white" />
-                    <Text className="text-white font-montserrat-medium text-sm mt-2">
-                        Complete
-                    </Text>
-                </TouchableOpacity>
-            </Animated.View>
-        );
-    };
-
-    const renderHabitItem = (item, index) => {
-        const isCompleted = isHabitCompletedToday(item.habitLogs);
-
-        return (
-            <MotiView
-                from={{ opacity: 0, translateY: 20 }}
-                animate={{ opacity: 1, translateY: 0 }}
-                transition={{
-                    type: 'timing',
-                    duration: 500,
-                    delay: index * 100
+            <TouchableOpacity
+                onPress={() => {
+                    onComplete();
+                    swipeableRef.current?.close();
                 }}
-                key={item.habit_id}
+                className="bg-primary-500 justify-center items-center rounded-2xl mr-4"
+                style={{ width: 75 }}
             >
-                <Swipeable
-                    ref={ref => swipeableRefs.current[item.habit_id] = ref}
-                    renderRightActions={(progress, dragX) =>
-                        renderRightActions(progress, dragX, item)
-                    }
-                    enabled={!isCompleted}
-                    rightThreshold={40}
-                    overshootRight={false}
-                    friction={2}
-                    onSwipeableWillOpen={() => {
-                        // Close other open swipeables
-                        Object.keys(swipeableRefs.current).forEach(key => {
-                            if (key !== item.habit_id && swipeableRefs.current[key]) {
-                                swipeableRefs.current[key].close();
-                            }
-                        });
-                    }}
-                >
-                    <HabitCard
-                        habit={item}
-                        isCompleted={isCompleted}
-                        isDark={isDark}
-                    />
-                </Swipeable>
-            </MotiView>
+                <Animated.View style={{ transform: [{ scale }] }}>
+                    <Text className="text-white text-3xl mb-1">✓</Text>
+                    <Text className="text-white text-xs font-montserrat-medium">Complete</Text>
+                </Animated.View>
+            </TouchableOpacity>
         );
     };
-
-    if (isLoading) {
-        return (
-            <View className={`flex-1 justify-center items-center ${isDark ? 'bg-theme-background-dark' : 'bg-gray-50'}`}>
-                <ActivityIndicator size="large" color={isDark ? '#FFFFFF' : '#000000'} />
-            </View>
-        );
-    }
 
     return (
-        <GestureHandlerRootView className={`flex-1 ${isDark ? 'bg-theme-background-dark' : 'bg-gray-50'}`}>
-            <SafeAreaView className="flex-1">
-                <ScrollView
-                    className="flex-1"
-                    showsVerticalScrollIndicator={false}
-                >
-                    <MotiView
-                        from={{ opacity: 0, translateY: 10 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        transition={{ type: 'timing', duration: 600 }}
-                        className="px-4"
-                    >
-                        {error && (
-                            <MotiView
-                                from={{ opacity: 0, translateY: -10 }}
-                                animate={{ opacity: 1, translateY: 0 }}
-                                exit={{ opacity: 0, translateY: -10 }}
-                                className="bg-error-500/10 px-4 py-3 rounded-xl mb-4"
-                            >
-                                <Text className="text-error-500 font-montserrat-medium text-sm">
-                                    {error}
-                                </Text>
-                            </MotiView>
-                        )}
-
-                        <View className="mb-8">
-                            <Text className={`text-3xl font-montserrat-bold mb-2
-                                ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                Your Habits
-                            </Text>
-                            <Text className={`text-sm font-montserrat
-                                ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                                {habits.length > 0
-                                    ? 'Swipe left to mark a habit as complete'
-                                    : 'Add your first habit to get started'}
-                            </Text>
-                        </View>
-
-                        {habits.length === 0 ? (
-                            <EmptyState isDark={isDark} />
-                        ) : (
-                            habits.map((item, index) => renderHabitItem(item, index))
-                        )}
-
-                        {upcomingHabits.length > 0 && (
-                            <View className="mt-8 mb-6">
-                                <Text className={`text-xl font-montserrat-bold mb-4
-                                    ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                    Coming Up Next
-                                </Text>
-                                <ScrollView
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    contentContainerStyle={{ paddingRight: 16 }}
-                                    className="gap-4"
-                                >
-                                    {upcomingHabits.slice(0, 3).map((item, index) => (
-                                        <UpcomingHabit
-                                            key={item.habit_id}
-                                            habit={item}
-                                            index={index}
-                                            isDark={isDark}
-                                        />
-                                    ))}
-                                </ScrollView>
+        <Swipeable
+            ref={swipeableRef}
+            renderRightActions={renderRightActions}
+            overshootRight={false}
+            enabled={!isCompleted}
+        >
+            <View className={`mb-4 p-4 rounded-2xl ${isDark ? 'bg-[#252F3C]' : 'bg-white'} 
+                ${isCompleted ? 'opacity-60' : ''}`}
+            >
+                <View className="flex-row justify-between items-center mb-3">
+                    <View className="flex-row items-center">
+                        <Text className={`text-lg font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            {habit.title}
+                        </Text>
+                        {isCompleted && (
+                            <View className="ml-2 bg-green-500/20 p-1 rounded-full">
+                                <Text className="text-green-500">✓</Text>
                             </View>
                         )}
-
-                        <View className="mt-2 flex-row justify-between items-center mb-8">
-                            <Text className={`text-xl font-montserrat-bold
-                                ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                Suggested Habits
-                            </Text>
-                            <TouchableOpacity
-                                onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-                                className="px-4 py-2 rounded-xl bg-primary-500/10"
-                            >
-                                <Text className="font-montserrat-medium text-sm text-primary-500">
-                                    View All
-                                </Text>
-                            </TouchableOpacity>
+                    </View>
+                    <View className={`px-3 py-1 rounded-full bg-primary-500/20`}>
+                        <Text className="text-xs font-montserrat-medium text-primary-500">
+                            {habit.frequency}
+                        </Text>
+                    </View>
+                </View>
+                <Text className={`mb-4 text-sm font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                    {habit.description}
+                </Text>
+                <View className="flex-row justify-between items-center">
+                    <View className="flex-row items-center">
+                        <View className="p-2 rounded-xl bg-primary-500/10">
+                            <Clock size={18} color={isDark ? '#9CA3AF' : '#4B5563'} />
                         </View>
-                    </MotiView>
-                </ScrollView>
+                        <Text className={`ml-2 text-sm font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                            {habit.time}
+                        </Text>
+                    </View>
+                    <View className="flex-row items-center">
+                        <Text>🔥</Text>
+                        <Text className="ml-1 font-montserrat-semibold text-accent-500">
+                            {habit.streak} days
+                        </Text>
+                    </View>
+                </View>
+            </View>
+        </Swipeable>
+    );
+};
+
+const UpcomingHabit = ({ habit, isDark }) => (
+    <View className={`mr-4 p-4 rounded-2xl min-w-[200] ${isDark ? 'bg-[#252F3C]' : 'bg-white'}`}>
+        <Text className={`font-montserrat-semibold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            {habit.title}
+        </Text>
+        <View className="flex-row items-center mt-2">
+            <View className="p-1.5 rounded-full bg-primary-500/10">
+                <Clock size={16} color={isDark ? '#9CA3AF' : '#4B5563'} />
+            </View>
+            <Text className={`text-xs ml-2 font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                {habit.time}
+            </Text>
+        </View>
+    </View>
+);
+
+const SuggestedHabit = ({ habit, isDark }) => (
+    <View className={`p-4 rounded-2xl mb-4 ${isDark ? 'bg-[#252F3C]' : 'bg-white'}`}>
+        <Text className={`font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            {habit.title}
+        </Text>
+        <Text className={`mt-2 text-sm font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+            {habit.description}
+        </Text>
+    </View>
+);
+
+const Home = () => {
+    const colorScheme = useColorScheme();
+    const isDark = colorScheme === 'dark';
+
+    const [habits, setHabits] = useState([
+        {
+            id: 1,
+            title: 'Morning Meditation',
+            description: '15 minutes of mindfulness meditation',
+            frequency: 'Daily',
+            time: '1 time daily',
+            streak: 5,
+            completed: false
+        },
+        {
+            id: 2,
+            title: 'Evening Run',
+            description: '30 minutes jogging',
+            frequency: 'Daily',
+            time: '1 time daily',
+            streak: 3,
+            completed: false
+        }
+    ]);
+
+    const upcomingHabits = [
+        {
+            id: 1,
+            title: 'Evening Run',
+            time: 'Today, 6:00 PM'
+        },
+        {
+            id: 2,
+            title: 'Reading',
+            time: 'Today, 8:00 PM'
+        }
+    ];
+
+    const suggestedHabits = [
+        {
+            id: 1,
+            title: 'Daily Reading',
+            description: 'Read for 30 minutes every day'
+        },
+        {
+            id: 2,
+            title: 'Morning Yoga',
+            description: '20 minutes of morning stretching'
+        }
+    ];
+
+    const handleComplete = (habitId) => {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setHabits(habits.map(habit =>
+            habit.id === habitId ? { ...habit, completed: true } : habit
+        ));
+    };
+
+    return (
+        <GestureHandlerRootView className={`flex-1 ${isDark ? 'bg-[#1C2732]' : 'bg-gray-50'}`}>
+            <SafeAreaView className="flex-1" edges={['top']}>
+                <View className="px-4">
+                    {/* Habits List */}
+                    {habits.map(habit => (
+                        <HabitCard
+                            key={habit.id}
+                            habit={habit}
+                            isDark={isDark}
+                            onComplete={() => handleComplete(habit.id)}
+                            isCompleted={habit.completed}
+                        />
+                    ))}
+
+                    {/* Coming Up Next Section */}
+                    <View className="mt-8 mb-6">
+                        <Text className={`text-xl font-montserrat-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            Coming Up Next
+                        </Text>
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={{ paddingRight: 16 }}
+                        >
+                            {upcomingHabits.map(habit => (
+                                <UpcomingHabit
+                                    key={habit.id}
+                                    habit={habit}
+                                    isDark={isDark}
+                                />
+                            ))}
+                        </ScrollView>
+                    </View>
+
+                    {/* Suggested Habits Section */}
+                    <View className="mt-2 mb-8">
+                        <Text className={`text-xl font-montserrat-bold mb-4 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            Suggested Habits
+                        </Text>
+                        {suggestedHabits.map(habit => (
+                            <SuggestedHabit
+                                key={habit.id}
+                                habit={habit}
+                                isDark={isDark}
+                            />
+                        ))}
+                    </View>
+                </View>
             </SafeAreaView>
         </GestureHandlerRootView>
     );
