@@ -19,20 +19,20 @@ const Blog = () => {
         {
             id: '1',
             user: {
-                name: 'Anshu Karki',
+                name: 'Kamesh Chaudary',
                 avatar: 'https://your-avatar-url.com/1',
             },
-            text: 'This is so beautiful!',
+            text: 'Thank you for this amazing post!',
             time: '2h ago',
             likes: 24,
             replies: [
                 {
                     id: '1.1',
                     user: {
-                        name: 'Anir Jung Thapa',
+                        name: 'Anjil Neupane',
                         avatar: 'https://your-avatar-url.com/2',
                     },
-                    text: 'Totally agree, but you are more beautiful!',
+                    text: 'Totally agree, it is amazing!',
                     time: '1h ago',
                     likes: 12,
                 }
