@@ -114,7 +114,7 @@ const Header = React.memo(() => {
                                     className="w-9 h-9 rounded-full"
                                 />
                                 <Text className={`text-xl ${Platform.OS === 'ios' ? 'font-montserrat-medium' : 'font-montserrat-bold'} ${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`}>
-                                    Hi, {userDetails?.user?.user?.user_name}
+                                    Hi, {userDetails?.user?.user_name}
                                 </Text>
                             </TouchableOpacity>
 

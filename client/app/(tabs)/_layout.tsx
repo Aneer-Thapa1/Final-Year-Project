@@ -1,4 +1,4 @@
-import { useColorScheme } from 'react-native';
+import {useColorScheme, View} from 'react-native';
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { TabBar } from "@/components/TabBar";
@@ -9,7 +9,7 @@ const TabsLayout = () => {
     const isDark = colorScheme === 'dark';
 
     return (
-        <>
+        <View className={`flex-1 ${isDark ? 'bg-theme-background-dark' : 'bg-gray-50'}`}>
             <Header />
             <Tabs tabBar={props => <TabBar {...props} options={{ headerShown: false }} />}>
                 <Tabs.Screen name='index' options={{ title: 'Home', headerShown: false }} />
@@ -18,7 +18,7 @@ const TabsLayout = () => {
                 <Tabs.Screen name='analytics' options={{ title: 'Analytics', headerShown: false }} />
                 <Tabs.Screen name='rank' options={{ title: 'Rank', headerShown: false }} />
             </Tabs>
-        </>
+        </View>
     );
 };
 
