@@ -23,7 +23,7 @@ const Rank = () => {
     const mockLeaderboardData: LeaderboardUser[] = [
         {
             id: 1,
-            name: "Sarah Johnson",
+            name: "Simrika Luitel",
             avatar: "/api/placeholder/40/40",
             points: 2840,
             streak: 45,

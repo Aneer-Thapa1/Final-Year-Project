@@ -24,7 +24,7 @@ const httpServer = createServer(app);
 // Initialize Socket.IO with the configuration
 const io = initializeSocket(httpServer);
 
-app.use(errorLogger);
+// app.use(errorLogger);
 
 httpServer.listen(process.env.PORT, () => {
     console.log(`Server is running on http://localhost:${process.env.PORT}`);

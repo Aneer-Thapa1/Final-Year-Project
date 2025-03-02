@@ -53,12 +53,12 @@ const Profile = () => {
                                     <Text className={`text-xl font-montserrat-bold mb-2 ${
                                         isDark ? 'text-white' : 'text-gray-900'
                                     }`}>
-                                        {userDetails?.user?.user_name}
+                                        {userDetails?.user?.user?.user_name}
                                     </Text>
                                     <View className="flex-row gap-2 items-center bg-primary-100 rounded-full py-2 px-4 self-start">
                                         <Trophy size={16} className="text-primary-500 mr-2" />
                                         <Text className="text-primary-700 font-montserrat-medium">
-                                            {userDetails?.user?.points_gained} Points
+                                            {userDetails?.user?.user?.points_gained} Points
                                         </Text>
                                     </View>
                                 </View>

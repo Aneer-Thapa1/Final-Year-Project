@@ -40,7 +40,7 @@ function RootLayoutNav() {
             checkAuthStatus()
           ]);
 
-          console.log("from layout", userData);
+
 
           // Determine the initial route
           let initialRoute = '/onboarding';

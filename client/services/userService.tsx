@@ -43,14 +43,14 @@ export const logoutUser = async () => {
 export const checkAuthStatus = async () => {
     try {
         const token = await AsyncStorage.getItem('token');
-        console.log(token);
+
         if (!token) return null;
 
 
         // Validate token with your backend
         const response = await fetchData('/api/users/verifyUser');
 
-        console.log("res from services", response.user);
+
         if (response) {
             return response;
         } else {
