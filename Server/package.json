@@ -4,7 +4,7 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "nodemon index.js"
+    "start": "node prisma/seed.js && nodemon index.js"
   },
   "prisma": {
     "seed": "node prisma/dataSeed.js"

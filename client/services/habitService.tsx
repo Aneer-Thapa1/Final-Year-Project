@@ -1,36 +1,35 @@
 import { fetchData, postData, updateData } from './api';
 
 // Interface for habit data
-interface HabitData {
-    name: string;
-    description?: string;
-    domain_id: number;
-    frequency_type_id: number;
-    frequency_value: number;
-    frequency_interval: number;
-    start_date: string;
-    end_date?: string;
-    specific_time?: string;
-    days_of_week?: number[];
-    days_of_month?: number[];
-    reminder_time?: string[];
-}
+import {Habit} from '../constants/habit'
 
 // Function to add a new habit
-export const addHabit = async (habitData: HabitData) => {
+export const addHabit = async (habitData: Habit) => {
     try {
-        console.log(habitData);
+
         return await postData('/api/habit/addHabit', habitData);
     } catch (error: any) {
         throw error.response?.data?.message || 'Failed to add habit';
     }
 };
 
+
 // Function to get user's habits
 export const getUserHabits = async () => {
     try {
-        return await fetchData('/api/habit/getHabit');
+        const response = await fetchData('/api/habit/getHabit');
+
+        // Check if response is valid and has data
+        if (response && response.data) {
+            return response.data; // If response has a data property
+        } else if (Array.isArray(response)) {
+            return response; // If response itself is the array
+        } else {
+            console.warn('Unexpected API response format in getUserHabits:', response);
+            return []; // Return empty array as fallback
+        }
     } catch (error: any) {
+        console.error('Error in getUserHabits:', error);
         throw error.response?.data?.message || 'Failed to fetch habits';
     }
 };
@@ -56,6 +55,7 @@ export const deleteHabit = async (habitId: number) => {
 // Function to get habit statistics
 export const getHabitStats = async (habitId: number, startDate?: string, endDate?: string) => {
     try {
+
         let url = `/api/habit/getHabitStats/${habitId}/stats`;
         if (startDate && endDate) {
             url += `?start_date=${startDate}&end_date=${endDate}`;
@@ -67,20 +67,25 @@ export const getHabitStats = async (habitId: number, startDate?: string, endDate
 };
 
 // Function to log habit completion
-export const logHabitCompletion = async (habitId: number, completionData: {
-    completed_at?: string;
-    notes?: string;
-    mood_rating?: number;
-}) => {
+export const logHabitCompletion = async (habitId: number, completionData: Partial<CompletionData>) => {
+    if (!habitId) {
+        console.error('No habit ID provided for completion');
+        throw new Error('Habit ID is required');
+    }
+
     try {
+        console.log(`Logging completion for habit ID: ${habitId}`);
+        console.log('Completion data:', completionData);
+
         return await postData(`/api/habit/logHabitCompletion/${habitId}`, completionData);
     } catch (error: any) {
+        console.error('Error in logHabitCompletion:', error);
         throw error.response?.data?.message || 'Failed to log habit completion';
     }
 };
 
 // Function to update a habit
-export const updateHabit = async (habitId: number, habitData: Partial<HabitData>) => {
+export const updateHabit = async (habitId: number, habitData: Partial<Habit>) => {
     try {
         return await updateData(`/api/habit/updateHabit/${habitId}`, habitData);
     } catch (error: any) {
