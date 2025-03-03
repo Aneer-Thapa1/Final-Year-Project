@@ -1,23 +1,26 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, FlatList, SafeAreaView, TextInput, KeyboardAvoidingView, Platform, Animated, useColorScheme } from 'react-native';
-import { Send, ArrowLeft, Bot, Sparkles, Brain } from 'lucide-react-native';
+import {
+    View,
+    Text,
+    TouchableOpacity,
+    FlatList,
+    SafeAreaView,
+    TextInput,
+    KeyboardAvoidingView,
+    Platform,
+    Animated,
+    ActivityIndicator,
+    Alert,
+    Dimensions
+} from 'react-native';
+import { Send, ArrowLeft, Sparkles, Brain, AlertCircle, Mic } from 'lucide-react-native';
 import { router } from "expo-router";
 import { MotiView } from 'moti';
+import { useColorScheme } from 'nativewind';
+import chatbotService, { ChatMessage } from '../../services/chatbotService';
+import NetInfo from '@react-native-community/netinfo';
 
-const INITIAL_MESSAGES = [
-    {
-        id: '1',
-        text: 'Welcome to Mindful! 👋 I\'m your AI companion on the journey to better habits.',
-        sender: 'bot'
-    },
-    {
-        id: '2',
-        text: 'I can help you develop mindful habits that stick. What would you like to work on today?',
-        sender: 'bot',
-        showSuggestions: true
-    }
-];
-
+// Suggestion categories with detailed habit information
 const HABIT_CATEGORIES = [
     {
         id: '1',
@@ -45,113 +48,296 @@ const HABIT_CATEGORIES = [
     }
 ];
 
-const BOT_RESPONSES = {
-    meditation: [
-        "Meditation is a wonderful foundation for mindfulness. When do you feel most calm during the day?",
-        "Starting with just 5 minutes can create a lasting impact. Would you like some guided sessions?",
-        "Many find mornings ideal for meditation. What time works best for your schedule?"
-    ],
-    gratitude: [
-        "Practicing gratitude can transform your perspective. What made you smile today?",
-        "Let's start with three simple things you're grateful for right now.",
-        "Writing down gratitude helps make it a habit. Shall we create a simple journaling routine?"
-    ]
-};
+// Initial welcome messages
+const getInitialMessages = () => [
+    {
+        id: 'welcome-1',
+        content: 'Welcome to Mindful! 👋 I\'m your AI companion on the journey to better habits.',
+        role: 'bot',
+        timestamp: new Date()
+    },
+    {
+        id: 'welcome-2',
+        content: 'I can help you develop mindful habits that stick. What would you like to work on today?',
+        role: 'bot',
+        timestamp: new Date(),
+        showSuggestions: true
+    }
+];
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const MindfulChatbot = () => {
-    const colorScheme = useColorScheme();
+    const { colorScheme } = useColorScheme();
     const isDark = colorScheme === 'dark';
-    const [messages, setMessages] = useState(INITIAL_MESSAGES);
-    const [selectedCategory, setSelectedCategory] = useState(null);
+    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [selectedCategory, setSelectedCategory] = useState<any>(null);
     const [inputText, setInputText] = useState('');
     const [isTyping, setIsTyping] = useState(false);
-    const flatListRef = useRef(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isNetworkAvailable, setIsNetworkAvailable] = useState(true);
+    const [retryCount, setRetryCount] = useState(0);
+    const flatListRef = useRef<FlatList>(null);
     const fadeAnim = useRef(new Animated.Value(0)).current;
+    const inputRef = useRef<TextInput>(null);
 
+    // Animation and initial data loading
     useEffect(() => {
         Animated.timing(fadeAnim, {
             toValue: 1,
             duration: 1000,
             useNativeDriver: true
         }).start();
+
+        const loadChatHistory = async () => {
+            try {
+                setIsLoading(true);
+                const history = await chatbotService.loadChatHistory();
+
+                // If no chat history, use initial welcome messages
+                if (history.length === 0) {
+                    const initialMessages = getInitialMessages();
+                    setMessages(initialMessages);
+                    await chatbotService.saveChatHistory(initialMessages);
+                } else {
+                    setMessages(history);
+                }
+            } catch (error) {
+                console.error('Error loading chat history:', error);
+                // Fallback to initial messages if error occurs
+                setMessages(getInitialMessages());
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        // Check network connectivity
+        const unsubscribe = NetInfo.addEventListener(state => {
+            setIsNetworkAvailable(state.isConnected ?? false);
+        });
+
+        loadChatHistory();
+
+        return () => {
+            unsubscribe();
+        };
     }, []);
 
-    const handleCategorySelect = (category) => {
+    // Save chat history whenever messages change
+    useEffect(() => {
+        if (messages.length > 0 && !isLoading) {
+            chatbotService.saveChatHistory(messages);
+        }
+    }, [messages, isLoading]);
+
+    // Placeholder for future voice functionality
+    const handleVoicePress = () => {
+        // This is a placeholder for future voice functionality
+        // Will be implemented in a future update
+        Alert.alert(
+            "Coming Soon",
+            "Voice input will be available in a future update.",
+            [{ text: "OK" }]
+        );
+    };
+
+    // Handle category selection
+    const handleCategorySelect = (category: any) => {
         setSelectedCategory(category);
-        const newMessage = {
-            id: String(messages.length + 1),
-            text: `Great! Let's explore ${category.title.toLowerCase()} habits. Choose one to focus on:`,
-            sender: 'bot',
+
+        const newMessage: ChatMessage = {
+            id: Date.now().toString(),
+            content: `Great! Let's explore ${category.title.toLowerCase()} habits. Choose one to focus on:`,
+            role: 'bot',
+            timestamp: new Date(),
             showHabits: true,
             category: category
         };
+
         setMessages(prev => [...prev, newMessage]);
     };
 
-    const handleHabitSelection = (habit) => {
-        setMessages(prev => [
-            ...prev,
-            { id: String(prev.length + 1), text: habit.text, sender: 'user' }
-        ]);
-        simulateBotResponse(habit);
+    // Handle habit selection
+    const handleHabitSelection = async (habit: any) => {
+        if (!isNetworkAvailable) {
+            showNetworkError();
+            return;
+        }
+
+        // Add user message
+        const userMessage: ChatMessage = {
+            id: Date.now().toString(),
+            content: habit.text,
+            role: 'user',
+            timestamp: new Date()
+        };
+
+        setMessages(prev => [...prev, userMessage]);
+
+        // Get response from AI
+        await getBotResponse(habit.text);
     };
 
-    const simulateBotResponse = (habit) => {
+    // Send message to chatbot API
+    const getBotResponse = async (prompt: string) => {
+        if (!isNetworkAvailable) {
+            showNetworkError();
+            return;
+        }
+
         setIsTyping(true);
-        setTimeout(() => {
-            const responses = habit.text.includes('Meditation') ?
-                BOT_RESPONSES.meditation : BOT_RESPONSES.gratitude;
-            const response = responses[Math.floor(Math.random() * responses.length)];
 
-            setMessages(prev => [...prev, {
-                id: String(prev.length + 1),
-                text: response,
-                sender: 'bot'
-            }]);
+        try {
+            // Send to chatbot API
+            const response = await chatbotService.sendMessageToChatbot(prompt);
+
+            // Add response to messages
+            setMessages(prev => [...prev, response]);
+
+            // Reset retry count on success
+            setRetryCount(0);
+        } catch (error) {
+            console.error('Error getting bot response:', error);
+
+            // Increment retry count
+            const newRetryCount = retryCount + 1;
+            setRetryCount(newRetryCount);
+
+            // Add error message after 2 failed attempts
+            if (newRetryCount >= 2) {
+                const errorMessage: ChatMessage = {
+                    id: `error-${Date.now()}`,
+                    content: "I'm having trouble connecting. Please check your connection or try again later.",
+                    role: 'bot',
+                    timestamp: new Date(),
+                    isError: true
+                };
+
+                setMessages(prev => [...prev, errorMessage]);
+                setRetryCount(0);
+            }
+        } finally {
             setIsTyping(false);
-        }, 1500);
+            // Scroll to bottom after getting response
+            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        }
     };
 
-    const handleSendMessage = () => {
+    // Handle sending user message
+    const handleSendMessage = async () => {
         if (!inputText.trim()) return;
 
-        setMessages(prev => [...prev, {
-            id: String(prev.length + 1),
-            text: inputText,
-            sender: 'user'
-        }]);
+        if (!isNetworkAvailable) {
+            showNetworkError();
+            return;
+        }
+
+        // Create user message
+        const userMessage: ChatMessage = {
+            id: Date.now().toString(),
+            content: inputText,
+            role: 'user',
+            timestamp: new Date()
+        };
+
+        // Add to messages
+        setMessages(prev => [...prev, userMessage]);
+
+        // Clear input
+        const messageText = inputText;
         setInputText('');
-        simulateBotResponse({ text: inputText });
+
+        // Get response from AI
+        await getBotResponse(messageText);
     };
 
-    const renderMessage = ({ item, index }) => (
+    // Network error handler
+    const showNetworkError = () => {
+        Alert.alert(
+            "Connection Error",
+            "Please check your internet connection and try again.",
+            [{ text: "OK" }]
+        );
+    };
+
+    // Clear chat history
+    const handleClearChat = async () => {
+        try {
+            setIsLoading(true);
+            await chatbotService.clearChatHistory();
+            const initialMessages = getInitialMessages();
+            setMessages(initialMessages);
+            await chatbotService.saveChatHistory(initialMessages);
+        } catch (error) {
+            console.error('Error clearing chat:', error);
+            Alert.alert(
+                "Error",
+                "Failed to clear chat history. Please try again.",
+                [{ text: "OK" }]
+            );
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    // Format timestamp
+    const formatTime = (date: Date) => {
+        return new Date(date).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: true
+        });
+    };
+
+    // Render a message
+    const renderMessage = ({ item, index }: { item: ChatMessage, index: number }) => (
         <MotiView
             from={{ opacity: 0, translateY: 20 }}
             animate={{ opacity: 1, translateY: 0 }}
-            transition={{ delay: index * 100 }}
-            className={`max-w-[85%] my-1 ${item.sender === 'bot' ? 'self-start' : 'self-end'}`}
+            transition={{ delay: index * 50, duration: 300 }}
+            className={`max-w-[85%] my-1 ${item.role === 'bot' ? 'self-start' : 'self-end'}`}
         >
-            {item.sender === 'bot' && (
+            {item.role === 'bot' && (
                 <View className="flex-row items-end mb-1">
                     <View className={`w-8 h-8 rounded-full mr-2 items-center justify-center ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
                         <Brain size={18} color={isDark ? '#C4B5FD' : '#7C3AED'} />
                     </View>
-                    <Text className={`text-xs font-montserrat-medium ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>Mindful AI</Text>
+                    <Text className={`text-xs font-montserrat-medium ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                        Mindful AI
+                    </Text>
                 </View>
             )}
+
             <View className={`
                 rounded-2xl p-4
-                ${item.sender === 'bot'
-                ? `${isDark ? 'bg-theme-card-dark' : 'bg-white'} rounded-tl-none shadow-sm`
+                ${item.role === 'bot'
+                ? `${isDark ? 'bg-theme-card-dark' : 'bg-white'} rounded-tl-none shadow-sm ${item.isError ? 'border border-red-500' : ''}`
                 : 'bg-primary-500 rounded-tr-none'}
             `}>
+                {item.isError && (
+                    <View className="flex-row items-center mb-2">
+                        <AlertCircle size={16} color="#EF4444" />
+                        <Text className="text-red-500 font-montserrat-bold ml-2">Connection Error</Text>
+                    </View>
+                )}
+
                 <Text className={`
                     text-base font-montserrat
-                    ${item.sender === 'bot'
+                    ${item.role === 'bot'
                     ? `${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`
                     : 'text-white'}
                 `}>
-                    {item.text}
+                    {item.content}
+                </Text>
+
+                {/* Timestamp for messages */}
+                <Text className={`
+                    text-xs mt-2 text-right
+                    ${item.role === 'bot'
+                    ? isDark ? 'text-gray-500' : 'text-gray-400'
+                    : 'text-white/70'}
+                `}>
+                    {formatTime(item.timestamp)}
                 </Text>
 
                 {item.showSuggestions && (
@@ -160,15 +346,16 @@ const MindfulChatbot = () => {
                             <TouchableOpacity
                                 key={category.id}
                                 className={`
-                                    p-3 rounded-xl border flex-row items-center space-x-3
+                                    p-3 rounded-xl border flex-row items-center
                                     ${isDark ? 'border-secondary-700 bg-secondary-900/20' : 'border-secondary-200 bg-secondary-50'}
                                 `}
                                 onPress={() => handleCategorySelect(category)}
+                                activeOpacity={0.7}
                             >
                                 <View className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
                                     <Sparkles size={20} color={isDark ? '#C4B5FD' : '#7C3AED'} />
                                 </View>
-                                <View className="flex-1">
+                                <View className="flex-1 ml-3">
                                     <Text className={`font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>
                                         {category.title}
                                     </Text>
@@ -181,9 +368,9 @@ const MindfulChatbot = () => {
                     </View>
                 )}
 
-                {item.showHabits && (
+                {item.showHabits && item.category && (
                     <View className="mt-4 space-y-2">
-                        {item.category.habits.map(habit => (
+                        {item.category.habits.map((habit: any) => (
                             <TouchableOpacity
                                 key={habit.id}
                                 className={`
@@ -191,6 +378,7 @@ const MindfulChatbot = () => {
                                     ${isDark ? 'bg-secondary-900/20' : 'bg-secondary-50'}
                                 `}
                                 onPress={() => handleHabitSelection(habit)}
+                                activeOpacity={0.7}
                             >
                                 <Text className={`font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>
                                     {habit.text}
@@ -206,16 +394,38 @@ const MindfulChatbot = () => {
         </MotiView>
     );
 
+    // Main loading screen
+    if (isLoading) {
+        return (
+            <SafeAreaView className={`flex-1 items-center justify-center ${isDark ? 'bg-theme-background-dark' : 'bg-theme-background'}`}>
+                <View className="items-center">
+                    <View className={`w-16 h-16 rounded-full items-center justify-center mb-4 ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
+                        <Brain size={32} color={isDark ? '#C4B5FD' : '#7C3AED'} />
+                    </View>
+                    <ActivityIndicator size="large" color={isDark ? '#C4B5FD' : '#7C3AED'} />
+                    <Text className={`mt-4 text-lg font-montserrat-medium ${isDark ? 'text-white' : 'text-gray-800'}`}>
+                        Loading your mindful assistant...
+                    </Text>
+                </View>
+            </SafeAreaView>
+        );
+    }
+
     return (
-        <SafeAreaView className={`flex-1 ${isDark ? 'bg-theme-background-dark' : 'bg-theme-background'}`}>
+        <SafeAreaView
+            className={`flex-1 ${isDark ? 'bg-theme-background-dark' : 'bg-theme-background'}`}
+            style={{ height: SCREEN_HEIGHT }}
+        >
             <Animated.View style={{ opacity: fadeAnim }}>
-                <View className={`px-4 py-4 flex-row items-center ${isDark ? 'bg-theme-card-dark' : 'bg-white'} shadow-sm`}>
+                <View className={`px-4 py-4 flex-row justify-between items-center ${isDark ? 'bg-theme-card-dark' : 'bg-white'} shadow-sm`}>
                     <TouchableOpacity
                         onPress={() => router.back()}
-                        className="mr-3"
+                        className="p-2"
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
                         <ArrowLeft size={24} color={isDark ? '#E2E8F0' : '#374151'} />
                     </TouchableOpacity>
+
                     <View className="flex-row items-center">
                         <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
                             <Brain size={24} color={isDark ? '#C4B5FD' : '#7C3AED'} />
@@ -229,7 +439,22 @@ const MindfulChatbot = () => {
                             </Text>
                         </View>
                     </View>
+
+                    <TouchableOpacity
+                        onPress={handleClearChat}
+                        className={`p-2 rounded-full ${isDark ? 'bg-gray-800' : 'bg-gray-100'}`}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                        <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>Clear</Text>
+                    </TouchableOpacity>
                 </View>
+
+                {!isNetworkAvailable && (
+                    <View className={`px-4 py-2 bg-red-500 flex-row items-center justify-center`}>
+                        <AlertCircle size={16} color="white" />
+                        <Text className="text-white font-montserrat-medium ml-2">No internet connection</Text>
+                    </View>
+                )}
             </Animated.View>
 
             <FlatList
@@ -237,9 +462,14 @@ const MindfulChatbot = () => {
                 data={messages}
                 renderItem={renderMessage}
                 keyExtractor={item => item.id}
-                className="flex-1 px-4 pt-4"
-                onContentSizeChange={() => flatListRef.current?.scrollToEnd()}
-                onLayout={() => flatListRef.current?.scrollToEnd()}
+                className="flex-1 px-4"
+                contentContainerStyle={{ paddingTop: 16, paddingBottom: 16 }}
+                onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
+                showsVerticalScrollIndicator={false}
+                initialNumToRender={10}
+                maxToRenderPerBatch={10}
+                windowSize={10}
             />
 
             {isTyping && (
@@ -249,9 +479,12 @@ const MindfulChatbot = () => {
                         animate={{ opacity: 1, translateY: 0 }}
                         className={`self-start rounded-2xl p-3 ${isDark ? 'bg-theme-card-dark' : 'bg-white'}`}
                     >
-                        <Text className={`font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                            Mindful is typing...
-                        </Text>
+                        <View className="flex-row items-center">
+                            <ActivityIndicator size="small" color={isDark ? '#C4B5FD' : '#7C3AED'} />
+                            <Text className={`ml-2 font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                Mindful is thinking...
+                            </Text>
+                        </View>
                     </MotiView>
                 </View>
             )}
@@ -260,11 +493,13 @@ const MindfulChatbot = () => {
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
                 className={`border-t ${isDark ? 'border-gray-800' : 'border-gray-100'}`}
+                style={{ marginBottom: 0 }}
             >
                 <View className={`flex-row items-end p-4 ${isDark ? 'bg-theme-card-dark' : 'bg-white'}`}>
                     <TextInput
+                        ref={inputRef}
                         className={`
-                            flex-1 rounded-xl px-4 py-3 mr-2 text-base font-montserrat min-h-[44px]
+                            flex-1 rounded-xl px-4 py-3 mr-2 text-base font-montserrat min-h-[44px] max-h-[100px]
                             ${isDark ? 'bg-theme-surface-dark text-white' : 'bg-gray-50 text-gray-900'}
                         `}
                         placeholder="Type your message..."
@@ -272,17 +507,42 @@ const MindfulChatbot = () => {
                         value={inputText}
                         onChangeText={setInputText}
                         multiline
-                        maxHeight={100}
+                        editable={!isTyping}
+                        returnKeyType="send"
+                        onSubmitEditing={inputText.trim() ? handleSendMessage : null}
                     />
+
+                    <TouchableOpacity
+                        className={`
+                            p-3 rounded-xl shadow-sm mr-2
+                            ${isDark ? 'bg-gray-800' : 'bg-gray-200'}
+                        `}
+                        onPress={handleVoicePress}
+                        disabled={isTyping}
+                        activeOpacity={0.7}
+                    >
+                        <Mic size={20} color={isDark ? '#94A3B8' : '#64748B'} />
+                    </TouchableOpacity>
+
                     <TouchableOpacity
                         className={`
                             p-3 rounded-xl shadow-sm
-                            ${inputText.trim() ? 'bg-primary-500' : isDark ? 'bg-gray-800' : 'bg-gray-100'}
+                            ${(inputText.trim() && !isTyping)
+                            ? 'bg-primary-500'
+                            : isDark ? 'bg-gray-800' : 'bg-gray-200'}
                         `}
                         onPress={handleSendMessage}
-                        disabled={!inputText.trim()}
+                        disabled={!inputText.trim() || isTyping}
+                        activeOpacity={0.7}
                     >
-                        <Send size={20} color={inputText.trim() ? 'white' : isDark ? '#94A3B8' : '#64748B'} />
+                        {isTyping ? (
+                            <ActivityIndicator size="small" color={isDark ? '#94A3B8' : '#64748B'} />
+                        ) : (
+                            <Send
+                                size={20}
+                                color={inputText.trim() ? 'white' : isDark ? '#94A3B8' : '#64748B'}
+                            />
+                        )}
                     </TouchableOpacity>
                 </View>
             </KeyboardAvoidingView>
