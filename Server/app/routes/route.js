@@ -2,6 +2,7 @@ const express = require('express');
 const userRoute = require('./userRoute');
 const habitRoute = require('./habitRoute');
 const blogRoute = require('./blogRoute');
+const chatbotRoute = require('./chatbotRoute');
 
 const router = express.Router();
 
@@ -13,5 +14,8 @@ router.use('/habit', habitRoute)
 
 // routes related to blog (/api/blog)
 router.use('/blog', blogRoute)
+
+// routes related to blog (/api/blog)
+router.use('/chatbot', chatbotRoute)
 
 module.exports = router;

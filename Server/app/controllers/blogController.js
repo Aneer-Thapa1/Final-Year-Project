@@ -1,47 +1,40 @@
-import res from "express/lib/response";
-import req from "express/lib/request";
-
+const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-const {PrismaClient} = require('@prisma/client');
-const prisma = new PrismaClient();
-
-//  function to add blog
+// Function to add blog
 const addBlog = async (req, res) => {
+    // Getting data from front end
+    const { blog_title, blog_description, blog_image } = req.body;
 
-    // getting data from front end
-    const {blog_title, blog_description, blog_image} = req.body;
-
-    // getting user_id extracted from middleware
-    const user_id = req.user.user_id;
+    // Getting user_id extracted from middleware
+    const user_id = req.user;
 
     // Check if all necessary fields are filled
     if (!blog_title || !blog_description) {
-        return res.status(400).json({error: 'Please enter all details including title, description.'});
+        return res.status(400).json({ error: 'Please enter all details including title, description.' });
     }
 
     try {
-        // starting transition query so that points_gained do not change in error
+        // Starting transaction query so that points_gained do not change in error
         const result = await prisma.$transaction(async (prisma) => {
             const user = await prisma.user.findUnique({
-                where: {id: user_id}
+                where: { id: parseInt(user_id) }
             });
 
-
-            // checking if user with that user_id exists or not
+            // Checking if user with that user_id exists or not
             if (!user) {
                 throw new Error('User not found');
             }
 
-            // logic to make sure if user have enough points to add a blog to prevent spam and unwanted blogs
+            // Logic to make sure if user have enough points to add a blog to prevent spam and unwanted blogs
             if (user.points_gained < 20) {
                 throw new Error("You do not meet the requirement to add a blog!");
             }
 
             // Update user points by deducting 20 points
             const updatedUser = await prisma.user.update({
-                where: {id: user_id},
-                data: {points_gained: user.points_gained - 20}
+                where: { id: parseInt(user_id) },
+                data: { points_gained: user.points_gained - 20 }
             });
 
             // Add new blog entry
@@ -50,62 +43,81 @@ const addBlog = async (req, res) => {
                     blog_title,
                     blog_description,
                     blog_image,
-                    user_id: user_id
+                    user_id: parseInt(user_id)
                 }
             });
 
-            return {updatedUser, newBlog};
+            return { updatedUser, newBlog };
         });
 
         // If transaction is successful
-        return res.status(201).json({success: 'Blog added successfully', blog: result.newBlog});
+        return res.status(201).json({ success: 'Blog added successfully', blog: result.newBlog });
 
     } catch (error) {
+        console.error('Error adding blog:', error);
         // Transaction failed
-        return res.status(403).json({error: error.message});
+        return res.status(403).json({ error: error.message });
     }
 };
 
-// function to retrive blogs for a user
+// Function to retrieve blogs for a user
 const getBlogs = async (req, res) => {
-    const user_id = req.user.user_id;
-    const lastLoadedBlogId = parseInt(req.query.lastLoadedBlogId); // Last loaded blog's ID
+    const user_id = req.user;
+    const lastLoadedBlogId = req.query.lastLoadedBlogId ? parseInt(req.query.lastLoadedBlogId) : 0; // Last loaded blog's ID
     const limit = parseInt(req.query.limit) || 7;
 
     try {
         const blogs = await prisma.blog.findMany({
             where: {
                 user_id: {
-                    not: user_id
+                    not: parseInt(user_id)
                 },
                 blog_id: {
                     gt: lastLoadedBlogId  // Greater than the last loaded blog's ID
                 }
             },
             include: {
-                user: true
+                user: {
+                    select: {
+                        username: true,
+                        profile_picture: true,
+                        id: true
+                    }
+                }
             },
             take: limit,
             orderBy: {
-                id: 'asc'  // Assuming newer blogs have higher IDs
+                blog_id: 'asc'  // Assuming newer blogs have higher IDs
             }
         });
 
         if (blogs.length === 0) {
-            return res.status(404).json({message: "No more blogs found"});
+            return res.status(200).json({
+                success: true,
+                message: "No more blogs found",
+                data: []
+            });
         }
 
-        res.status(200).json(blogs);
+        res.status(200).json({
+            success: true,
+            data: blogs
+        });
     } catch (error) {
-        res.status(500).json({error: 'An error occurred while retrieving blogs'});
+        console.error('Error getting blogs:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred while retrieving blogs'
+        });
     }
 };
 
-
+// Function to edit an existing blog
 const editBlog = async (req, res) => {
     try {
         const blog_id = parseInt(req.params.blog_id); // Convert to integer if it's a string
         const { blog_title, blog_description, blog_image } = req.body;
+        const user_id = req.user;
 
         // Input validation
         if (!blog_title || !blog_description) {
@@ -115,7 +127,7 @@ const editBlog = async (req, res) => {
             });
         }
 
-        // Check if blog exists
+        // Check if blog exists and belongs to the user
         const existingBlog = await prisma.blog.findUnique({
             where: {
                 blog_id: blog_id
@@ -126,6 +138,14 @@ const editBlog = async (req, res) => {
             return res.status(404).json({
                 success: false,
                 error: 'Blog not found!'
+            });
+        }
+
+        // Check if the blog belongs to the authenticated user
+        if (existingBlog.user_id !== parseInt(user_id)) {
+            return res.status(403).json({
+                success: false,
+                error: 'You do not have permission to edit this blog!'
             });
         }
 
@@ -158,7 +178,97 @@ const editBlog = async (req, res) => {
     }
 };
 
+// Function to delete a blog
+const deleteBlog = async (req, res) => {
+    try {
+        const blog_id = parseInt(req.params.blog_id);
+        const user_id = req.user;
 
-module.exports = {addBlog, getBlogs};
+        // Check if blog exists and belongs to the user
+        const existingBlog = await prisma.blog.findUnique({
+            where: {
+                blog_id: blog_id
+            }
+        });
 
+        if (!existingBlog) {
+            return res.status(404).json({
+                success: false,
+                error: 'Blog not found!'
+            });
+        }
 
+        // Check if the blog belongs to the authenticated user
+        if (existingBlog.user_id !== parseInt(user_id)) {
+            return res.status(403).json({
+                success: false,
+                error: 'You do not have permission to delete this blog!'
+            });
+        }
+
+        // Delete the blog
+        await prisma.blog.delete({
+            where: {
+                blog_id: blog_id
+            }
+        });
+
+        // Refund points to the user
+        await prisma.user.update({
+            where: { id: parseInt(user_id) },
+            data: {
+                points_gained: {
+                    increment: 20 // Refunding the points that were deducted when blog was created
+                }
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Blog deleted successfully and points refunded'
+        });
+
+    } catch (error) {
+        console.error('Error deleting blog:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to delete blog',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Function to get blogs created by the authenticated user
+const getUserBlogs = async (req, res) => {
+    const user_id = req.user;
+
+    try {
+        const blogs = await prisma.blog.findMany({
+            where: {
+                user_id: parseInt(user_id)
+            },
+            orderBy: {
+                created_at: 'desc'
+            }
+        });
+
+        res.status(200).json({
+            success: true,
+            data: blogs
+        });
+    } catch (error) {
+        console.error('Error getting user blogs:', error);
+        res.status(500).json({
+            success: false,
+            error: 'An error occurred while retrieving your blogs'
+        });
+    }
+};
+
+module.exports = {
+    addBlog,
+    getBlogs,
+    editBlog,
+    deleteBlog,
+    getUserBlogs
+};
