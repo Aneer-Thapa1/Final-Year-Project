@@ -11,7 +11,8 @@ import {
     Animated,
     ActivityIndicator,
     Alert,
-    Dimensions
+    Dimensions,
+    StyleSheet
 } from 'react-native';
 import { Send, ArrowLeft, Sparkles, Brain, AlertCircle, Mic } from 'lucide-react-native';
 import { router } from "expo-router";
@@ -417,7 +418,8 @@ const MindfulChatbot = () => {
             style={{ height: SCREEN_HEIGHT }}
         >
             <Animated.View style={{ opacity: fadeAnim }}>
-                <View className={`px-4 py-4 flex-row justify-between items-center ${isDark ? 'bg-theme-card-dark' : 'bg-white'} shadow-sm`}>
+                {/* Updated header with better alignment */}
+                <View className={`px-4 py-4 flex-row items-center ${isDark ? 'bg-theme-card-dark' : 'bg-white'} shadow-sm`}>
                     <TouchableOpacity
                         onPress={() => router.back()}
                         className="p-2"
@@ -426,6 +428,7 @@ const MindfulChatbot = () => {
                         <ArrowLeft size={24} color={isDark ? '#E2E8F0' : '#374151'} />
                     </TouchableOpacity>
 
+                    {/* Left-aligned title instead of center */}
                     <View className="flex-row items-center">
                         <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
                             <Brain size={24} color={isDark ? '#C4B5FD' : '#7C3AED'} />
@@ -439,6 +442,9 @@ const MindfulChatbot = () => {
                             </Text>
                         </View>
                     </View>
+
+                    {/* Push clear button to the right */}
+                    <View style={styles.flexSpacer} />
 
                     <TouchableOpacity
                         onPress={handleClearChat}
@@ -463,7 +469,7 @@ const MindfulChatbot = () => {
                 renderItem={renderMessage}
                 keyExtractor={item => item.id}
                 className="flex-1 px-4"
-                contentContainerStyle={{ paddingTop: 16, paddingBottom: 16 }}
+                contentContainerStyle={{ paddingTop: 16, paddingBottom: 8 }}
                 onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
                 onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
                 showsVerticalScrollIndicator={false}
@@ -489,17 +495,17 @@ const MindfulChatbot = () => {
                 </View>
             )}
 
+            {/* Fixed input area with reduced bottom margin */}
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-                className={`border-t ${isDark ? 'border-gray-800' : 'border-gray-100'}`}
-                style={{ marginBottom: 0 }}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+                style={styles.keyboardAvoid}
             >
-                <View className={`flex-row items-end p-4 ${isDark ? 'bg-theme-card-dark' : 'bg-white'}`}>
+                <View className={`flex-row items-center px-4 py-2 ${isDark ? 'bg-theme-card-dark' : 'bg-white'} border-t ${isDark ? 'border-gray-800' : 'border-gray-100'}`}>
                     <TextInput
                         ref={inputRef}
                         className={`
-                            flex-1 rounded-xl px-4 py-3 mr-2 text-base font-montserrat min-h-[44px] max-h-[100px]
+                            flex-1 rounded-xl px-4 py-2 text-base font-montserrat min-h-[40px] max-h-[100px]
                             ${isDark ? 'bg-theme-surface-dark text-white' : 'bg-gray-50 text-gray-900'}
                         `}
                         placeholder="Type your message..."
@@ -514,7 +520,7 @@ const MindfulChatbot = () => {
 
                     <TouchableOpacity
                         className={`
-                            p-3 rounded-xl shadow-sm mr-2
+                            p-3 rounded-xl shadow-sm mx-2
                             ${isDark ? 'bg-gray-800' : 'bg-gray-200'}
                         `}
                         onPress={handleVoicePress}
@@ -549,5 +555,16 @@ const MindfulChatbot = () => {
         </SafeAreaView>
     );
 };
+
+// Additional styles
+const styles = StyleSheet.create({
+    flexSpacer: {
+        flex: 1
+    },
+    keyboardAvoid: {
+        marginBottom: 0,
+        paddingBottom: Platform.OS === 'ios' ? 2 : 0,
+    }
+});
 
 export default MindfulChatbot;

@@ -7,11 +7,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MotiView } from 'moti';
 import { router } from 'expo-router';
 
+// Import the tab components
+import ActivityComponent from '../../components/ActivityComponent';
+import AchievementsComponent from '../../components/AchievementsComponent';
+import FriendsComponent from '../../components/FriendsComponent';
+
 const Profile = () => {
     const userDetails = useSelector((state) => state.user);
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
-    const [activeTab, setActiveTab] = React.useState('Achievements');
+    const [activeTab, setActiveTab] = React.useState('Activity');
 
     const tabs = [
         { id: 'Activity', icon: Activity },
@@ -31,34 +36,33 @@ const Profile = () => {
                     <View className={`rounded-3xl overflow-hidden ${isDark ? 'bg-theme-card-dark' : 'bg-white'}`}>
                         {/* Top Bar */}
                         <View className="p-4 flex-row justify-between items-center">
-                            <TouchableOpacity
-                                onPress={() => router.back()}
+                            <View
                                 className="p-2"
                             >
                                 <ArrowLeft size={24} color={isDark ? '#E2E8F0' : '#1F2937'} />
-                            </TouchableOpacity>
-                            <TouchableOpacity className="p-2">
+                            </View>
+                            <View className="p-2">
                                 <Settings size={24} color={isDark ? '#E2E8F0' : '#1F2937'} />
-                            </TouchableOpacity>
+                            </View>
                         </View>
 
                         {/* Profile Info */}
                         <View className="px-6 pb-6">
                             <View className="flex-row items-center space-x-4">
                                 <Image
-                                    source={images.maleProfile}
+                                    source={{ uri: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?fit=crop&w=300&h=300' }}
                                     className="h-24 w-24 rounded-full"
                                 />
                                 <View className="flex-1">
                                     <Text className={`text-xl font-montserrat-bold mb-2 ${
                                         isDark ? 'text-white' : 'text-gray-900'
                                     }`}>
-                                        {userDetails?.user?.user?.user_name}
+                                        {userDetails?.user?.user?.user_name || "John Doe"}
                                     </Text>
                                     <View className="flex-row gap-2 items-center bg-primary-100 rounded-full py-2 px-4 self-start">
                                         <Trophy size={16} className="text-primary-500 mr-2" />
                                         <Text className="text-primary-700 font-montserrat-medium">
-                                            {userDetails?.user?.user?.points_gained} Points
+                                            {userDetails?.user?.user?.points_gained || "1,250"} Points
                                         </Text>
                                     </View>
                                 </View>
@@ -76,7 +80,7 @@ const Profile = () => {
                                     >
                                         <tab.icon
                                             size={16}
-                                            className={activeTab === tab.id ? 'text-primary-500' : 'text-gray-500'}
+                                            color={activeTab === tab.id ? '#4F46E5' : '#6B7280'}
                                         />
                                         <Text className={`font-montserrat-medium ${
                                             activeTab === tab.id
@@ -94,35 +98,9 @@ const Profile = () => {
 
                 {/* Content based on active tab */}
                 <View className="p-4 flex-1">
-                    {activeTab === 'Activity' && (
-                        <MotiView
-                            from={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="space-y-4"
-                        >
-                            {/* Add Activity content */}
-                        </MotiView>
-                    )}
-
-                    {activeTab === 'Achievements' && (
-                        <MotiView
-                            from={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="space-y-4"
-                        >
-                            {/* Add Achievements content */}
-                        </MotiView>
-                    )}
-
-                    {activeTab === 'Friends' && (
-                        <MotiView
-                            from={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            className="space-y-4"
-                        >
-                            {/* Add Friends content */}
-                        </MotiView>
-                    )}
+                    {activeTab === 'Activity' && <ActivityComponent />}
+                    {activeTab === 'Achievements' && <AchievementsComponent />}
+                    {activeTab === 'Friends' && <FriendsComponent />}
                 </View>
             </ScrollView>
         </SafeAreaView>
