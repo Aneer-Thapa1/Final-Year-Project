@@ -6,6 +6,7 @@ export interface Blog {
     blog_title: string;
     blog_description: string;
     blog_image?: string;
+    category_id: number; // Added category_id field
     user_id?: number;
     created_at?: string;
     updated_at?: string;
@@ -18,17 +19,23 @@ export interface BlogResponse {
     error?: string;
 }
 
-// Function to add a new blog
+// Function to add a new blog with category support
 export const addBlog = async (blogData: {
     blog_title: string;
     blog_description: string;
     blog_image?: string;
+    category_id: number; // Added category_id parameter
 }) => {
     try {
+        // Validate category_id is present
+        if (!blogData.category_id) {
+            throw new Error('Category ID is required');
+        }
+
         return await postData('/api/blog/addBlog', blogData);
     } catch (error: any) {
         console.error('Error in addBlog:', error);
-        throw error.response?.data?.message || 'Failed to add blog';
+        throw error.response?.data?.message || error.message || 'Failed to add blog';
     }
 };
 
@@ -58,6 +65,35 @@ export const getBlogs = async (lastLoadedBlogId?: number, limit: number = 7) => 
     } catch (error: any) {
         console.error('Error in getBlogs:', error);
         throw error.response?.data?.message || 'Failed to fetch blogs';
+    }
+};
+
+// Function to get blogs by category
+export const getBlogsByCategory = async (categoryId: number, lastLoadedBlogId?: number, limit: number = 7) => {
+    try {
+        let url = `/api/blog/getBlogsByCategory/${categoryId}`;
+
+        // Add query parameters if provided
+        if (lastLoadedBlogId) {
+            url += `?lastLoadedBlogId=${lastLoadedBlogId}&limit=${limit}`;
+        } else {
+            url += `?limit=${limit}`;
+        }
+
+        const response = await fetchData(url);
+
+        // Check if response is valid and has data
+        if (response && response.data) {
+            return response.data;
+        } else if (Array.isArray(response)) {
+            return response;
+        } else {
+            console.warn('Unexpected API response format in getBlogsByCategory:', response);
+            return [];
+        }
+    } catch (error: any) {
+        console.error('Error in getBlogsByCategory:', error);
+        throw error.response?.data?.message || 'Failed to fetch blogs by category';
     }
 };
 

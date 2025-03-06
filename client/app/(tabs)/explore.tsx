@@ -57,10 +57,10 @@ const Explore: React.FC = () => {
           setPosts(prev => [...prev, ...fetchedPosts]);
         }
 
-        // Update last loaded ID for pagination
+        // Update last loaded ID for pagination - use the last post's ID
         if (fetchedPosts.length > 0) {
-          const maxId = Math.max(...fetchedPosts.map(post => post.blog_id));
-          setLastLoadedBlogId(maxId);
+          const lastPost = fetchedPosts[fetchedPosts.length - 1];
+          setLastLoadedBlogId(lastPost.blog_id);
         }
 
         // Check if there are more posts to load
@@ -90,7 +90,8 @@ const Explore: React.FC = () => {
       const blogData = {
         blog_title: newPost.title || 'My Progress Update',
         blog_description: newPost.content,
-        blog_image: newPost.images && newPost.images.length > 0 ? newPost.images[0] : undefined
+        blog_image: newPost.images && newPost.images.length > 0 ? newPost.images[0] : undefined,
+        category_id: newPost.category_id // Make sure to include the category_id
       };
 
       // Call the API to create the post
@@ -177,6 +178,8 @@ const Explore: React.FC = () => {
       images: apiPost.blog_image ? [apiPost.blog_image] : [],
       author: apiPost.user?.username || 'Anonymous',
       authorId: apiPost.user_id,
+      categoryId: apiPost.category_id,
+      categoryName: apiPost.category?.category_name || 'Uncategorized',
       likes: apiPost.likes || 0,
       comments: apiPost.comments || 0,
       createdAt: new Date(apiPost.created_at),

@@ -9,28 +9,29 @@ import {
     KeyboardAvoidingView,
     Platform,
     Keyboard,
-    Dimensions
+    Dimensions,
+    Alert
 } from 'react-native';
 import { MotiView } from 'moti';
 import { Camera, Image as ImageIcon, X, ChevronDown, Tag, Clock } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 
+// Static categories - no API fetching needed
+const STATIC_CATEGORIES = [
+    { category_id: 1, category_name: 'Meditation', icon: '🧘' },
+    { category_id: 2, category_name: 'Exercise', icon: '🏃' },
+    { category_id: 3, category_name: 'Reading', icon: '📚' },
+    { category_id: 4, category_name: 'Coding', icon: '💻' },
+];
+
 const BlogPostCreator = ({ isDark, onPost }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
     const [selectedImages, setSelectedImages] = useState([]);
-    const [selectedHabits, setSelectedHabits] = useState([]);
-    const [isHabitSelectorVisible, setIsHabitSelectorVisible] = useState(false);
-
-    // Sample habits for selection
-    const availableHabits = [
-        { id: '1', title: 'Morning Meditation', icon: '🧘' },
-        { id: '2', title: 'Running', icon: '🏃' },
-        { id: '3', title: 'Reading', icon: '📚' },
-        { id: '4', title: 'Coding Practice', icon: '💻' },
-    ];
+    const [selectedCategory, setSelectedCategory] = useState(null);
+    const [isCategorySelectorVisible, setIsCategorySelectorVisible] = useState(false);
 
     const contentInputRef = useRef(null);
     const scrollViewRef = useRef(null);
@@ -92,36 +93,41 @@ const BlogPostCreator = ({ isDark, onPost }) => {
         setSelectedImages(selectedImages.filter((_, i) => i !== index));
     };
 
-    const toggleHabitSelector = () => {
+    const toggleCategorySelector = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setIsHabitSelectorVisible(!isHabitSelectorVisible);
+        setIsCategorySelectorVisible(!isCategorySelectorVisible);
     };
 
-    const toggleHabitSelection = (habit) => {
+    const selectCategory = (category) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-        if (selectedHabits.some(h => h.id === habit.id)) {
-            setSelectedHabits(selectedHabits.filter(h => h.id !== habit.id));
-        } else {
-            setSelectedHabits([...selectedHabits, habit]);
-        }
+        setSelectedCategory(category);
+        setIsCategorySelectorVisible(false);
     };
 
     const handlePost = () => {
+        if (!selectedCategory) {
+            Alert.alert('Error', 'Please select a category for your post.');
+            return;
+        }
+
         if (title.trim() || content.trim() || selectedImages.length > 0) {
-            onPost({
+            // Create the blog post object with category_id
+            const postData = {
                 title: title.trim() ? title : 'My Progress Update',
                 content,
                 images: selectedImages,
-                relatedHabits: selectedHabits,
+                // Include the category ID in the post data
+                category_id: selectedCategory.category_id,
                 createdAt: new Date(),
-            });
+            };
+
+            onPost(postData);
 
             // Reset form
             setTitle('');
             setContent('');
             setSelectedImages([]);
-            setSelectedHabits([]);
+            setSelectedCategory(null);
             setIsExpanded(false);
 
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -210,10 +216,10 @@ const BlogPostCreator = ({ isDark, onPost }) => {
                                 />
                             </View>
 
-                            {/* Related Habits Selector */}
+                            {/* Category Selector */}
                             <View className="mb-4">
                                 <TouchableOpacity
-                                    onPress={toggleHabitSelector}
+                                    onPress={toggleCategorySelector}
                                     className={`flex-row items-center justify-between px-4 py-3 rounded-2xl ${
                                         isDark
                                             ? 'bg-theme-input-dark'
@@ -223,40 +229,40 @@ const BlogPostCreator = ({ isDark, onPost }) => {
                                     <View className="flex-row items-center">
                                         <Tag size={18} color={isDark ? '#94A3B8' : '#6B7280'} />
                                         <Text className={`ml-2 font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                            {selectedHabits.length > 0
-                                                ? `${selectedHabits.length} habit${selectedHabits.length > 1 ? 's' : ''} selected`
-                                                : 'Link to habits'}
+                                            {selectedCategory
+                                                ? `${selectedCategory.icon} ${selectedCategory.category_name}`
+                                                : 'Select a category (required)'}
                                         </Text>
                                     </View>
                                     <ChevronDown size={16} color={isDark ? '#E5E7EB' : '#4B5563'} style={{
-                                        transform: [{ rotate: isHabitSelectorVisible ? '180deg' : '0deg' }]
+                                        transform: [{ rotate: isCategorySelectorVisible ? '180deg' : '0deg' }]
                                     }} />
                                 </TouchableOpacity>
 
-                                {/* Habits list */}
-                                {isHabitSelectorVisible && (
+                                {/* Categories list */}
+                                {isCategorySelectorVisible && (
                                     <View className={`mt-2 p-3 rounded-2xl ${
                                         isDark
                                             ? 'bg-gray-800'
                                             : 'bg-gray-50'
                                     }`}>
-                                        {availableHabits.map(habit => (
+                                        {STATIC_CATEGORIES.map(category => (
                                             <TouchableOpacity
-                                                key={habit.id}
-                                                onPress={() => toggleHabitSelection(habit)}
+                                                key={category.category_id}
+                                                onPress={() => selectCategory(category)}
                                                 className={`flex-row items-center justify-between py-2 px-3 mb-1 rounded-xl ${
-                                                    selectedHabits.some(h => h.id === habit.id)
+                                                    selectedCategory?.category_id === category.category_id
                                                         ? isDark ? 'bg-primary-500/20' : 'bg-primary-500/10'
                                                         : 'bg-transparent'
                                                 }`}
                                             >
                                                 <View className="flex-row items-center">
-                                                    <Text className="mr-2">{habit.icon}</Text>
+                                                    <Text className="mr-2">{category.icon}</Text>
                                                     <Text className={`font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                                        {habit.title}
+                                                        {category.category_name}
                                                     </Text>
                                                 </View>
-                                                {selectedHabits.some(h => h.id === habit.id) && (
+                                                {selectedCategory?.category_id === category.category_id && (
                                                     <View className="bg-primary-500 rounded-full p-1">
                                                         <Text className="text-white text-xs">✓</Text>
                                                     </View>
@@ -316,16 +322,16 @@ const BlogPostCreator = ({ isDark, onPost }) => {
 
                                 <TouchableOpacity
                                     onPress={handlePost}
-                                    disabled={!title.trim() && !content.trim() && selectedImages.length === 0}
+                                    disabled={(!title.trim() && !content.trim() && selectedImages.length === 0) || !selectedCategory}
                                     className={`px-4 py-2 rounded-xl ${
-                                        title.trim() || content.trim() || selectedImages.length > 0
+                                        (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory
                                             ? 'bg-primary-500'
                                             : isDark ? 'bg-gray-700' : 'bg-gray-200'
                                     }`}
                                 >
                                     <Text
                                         className={`font-montserrat-medium ${
-                                            title.trim() || content.trim() || selectedImages.length > 0
+                                            (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory
                                                 ? 'text-white'
                                                 : isDark ? 'text-gray-500' : 'text-gray-400'
                                         }`}
