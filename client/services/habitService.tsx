@@ -17,7 +17,7 @@ export const addHabit = async (habitData: Habit) => {
 // Function to get user's habits
 export const getUserHabits = async () => {
     try {
-        const response = await fetchData('/api/habit/getHabit');
+        const response = await fetchData('/api/habit/getUserHabits');
 
         // Check if response is valid and has data
         if (response && response.data) {

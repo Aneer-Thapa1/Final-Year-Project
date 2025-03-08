@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
@@ -10,28 +10,29 @@ import {
     Platform,
     Keyboard,
     Dimensions,
-    Alert
+    Alert,
+    ActivityIndicator
 } from 'react-native';
-import { MotiView } from 'moti';
-import { Camera, Image as ImageIcon, X, ChevronDown, Tag, Clock } from 'lucide-react-native';
+import { MotiView, AnimatePresence } from 'moti';
+import { Camera, Image as ImageIcon, X, ChevronDown, Tag, Clock, Users } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 
-// Static categories - no API fetching needed
-const STATIC_CATEGORIES = [
-    { category_id: 1, category_name: 'Meditation', icon: '🧘' },
-    { category_id: 2, category_name: 'Exercise', icon: '🏃' },
-    { category_id: 3, category_name: 'Reading', icon: '📚' },
-    { category_id: 4, category_name: 'Coding', icon: '💻' },
-];
+// Import the getCategories function
+import { getCategories } from '../services/blogService';
 
-const BlogPostCreator = ({ isDark, onPost }) => {
+const BlogPostCreator = ({ isDark, onPost, isLoading = false }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
     const [selectedImages, setSelectedImages] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState(null);
     const [isCategorySelectorVisible, setIsCategorySelectorVisible] = useState(false);
+    const [isPublic, setIsPublic] = useState(true);
+
+    // State for dynamic categories
+    const [categories, setCategories] = useState([]);
+    const [loadingCategories, setLoadingCategories] = useState(false);
 
     const contentInputRef = useRef(null);
     const scrollViewRef = useRef(null);
@@ -40,6 +41,41 @@ const BlogPostCreator = ({ isDark, onPost }) => {
     const [contentHeight, setContentHeight] = useState(100);
     const windowHeight = Dimensions.get('window').height;
     const maxHeight = windowHeight * 0.5; // Max 50% of screen height
+
+    // Fetch categories when component mounts
+    useEffect(() => {
+        const fetchCategories = async () => {
+            try {
+                setLoadingCategories(true);
+                const response = await getCategories();
+
+                if (response && response.success && response.data) {
+                    setCategories(response.data);
+                } else {
+                    // Fallback to static categories if API fails
+                    setCategories([
+                        { category_id: 1, category_name: 'Meditation', icon: '🧘', color: '#8B5CF6' },
+                        { category_id: 2, category_name: 'Exercise', icon: '🏃', color: '#F43F5E' },
+                        { category_id: 3, category_name: 'Reading', icon: '📚', color: '#F59E0B' },
+                        { category_id: 4, category_name: 'Coding', icon: '💻', color: '#3B82F6' },
+                    ]);
+                }
+            } catch (error) {
+                console.error('Error fetching categories:', error);
+                // Fallback to static categories
+                setCategories([
+                    { category_id: 1, category_name: 'Meditation', icon: '🧘', color: '#8B5CF6' },
+                    { category_id: 2, category_name: 'Exercise', icon: '🏃', color: '#F43F5E' },
+                    { category_id: 3, category_name: 'Reading', icon: '📚', color: '#F59E0B' },
+                    { category_id: 4, category_name: 'Coding', icon: '💻', color: '#3B82F6' },
+                ]);
+            } finally {
+                setLoadingCategories(false);
+            }
+        };
+
+        fetchCategories();
+    }, []);
 
     const toggleExpand = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -104,6 +140,12 @@ const BlogPostCreator = ({ isDark, onPost }) => {
         setIsCategorySelectorVisible(false);
     };
 
+    // Toggle public/private status
+    const togglePublicStatus = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setIsPublic(!isPublic);
+    };
+
     const handlePost = () => {
         if (!selectedCategory) {
             Alert.alert('Error', 'Please select a category for your post.');
@@ -111,14 +153,13 @@ const BlogPostCreator = ({ isDark, onPost }) => {
         }
 
         if (title.trim() || content.trim() || selectedImages.length > 0) {
-            // Create the blog post object with category_id
+            // Create the blog post object with updated field names
             const postData = {
                 title: title.trim() ? title : 'My Progress Update',
-                content,
-                images: selectedImages,
-                // Include the category ID in the post data
+                content: content.trim(),
+                image: selectedImages.length > 0 ? selectedImages[0] : null, // Take first image only
                 category_id: selectedCategory.category_id,
-                createdAt: new Date(),
+                is_public: isPublic
             };
 
             onPost(postData);
@@ -239,39 +280,81 @@ const BlogPostCreator = ({ isDark, onPost }) => {
                                     }} />
                                 </TouchableOpacity>
 
-                                {/* Categories list */}
-                                {isCategorySelectorVisible && (
-                                    <View className={`mt-2 p-3 rounded-2xl ${
-                                        isDark
-                                            ? 'bg-gray-800'
-                                            : 'bg-gray-50'
-                                    }`}>
-                                        {STATIC_CATEGORIES.map(category => (
-                                            <TouchableOpacity
-                                                key={category.category_id}
-                                                onPress={() => selectCategory(category)}
-                                                className={`flex-row items-center justify-between py-2 px-3 mb-1 rounded-xl ${
-                                                    selectedCategory?.category_id === category.category_id
-                                                        ? isDark ? 'bg-primary-500/20' : 'bg-primary-500/10'
-                                                        : 'bg-transparent'
-                                                }`}
-                                            >
-                                                <View className="flex-row items-center">
-                                                    <Text className="mr-2">{category.icon}</Text>
-                                                    <Text className={`font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                                        {category.category_name}
+                                {/* Categories list - Animated */}
+                                <AnimatePresence>
+                                    {isCategorySelectorVisible && (
+                                        <MotiView
+                                            from={{ opacity: 0, height: 0 }}
+                                            animate={{ opacity: 1, height: 'auto' }}
+                                            exit={{ opacity: 0, height: 0 }}
+                                            transition={{ type: 'timing', duration: 200 }}
+                                            className={`mt-2 p-3 rounded-2xl ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}
+                                        >
+                                            {loadingCategories ? (
+                                                <View className="py-4 items-center">
+                                                    <ActivityIndicator size="small" color="#6366F1" />
+                                                    <Text className={`mt-2 font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                                        Loading categories...
                                                     </Text>
                                                 </View>
-                                                {selectedCategory?.category_id === category.category_id && (
-                                                    <View className="bg-primary-500 rounded-full p-1">
-                                                        <Text className="text-white text-xs">✓</Text>
-                                                    </View>
-                                                )}
-                                            </TouchableOpacity>
-                                        ))}
-                                    </View>
-                                )}
+                                            ) : (
+                                                <ScrollView
+                                                    nestedScrollEnabled
+                                                    className="max-h-48"
+                                                    showsVerticalScrollIndicator={false}
+                                                >
+                                                    {categories.map(category => (
+                                                        <TouchableOpacity
+                                                            key={category.category_id}
+                                                            onPress={() => selectCategory(category)}
+                                                            className={`flex-row items-center justify-between py-2 px-3 mb-1 rounded-xl ${
+                                                                selectedCategory?.category_id === category.category_id
+                                                                    ? isDark ? 'bg-primary-500/20' : 'bg-primary-500/10'
+                                                                    : 'bg-transparent'
+                                                            }`}
+                                                        >
+                                                            <View className="flex-row items-center">
+                                                                <Text className="mr-2">{category.icon}</Text>
+                                                                <Text className={`font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                                                    {category.category_name}
+                                                                </Text>
+                                                            </View>
+                                                            {selectedCategory?.category_id === category.category_id && (
+                                                                <View className="bg-primary-500 rounded-full p-1">
+                                                                    <Text className="text-white text-xs">✓</Text>
+                                                                </View>
+                                                            )}
+                                                        </TouchableOpacity>
+                                                    ))}
+                                                </ScrollView>
+                                            )}
+                                        </MotiView>
+                                    )}
+                                </AnimatePresence>
                             </View>
+
+                            {/* Public/Private Toggle */}
+                            <TouchableOpacity
+                                onPress={togglePublicStatus}
+                                className={`flex-row items-center justify-between px-4 py-3 rounded-2xl mb-4 ${
+                                    isDark ? 'bg-theme-input-dark' : 'bg-gray-100'
+                                }`}
+                            >
+                                <View className="flex-row items-center">
+                                    <Users size={18} color={isDark ? '#94A3B8' : '#6B7280'} />
+                                    <Text className={`ml-2 font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                        {isPublic ? 'Public post' : 'Private post'}
+                                    </Text>
+                                </View>
+
+                                <View className={`w-5 h-5 rounded-full ${
+                                    isPublic
+                                        ? 'bg-primary-500'
+                                        : isDark ? 'bg-gray-600' : 'bg-gray-300'
+                                } justify-center items-center`}>
+                                    {isPublic && <Text className="text-white text-xs">✓</Text>}
+                                </View>
+                            </TouchableOpacity>
 
                             {/* Selected Images Preview */}
                             {selectedImages.length > 0 && (
@@ -312,32 +395,32 @@ const BlogPostCreator = ({ isDark, onPost }) => {
                                     >
                                         <ImageIcon size={20} color="#6366F1" />
                                     </TouchableOpacity>
-
-                                    <TouchableOpacity
-                                        className="flex-row items-center rounded-xl p-2 bg-primary-500/10"
-                                    >
-                                        <Clock size={20} color="#6366F1" />
-                                    </TouchableOpacity>
                                 </View>
 
                                 <TouchableOpacity
                                     onPress={handlePost}
-                                    disabled={(!title.trim() && !content.trim() && selectedImages.length === 0) || !selectedCategory}
+                                    disabled={isLoading || (!title.trim() && !content.trim() && selectedImages.length === 0) || !selectedCategory}
                                     className={`px-4 py-2 rounded-xl ${
-                                        (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory
-                                            ? 'bg-primary-500'
-                                            : isDark ? 'bg-gray-700' : 'bg-gray-200'
+                                        isLoading
+                                            ? isDark ? 'bg-gray-700' : 'bg-gray-200'
+                                            : (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory
+                                                ? 'bg-primary-500'
+                                                : isDark ? 'bg-gray-700' : 'bg-gray-200'
                                     }`}
                                 >
-                                    <Text
-                                        className={`font-montserrat-medium ${
-                                            (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory
-                                                ? 'text-white'
-                                                : isDark ? 'text-gray-500' : 'text-gray-400'
-                                        }`}
-                                    >
-                                        Post
-                                    </Text>
+                                    {isLoading ? (
+                                        <ActivityIndicator size="small" color={isDark ? "#9CA3AF" : "#6B7280"} />
+                                    ) : (
+                                        <Text
+                                            className={`font-montserrat-medium ${
+                                                (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory
+                                                    ? 'text-white'
+                                                    : isDark ? 'text-gray-500' : 'text-gray-400'
+                                            }`}
+                                        >
+                                            Post
+                                        </Text>
+                                    )}
                                 </TouchableOpacity>
                             </View>
                         </ScrollView>

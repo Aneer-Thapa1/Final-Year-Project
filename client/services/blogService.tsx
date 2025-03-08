@@ -3,28 +3,63 @@ import { fetchData, postData, updateData, deleteData } from './api';
 // Blog interfaces
 export interface Blog {
     blog_id?: number;
-    blog_title: string;
-    blog_description: string;
-    blog_image?: string;
-    category_id: number; // Added category_id field
+    title: string;
+    content: string;
+    image?: string;
+    category_id: number;
     user_id?: number;
-    created_at?: string;
-    updated_at?: string;
+    is_featured?: boolean;
+    view_count?: number;
+    createdAt?: string;
+    updatedAt?: string;
+    user?: User;
+    category?: Category;
+    likesCount?: number;
+    commentsCount?: number;
+    isLiked?: boolean;
+    isSaved?: boolean;
 }
 
-export interface BlogResponse {
+export interface User {
+    user_id: number;
+    user_name: string;
+    avatar?: string;
+}
+
+export interface Category {
+    category_id: number;
+    category_name: string;
+    icon?: string;
+    color?: string;
+    sortOrder?: number;
+}
+
+export interface Comment {
+    comment_id: number;
+    content: string;
+    user_id: number;
+    blog_id: number;
+    parent_id?: number;
+    createdAt: string;
+    updatedAt: string;
+    user?: User;
+    replies?: Comment[];
+}
+
+export interface ApiResponse<T> {
     success: boolean;
-    data?: Blog[] | Blog;
+    data?: T;
     message?: string;
     error?: string;
 }
 
 // Function to add a new blog with category support
 export const addBlog = async (blogData: {
-    blog_title: string;
-    blog_description: string;
-    blog_image?: string;
-    category_id: number; // Added category_id parameter
+    title: string;
+    content: string;
+    image?: string;
+    category_id: number;
+    is_featured?: boolean;
 }) => {
     try {
         // Validate category_id is present
@@ -35,12 +70,12 @@ export const addBlog = async (blogData: {
         return await postData('/api/blog/addBlog', blogData);
     } catch (error: any) {
         console.error('Error in addBlog:', error);
-        throw error.response?.data?.message || error.message || 'Failed to add blog';
+        throw error.response?.data?.error || error.message || 'Failed to add blog';
     }
 };
 
 // Function to get blogs for the feed (with pagination)
-export const getBlogs = async (lastLoadedBlogId?: number, limit: number = 7) => {
+export const getBlogs = async (lastLoadedBlogId?: number, limit: number = 10) => {
     try {
         let url = '/api/blog/getBlogs';
 
@@ -51,118 +86,143 @@ export const getBlogs = async (lastLoadedBlogId?: number, limit: number = 7) => 
             url += `?limit=${limit}`;
         }
 
-        const response = await fetchData(url);
+        const response = await fetchData<ApiResponse<Blog[]>>(url);
 
-        // Check if response is valid and has data
-        if (response && response.data) {
-            return response.data; // If response has a data property
-        } else if (Array.isArray(response)) {
-            return response; // If response itself is the array
+        // Process response
+        if (response && response.success && response.data) {
+            return response;
         } else {
             console.warn('Unexpected API response format in getBlogs:', response);
-            return []; // Return empty array as fallback
+            return { success: true, data: [] };
         }
     } catch (error: any) {
         console.error('Error in getBlogs:', error);
-        throw error.response?.data?.message || 'Failed to fetch blogs';
-    }
-};
-
-// Function to get blogs by category
-export const getBlogsByCategory = async (categoryId: number, lastLoadedBlogId?: number, limit: number = 7) => {
-    try {
-        let url = `/api/blog/getBlogsByCategory/${categoryId}`;
-
-        // Add query parameters if provided
-        if (lastLoadedBlogId) {
-            url += `?lastLoadedBlogId=${lastLoadedBlogId}&limit=${limit}`;
-        } else {
-            url += `?limit=${limit}`;
-        }
-
-        const response = await fetchData(url);
-
-        // Check if response is valid and has data
-        if (response && response.data) {
-            return response.data;
-        } else if (Array.isArray(response)) {
-            return response;
-        } else {
-            console.warn('Unexpected API response format in getBlogsByCategory:', response);
-            return [];
-        }
-    } catch (error: any) {
-        console.error('Error in getBlogsByCategory:', error);
-        throw error.response?.data?.message || 'Failed to fetch blogs by category';
+        throw error.response?.data?.error || 'Failed to fetch blogs';
     }
 };
 
 // Function to get blogs created by the authenticated user
 export const getUserBlogs = async () => {
     try {
-        const response = await fetchData('/api/blog/getUserBlogs');
+        const response = await fetchData<ApiResponse<Blog[]>>('/api/blog/getUserBlogs');
 
-        // Check if response is valid and has data
-        if (response && response.data) {
-            return response.data;
-        } else if (Array.isArray(response)) {
+        if (response && response.success && response.data) {
             return response;
         } else {
             console.warn('Unexpected API response format in getUserBlogs:', response);
-            return [];
+            return { success: true, data: [] };
         }
     } catch (error: any) {
         console.error('Error in getUserBlogs:', error);
-        throw error.response?.data?.message || 'Failed to fetch your blogs';
+        throw error.response?.data?.error || 'Failed to fetch your blogs';
     }
 };
 
 // Function to edit an existing blog
 export const editBlog = async (blogId: number, blogData: Partial<Blog>) => {
     try {
-        return await updateData(`/api/blog/editBlog/${blogId}`, blogData);
+        return await updateData<ApiResponse<Blog>>(`/api/blog/editBlog/${blogId}`, blogData);
     } catch (error: any) {
         console.error('Error in editBlog:', error);
-        throw error.response?.data?.message || 'Failed to update blog';
+        throw error.response?.data?.error || 'Failed to update blog';
     }
 };
 
 // Function to delete a blog
 export const deleteBlog = async (blogId: number) => {
     try {
-        return await deleteData(`/api/blog/deleteBlog/${blogId}`);
+        return await deleteData<ApiResponse<void>>(`/api/blog/deleteBlog/${blogId}`);
     } catch (error: any) {
         console.error('Error in deleteBlog:', error);
-        throw error.response?.data?.message || 'Failed to delete blog';
+        throw error.response?.data?.error || 'Failed to delete blog';
     }
 };
 
-// Function to like/unlike a blog (for future implementation)
+// Function to like/unlike a blog
 export const toggleLikeBlog = async (blogId: number) => {
     try {
-        return await postData(`/api/blog/toggleLike/${blogId}`, {});
+        return await postData<ApiResponse<{liked: boolean}>>(`/api/blog/toggleLike/${blogId}`, {});
     } catch (error: any) {
         console.error('Error in toggleLikeBlog:', error);
-        throw error.response?.data?.message || 'Failed to like/unlike blog';
+        throw error.response?.data?.error || 'Failed to like/unlike blog';
     }
 };
 
-// Function to add a comment to a blog (for future implementation)
-export const addComment = async (blogId: number, comment: string) => {
+// Function to get blog details with comments
+export const getBlogDetails = async (blogId: number) => {
     try {
-        return await postData(`/api/blog/addComment/${blogId}`, { comment });
+        return await fetchData<ApiResponse<Blog>>(`/api/blog/getBlogDetails/${blogId}`);
+    } catch (error: any) {
+        console.error('Error in getBlogDetails:', error);
+        throw error.response?.data?.error || 'Failed to fetch blog details';
+    }
+};
+
+// Function to add a comment to a blog
+export const addComment = async (blogId: number, commentData: {
+    content: string;
+    parent_id?: number;
+}) => {
+    try {
+        return await postData<ApiResponse<Comment>>(`/api/blog/addComment/${blogId}`, commentData);
     } catch (error: any) {
         console.error('Error in addComment:', error);
-        throw error.response?.data?.message || 'Failed to add comment';
+        throw error.response?.data?.error || 'Failed to add comment';
     }
 };
 
-// Function to get a single blog with details
-export const getSingleBlog = async (blogId: number) => {
+// Function to get trending blogs
+export const getTrendingBlogs = async (limit: number = 5) => {
     try {
-        return await fetchData(`/api/blog/getSingleBlog/${blogId}`);
+        return await fetchData<ApiResponse<Blog[]>>(`/api/blog/trending?limit=${limit}`);
     } catch (error: any) {
-        console.error('Error in getSingleBlog:', error);
-        throw error.response?.data?.message || 'Failed to fetch blog details';
+        console.error('Error in getTrendingBlogs:', error);
+        throw error.response?.data?.error || 'Failed to fetch trending blogs';
     }
 };
+
+// Function to get categories
+export const getCategories = async () => {
+    try {
+        const response = await fetchData<ApiResponse<Category[]>>('/api/blog/categories');
+
+        if (response && response.success && response.data) {
+            return response;
+        } else {
+            console.warn('Unexpected API response format in getCategories:', response);
+            return { success: true, data: [] };
+        }
+    } catch (error: any) {
+        console.error('Error in getCategories:', error);
+        throw error.response?.data?.error || 'Failed to fetch categories';
+    }
+};
+
+// Create a custom hook for categories (for React components)
+export const useCategories = () => {
+    const [categories, setCategories] = React.useState<Category[]>([]);
+    const [loading, setLoading] = React.useState<boolean>(true);
+    const [error, setError] = React.useState<string | null>(null);
+
+    React.useEffect(() => {
+        const fetchCategories = async () => {
+            try {
+                setLoading(true);
+                const response = await getCategories();
+                if (response.success && response.data) {
+                    setCategories(response.data);
+                }
+            } catch (err: any) {
+                setError(err.message || 'Failed to fetch categories');
+                console.error('Error fetching categories:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchCategories();
+    }, []);
+
+    return { categories, loading, error };
+};
+

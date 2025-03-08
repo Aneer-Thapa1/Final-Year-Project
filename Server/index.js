@@ -6,6 +6,8 @@ const { initializeSocket } = require("./app/config/socketConfig");
 require("dotenv").config();
 const routes = require("./app/routes/route.js");
 var cors = require("cors");
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 
@@ -16,6 +18,16 @@ app.use(cors({
     credentials: true,
     origin: "*",
 }));
+
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+app.use('/uploads', (req, res, next) => {
+    console.log(`Static file request: ${req.url}`);
+    next();
+}, express.static(path.join(__dirname, 'uploads')));
 
 app.use("/api", routes);
 
