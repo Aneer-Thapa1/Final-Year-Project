@@ -1,1 +1,1 @@
-const getProfileDetails =
+const getProfileDetails =cd

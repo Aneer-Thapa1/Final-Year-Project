@@ -1,287 +1,496 @@
 import {
   View,
-  ScrollView,
   Text,
   useColorScheme,
   ActivityIndicator,
   RefreshControl,
   Alert,
-  Image
+  TouchableOpacity,
+  Share,
+  FlatList
 } from "react-native";
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { MotiView } from "moti";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { ArrowUpCircle } from 'lucide-react-native';
 
 // Components
 import BlogPostCreator from "../../components/BlogPostCreator";
-import BlogPost from "../../components/BlogPost";
+import Blog from "../../components/Blogs";
+
 import icons from "../../constants/images";
 
-// Import the blog service properly
+// Import the blog service
 import * as blogService from "../../services/blogService";
 
-const Explore: React.FC = () => {
+const Explore = ({ navigation }) => {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
-  const [posts, setPosts] = useState<any[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [refreshing, setRefreshing] = useState<boolean>(false);
-  const [lastLoadedBlogId, setLastLoadedBlogId] = useState<number>(0);
-  const [hasMorePosts, setHasMorePosts] = useState<boolean>(true);
 
-  // Get user details from Redux state
-  const userDetails = useSelector((state: any) => state.user);
-  const userId = userDetails?.id || userDetails?.user_id;
+  // State management
+  const [posts, setPosts] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastLoadedBlogId, setLastLoadedBlogId] = useState(0);
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [creatingPost, setCreatingPost] = useState(false);
+  const [scrollY, setScrollY] = useState(0);
+  const [showScrollToTop, setShowScrollToTop] = useState(false);
+  const [page, setPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  // Sample profile image for demo purposes
-  const userProfile = icons.maleProfile;
+  // Refs
+  const flatListRef = useRef(null);
+  const isMounted = useRef(true);
+  const PAGE_SIZE = 10; // Number of posts to load per page
 
-  // Load posts from backend
-  const loadPosts = async (refresh = false) => {
-    try {
-      setLoading(true);
-      // If refreshing, start from the beginning
-      const startId = refresh ? 0 : lastLoadedBlogId;
+  // Get user from Redux
+  const user = useSelector(state => state.user);
+  const userId = user?.user?.user?.user_id || user?.id;
 
-      const response = await blogService.getBlogs(startId);
+  // Normalize blog post data to ensure consistent structure
+  const normalizeBlogData = (post) => {
+    if (!post) return null;
 
-      if (response && response.data) {
-        const fetchedPosts = response.data;
-
-        // If refreshing, replace posts. Otherwise, append new posts
-        if (refresh) {
-          setPosts(fetchedPosts);
-        } else {
-          setPosts(prev => [...prev, ...fetchedPosts]);
-        }
-
-        // Update last loaded ID for pagination - use the last post's ID
-        if (fetchedPosts.length > 0) {
-          const lastPost = fetchedPosts[fetchedPosts.length - 1];
-          setLastLoadedBlogId(lastPost.blog_id);
-        }
-
-        // Check if there are more posts to load
-        setHasMorePosts(fetchedPosts.length > 0);
-      } else {
-        // No data or empty array
-        if (refresh) {
-          setPosts([]);
-        }
-        setHasMorePosts(false);
-      }
-    } catch (error) {
-      console.error('Error loading posts:', error);
-      Alert.alert('Error', 'Failed to load posts. Please try again.');
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  // Handle creating a new post
-  const handleCreatePost = async (newPost: any) => {
-    try {
-      setLoading(true);
-
-      // Map from UI post format to API format
-      const blogData = {
-        blog_title: newPost.title || 'My Progress Update',
-        blog_description: newPost.content,
-        blog_image: newPost.images && newPost.images.length > 0 ? newPost.images[0] : undefined,
-        category_id: newPost.category_id // Make sure to include the category_id
-      };
-
-      // Call the API to create the post
-      const response = await blogService.addBlog(blogData);
-
-      if (response && response.success) {
-        // Show success feedback
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-        // Refresh the posts to include the new one
-        await loadPosts(true);
-      } else {
-        throw new Error('Failed to create post');
-      }
-    } catch (error) {
-      console.error('Error creating post:', error);
-      Alert.alert('Error', 'Could not create your post. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handle liking a post (placeholder - implement when API supports it)
-  const handleLikePost = async (postId: number) => {
-    try {
-      // For now, we'll just update the UI optimistically
-      // This should be replaced with an actual API call when available
-
-      const updatedPosts = posts.map(post => {
-        if (post.blog_id === postId) {
-          // Toggle like state
-          const isLiked = post.isLiked || false;
-          return {
-            ...post,
-            likes: isLiked ? (post.likes || 1) - 1 : (post.likes || 0) + 1,
-            isLiked: !isLiked
-          };
-        }
-        return post;
-      });
-
-      setPosts(updatedPosts);
-
-      // In future: Call the API to toggle like status
-      // await blogService.toggleLikeBlog(postId);
-    } catch (error) {
-      console.error('Error liking post:', error);
-    }
-  };
-
-  // Pull-to-refresh handler
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    setLastLoadedBlogId(0); // Reset pagination
-    await loadPosts(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  }, []);
-
-  // Load more posts when user reaches the end
-  const loadMorePosts = async () => {
-    if (!loading && hasMorePosts) {
-      await loadPosts();
-    }
-  };
-
-  // Load posts when the screen is focused
-  useFocusEffect(
-      useCallback(() => {
-        loadPosts(true);
-      }, [])
-  );
-
-  // Initial load
-  useEffect(() => {
-    loadPosts(true);
-  }, []);
-
-  // Format posts from API to match UI component expectations
-  const formatPost = (apiPost: any) => {
     return {
-      id: apiPost.blog_id.toString(),
-      title: apiPost.blog_title,
-      content: apiPost.blog_description,
-      images: apiPost.blog_image ? [apiPost.blog_image] : [],
-      author: apiPost.user?.username || 'Anonymous',
-      authorId: apiPost.user_id,
-      categoryId: apiPost.category_id,
-      categoryName: apiPost.category?.category_name || 'Uncategorized',
-      likes: apiPost.likes || 0,
-      comments: apiPost.comments || 0,
-      createdAt: new Date(apiPost.created_at),
-      isLiked: apiPost.isLiked || false
+      ...post,
+      blog_id: post.blog_id || 0,
+      title: post.title || '',
+      content: post.content || '',
+      image: post.image || null,
+      user: post.user || { user_name: 'Anonymous' },
+      category: post.category || { category_name: 'General' },
+      likesCount: post.likesCount || 0,
+      commentsCount: post.commentsCount || 0,
+      createdAt: post.createdAt || new Date().toISOString(),
+      isLiked: !!post.isLiked
     };
   };
 
-  return (
-      <ScrollView
-          className={`flex-1 ${isDark ? "bg-theme-background-dark" : "bg-gray-50"}`}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                tintColor={isDark ? "#E5E7EB" : "#4B5563"}
-            />
-          }
-          onScrollEndDrag={loadMorePosts}
-      >
-        {/* Content container with padding */}
-        <View className="py-4">
-          {/* Blog Post Creator */}
-          <View className="px-4">
-            <BlogPostCreator
-                isDark={isDark}
-                onPost={handleCreatePost}
-            />
-          </View>
+  // Initial load of posts
+  const initialLoadPosts = async () => {
+    try {
+      setInitialLoading(true);
+      setPage(1);
+      setLastLoadedBlogId(0);
 
-          {/* Section title */}
-          <View className="px-4 mt-2 mb-4">
-            <Text className={`text-xl font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-              Community Feed
+      const response = await blogService.getBlogs(0, PAGE_SIZE);
+
+      if (response && response.success && Array.isArray(response.data)) {
+        const normalizedPosts = response.data.map(normalizeBlogData).filter(Boolean);
+
+        if (isMounted.current) {
+          setPosts(normalizedPosts);
+
+          if (normalizedPosts.length > 0) {
+            const lastPost = normalizedPosts[normalizedPosts.length - 1];
+            setLastLoadedBlogId(lastPost.blog_id);
+            setHasMorePosts(normalizedPosts.length >= PAGE_SIZE);
+          } else {
+            setHasMorePosts(false);
+          }
+        }
+      } else {
+        if (isMounted.current) {
+          setPosts([]);
+          setHasMorePosts(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading initial posts:', error);
+      if (isMounted.current) {
+        Alert.alert('Error', 'Failed to load posts. Please try again.');
+      }
+    } finally {
+      if (isMounted.current) {
+        setInitialLoading(false);
+      }
+    }
+  };
+
+  // Load more posts (lazy loading)
+  const loadMorePosts = async () => {
+    if (!hasMorePosts || loadingMore || refreshing) return;
+
+    try {
+      setLoadingMore(true);
+
+      const response = await blogService.getBlogs(lastLoadedBlogId, PAGE_SIZE);
+
+      if (response && response.success && Array.isArray(response.data)) {
+        const normalizedPosts = response.data.map(normalizeBlogData).filter(Boolean);
+
+        if (isMounted.current) {
+          if (normalizedPosts.length > 0) {
+            setPosts(prev => [...prev, ...normalizedPosts]);
+            setPage(prev => prev + 1);
+
+            const lastPost = normalizedPosts[normalizedPosts.length - 1];
+            setLastLoadedBlogId(lastPost.blog_id);
+            setHasMorePosts(normalizedPosts.length >= PAGE_SIZE);
+          } else {
+            setHasMorePosts(false);
+          }
+        }
+      } else {
+        if (isMounted.current) {
+          setHasMorePosts(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading more posts:', error);
+      // Don't show alert for lazy loading errors to avoid annoying users
+    } finally {
+      if (isMounted.current) {
+        setLoadingMore(false);
+      }
+    }
+  };
+
+  // Handle refresh (pull-to-refresh)
+  const handleRefresh = async () => {
+    if (refreshing) return;
+
+    try {
+      setRefreshing(true);
+
+      // Reset pagination
+      setPage(1);
+      setLastLoadedBlogId(0);
+
+      const response = await blogService.getBlogs(0, PAGE_SIZE);
+
+      if (response && response.success && Array.isArray(response.data)) {
+        const normalizedPosts = response.data.map(normalizeBlogData).filter(Boolean);
+
+        if (isMounted.current) {
+          setPosts(normalizedPosts);
+
+          if (normalizedPosts.length > 0) {
+            const lastPost = normalizedPosts[normalizedPosts.length - 1];
+            setLastLoadedBlogId(lastPost.blog_id);
+            setHasMorePosts(normalizedPosts.length >= PAGE_SIZE);
+          } else {
+            setHasMorePosts(false);
+          }
+        }
+      } else {
+        if (isMounted.current) {
+          setPosts([]);
+          setHasMorePosts(false);
+        }
+      }
+
+      // Provide haptic feedback after successful refresh
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (error) {
+      console.error('Error refreshing posts:', error);
+      if (isMounted.current) {
+        Alert.alert('Error', 'Failed to refresh posts. Please try again.');
+      }
+    } finally {
+      if (isMounted.current) {
+        setRefreshing(false);
+      }
+    }
+  };
+
+  // Create new post
+  const handleCreatePost = async (postData) => {
+    try {
+      setCreatingPost(true);
+
+      const blogData = {
+        title: postData.title || undefined,
+        content: postData.content,
+        image: postData.images && postData.images.length > 0 ? postData.images[0] : undefined,
+        category_id: postData.category_id
+      };
+
+      const response = await blogService.addBlog(blogData);
+
+      if (response && response.success) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert('Success', 'Your post has been created!');
+        // Refresh to show the new post
+        handleRefresh();
+      } else {
+        throw new Error(response.error || 'Failed to create post');
+      }
+    } catch (error) {
+      console.error('Error creating post:', error);
+      Alert.alert('Error', error.message || 'Could not create your post. Please try again.');
+    } finally {
+      setCreatingPost(false);
+    }
+  };
+
+  // Handle liking a post
+  const handleLikePost = async (blogId, isLiked) => {
+    try {
+      await blogService.toggleLikeBlog(blogId);
+
+      // Update post in local state
+      setPosts(currentPosts =>
+          currentPosts.map(post =>
+              post.blog_id === blogId
+                  ? {
+                    ...post,
+                    isLiked: !isLiked,
+                    likesCount: isLiked ? post.likesCount - 1 : post.likesCount + 1
+                  }
+                  : post
+          )
+      );
+    } catch (error) {
+      console.error('Error liking post:', error);
+      // If API call fails, we don't need to alert the user
+      // The Blog component handles its own state
+    }
+  };
+
+  // Handle adding a comment
+  const handleAddComment = async (blogId, comment) => {
+    try {
+      await blogService.addComment(blogId, { content: comment });
+
+      // Update comment count in local state
+      setPosts(currentPosts =>
+          currentPosts.map(post =>
+              post.blog_id === blogId
+                  ? { ...post, commentsCount: post.commentsCount + 1 }
+                  : post
+          )
+      );
+    } catch (error) {
+      console.error('Error adding comment:', error);
+      Alert.alert('Error', 'Failed to add comment. Please try again.');
+    }
+  };
+
+  // Handle sharing a post
+  const handleSharePost = async (blogId) => {
+    try {
+      const post = posts.find(p => p.blog_id === blogId);
+      const title = post?.title || 'Check out this post';
+
+      await Share.share({
+        message: title,
+        url: `yourapp://blog/${blogId}`
+      });
+    } catch (error) {
+      console.error('Error sharing post:', error);
+    }
+  };
+
+  // Handle bookmarking a post
+  const handleBookmarkPost = async (blogId, isBookmarked) => {
+    try {
+      // In a real app, you would call an API to save/unsave the post
+      console.log(`Post ${blogId} ${isBookmarked ? 'bookmarked' : 'unbookmarked'}`);
+
+      // Provide haptic feedback
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    } catch (error) {
+      console.error('Error bookmarking post:', error);
+    }
+  };
+
+  // Scroll to top function
+  const scrollToTop = () => {
+    if (flatListRef.current) {
+      flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
+  // Handle scroll events
+  const handleScroll = (event) => {
+    const currentScrollY = event.nativeEvent.contentOffset.y;
+    setScrollY(currentScrollY);
+    setShowScrollToTop(currentScrollY > 300);
+  };
+
+  // Load posts when screen is focused
+  useFocusEffect(
+      useCallback(() => {
+        initialLoadPosts();
+
+        return () => {
+          // This will run when the screen loses focus
+        };
+      }, [])
+  );
+
+  // Initialize component
+  useEffect(() => {
+    isMounted.current = true;
+
+    // Initial load
+    initialLoadPosts();
+
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  // Header component for FlatList
+  const ListHeader = useCallback(() => (
+      <View className="px-4 pb-2">
+        {/* Blog Creator */}
+        <BlogPostCreator
+            isDark={isDark}
+            onPost={handleCreatePost}
+            isLoading={creatingPost}
+        />
+
+        {/* Section heading */}
+        <View className="flex-row items-center justify-between mt-4 mb-2">
+          <Text className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            Community Feed
+          </Text>
+        </View>
+      </View>
+  ), [isDark, creatingPost, handleCreatePost]);
+
+  // Empty state component when no posts are available
+  const EmptyComponent = useCallback(() => (
+      <View className={`p-6 rounded-xl mx-4 mt-4 ${isDark ? 'bg-gray-800' : 'bg-gray-100'}`}>
+        <Text className={`text-center font-bold text-lg mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+          No posts available
+        </Text>
+        <Text className={`text-center ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-4`}>
+          Be the first to share your progress with the community.
+        </Text>
+        <TouchableOpacity
+            onPress={() => {
+              // Scroll up to post creator
+              scrollToTop();
+              // Add a short delay to let animation complete
+              setTimeout(() => {
+                // Logic to focus on post creator
+              }, 300);
+            }}
+            className="bg-primary-500 py-2 px-4 rounded-lg self-center"
+        >
+          <Text className="text-white font-medium">Create Post</Text>
+        </TouchableOpacity>
+      </View>
+  ), [isDark, scrollToTop]);
+
+  // Render a single blog post
+  const renderBlog = useCallback(({ item }) => {
+    // Add defensive check to avoid rendering null/undefined items
+    if (!item || typeof item !== 'object' || !item.blog_id) {
+      console.warn('Invalid blog post data:', item);
+      return null;
+    }
+
+    return (
+        <View className="px-4 mb-4">
+          <Blog
+              blog={item}
+              isDark={isDark}
+              onLike={handleLikePost}
+              onComment={handleAddComment}
+              onShare={handleSharePost}
+              onBookmark={handleBookmarkPost}
+              authorProfile={item.user?.avatar ? { uri: item.user.avatar } : icons.maleProfile}
+          />
+        </View>
+    );
+  }, [isDark, handleLikePost, handleAddComment, handleSharePost, handleBookmarkPost]);
+
+  // Footer component to show loading indicator or end of list message
+  const ListFooter = useCallback(() => {
+    if (loadingMore) {
+      return (
+          <View className="py-6 items-center">
+            <ActivityIndicator size="small" color="#6366F1" />
+            <Text className={`mt-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+              Loading more posts...
             </Text>
           </View>
+      );
+    }
 
-          {/* Loading state */}
-          {loading && !refreshing && (
-              <View className="py-8 items-center">
+    if (!hasMorePosts && posts.length > 0) {
+      return (
+          <View className="py-6 items-center">
+            <Text className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+              You've reached the end!
+            </Text>
+          </View>
+      );
+    }
+
+    return <View className="h-20" />;
+  }, [loadingMore, hasMorePosts, posts.length, isDark]);
+
+  return (
+      <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+        <FlatList
+            ref={flatListRef}
+            data={posts}
+            renderItem={renderBlog}
+            keyExtractor={(item) => (item?.blog_id || Math.random()).toString()}
+            ListHeaderComponent={ListHeader}
+            ListEmptyComponent={!initialLoading ? EmptyComponent : null}
+            ListFooterComponent={ListFooter}
+            onEndReached={loadMorePosts}
+            onEndReachedThreshold={0.5}
+            refreshControl={
+              <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor={isDark ? "#E5E7EB" : "#6366F1"}
+                  colors={[isDark ? "#E5E7EB" : "#6366F1"]}
+              />
+            }
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={5}
+            maxToRenderPerBatch={10}
+            updateCellsBatchingPeriod={50}
+            windowSize={21}
+        />
+
+        {/* Initial Loading Overlay */}
+        {initialLoading && (
+            <View className="absolute inset-0 justify-center items-center bg-black/20">
+              <View className={`p-4 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
                 <ActivityIndicator size="large" color="#6366F1" />
-                <Text className={`mt-2 font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                <Text className={`mt-2 text-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
                   Loading posts...
                 </Text>
               </View>
-          )}
+            </View>
+        )}
 
-          {/* Empty state */}
-          {!loading && posts.length === 0 && (
-              <MotiView
-                  from={{ opacity: 0, translateY: 10 }}
-                  animate={{ opacity: 1, translateY: 0 }}
-                  className="mx-4 p-6 rounded-3xl items-center justify-center bg-primary-500/10"
+        {/* Scroll to top button */}
+        {showScrollToTop && (
+            <MotiView
+                from={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: 'timing', duration: 300 }}
+                className="absolute bottom-6 right-6"
+            >
+              <TouchableOpacity
+                  onPress={scrollToTop}
+                  className={`w-12 h-12 rounded-full shadow-lg items-center justify-center ${
+                      isDark ? 'bg-gray-800' : 'bg-white'
+                  }`}
               >
-                <Text className="text-primary-500 font-montserrat-bold text-lg mb-2">
-                  No posts yet
-                </Text>
-                <Text className={`text-center font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-600'} mb-4`}>
-                  Be the first to share your progress with the community.
-                </Text>
-              </MotiView>
-          )}
-
-          {/* Posts list */}
-          {!loading && posts.map((post, index) => {
-            // Format the post data for the UI component
-            const formattedPost = formatPost(post);
-
-            return (
-                <MotiView
-                    key={formattedPost.id || index}
-                    from={{ opacity: 0, translateY: 20 }}
-                    animate={{ opacity: 1, translateY: 0 }}
-                    transition={{
-                      type: 'timing',
-                      duration: 500,
-                      delay: index * 100,
-                    }}
-                >
-                  <BlogPost
-                      post={formattedPost}
-                      isDark={isDark}
-                      authorProfile={formattedPost.authorId === userId ? userProfile : null}
-                      onLike={() => handleLikePost(post.blog_id)}
-                  />
-                </MotiView>
-            );
-          })}
-
-          {/* Loading more indicator */}
-          {hasMorePosts && !loading && posts.length > 0 && (
-              <View className="py-4 items-center">
-                <Text className={`font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                  Pull to load more posts
-                </Text>
-              </View>
-          )}
-
-          {/* Bottom padding */}
-          <View className="h-20" />
-        </View>
-      </ScrollView>
+                <ArrowUpCircle size={24} color={isDark ? '#60A5FA' : '#3B82F6'} />
+              </TouchableOpacity>
+            </MotiView>
+        )}
+      </SafeAreaView>
   );
 };
 

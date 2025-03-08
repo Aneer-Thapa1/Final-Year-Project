@@ -48,17 +48,17 @@ const Home = () => {
             }
 
             // Fetch upcoming habits with better error handling
-            let upcomingResponse;
-            try {
-                upcomingResponse = await getUpcomingHabits();
-            } catch (err) {
-                console.error('Failed to fetch upcoming habits:', err);
-                upcomingResponse = [];
-            }
+            // let upcomingResponse;
+            // try {
+            //     upcomingResponse = await getUpcomingHabits();
+            // } catch (err) {
+            //     console.error('Failed to fetch upcoming habits:', err);
+            //     upcomingResponse = [];
+            // }
 
             // Ensure we have arrays before filtering
             const habitsData = Array.isArray(habitsResponse) ? habitsResponse : [];
-            const upcomingData = Array.isArray(upcomingResponse) ? upcomingResponse : [];
+            // const upcomingData = Array.isArray(upcomingResponse) ? upcomingResponse : [];
 
             // Safe filtering after ensuring habitsData is an array
             const activeHabits = habitsData.filter(habit =>
@@ -66,7 +66,7 @@ const Home = () => {
             );
 
             setHabits(activeHabits);
-            setUpcomingHabits(upcomingData);
+            // setUpcomingHabits(upcomingData);
             setError(null);
         } catch (err) {
             console.error('Error loading data:', err);
@@ -135,18 +135,18 @@ const Home = () => {
                         isDark={isDark}
                     />
 
-                    {upcomingHabits && upcomingHabits.length > 0 ? (
-                        <UpcomingHabitsSection
-                            upcomingHabits={upcomingHabits}
-                            isDark={isDark}
-                        />
-                    ) : (
-                        <View className={`p-4 rounded-xl mb-4 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
-                            <Text className={`text-center font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                                No upcoming habits.
-                            </Text>
-                        </View>
-                    )}
+                    {/*{upcomingHabits && upcomingHabits.length > 0 ? (*/}
+                    {/*    <UpcomingHabitsSection*/}
+                    {/*        upcomingHabits={upcomingHabits}*/}
+                    {/*        isDark={isDark}*/}
+                    {/*    />*/}
+                    {/*) : (*/}
+                    {/*    <View className={`p-4 rounded-xl mb-4 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>*/}
+                    {/*        <Text className={`text-center font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>*/}
+                    {/*            No upcoming habits.*/}
+                    {/*        </Text>*/}
+                    {/*    </View>*/}
+                    {/*)}*/}
 
                     {/* Add some bottom padding for better scrolling experience */}
                     <View className="h-20" />

@@ -1,5 +1,3 @@
-// Complete Enhanced Schema for Habit Tracking Mobile App
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -9,96 +7,77 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// User model with enhanced habit tracking capabilities
+// 🔹 User Model - Includes Social & Habit Preferences
 model User {
   user_id              Int       @id @default(autoincrement())
   user_email           String    @unique
   user_name            String
-  gender               String
   avatar               String?
-  points_gained        Int?      @default(0)
+  points_gained        Int
   password             String
+  gender               String? // Made optional to be more inclusive
   timezone             String    @default("UTC")
-  onVacation           Boolean   @default(false)
-  vacation_start       DateTime?
-  vacation_end         DateTime?
-  dailyGoal            Int       @default(3) // Number of habits user aims to complete daily
-  weeklyGoal           Int       @default(15) // Number of habits user aims to complete weekly
   prefersNotifications Boolean   @default(true)
-  theme_preference     String    @default("auto") // "light", "dark", or "auto"
+  theme_preference     String    @default("auto") // "light", "dark", "auto"
   language             String    @default("en")
   premium_status       Boolean   @default(false)
   premium_until        DateTime?
 
+  // Vacation Mode
+  onVacation     Boolean   @default(false)
+  vacation_start DateTime?
+  vacation_end   DateTime?
+
+  // Habit Goals
+  dailyGoal   Int @default(3)
+  weeklyGoal  Int @default(15)
+  monthlyGoal Int @default(60) // Added monthly goal
+
+  // Social & Activity Relationships
+  sentFriendRequests     FriendRequest[] @relation("SentRequests")
+  receivedFriendRequests FriendRequest[] @relation("ReceivedRequests")
+  blogs                  Blog[]
+  sentMessages           Message[]       @relation("SentMessages")
+  receivedMessages       Message[]       @relation("ReceivedMessages")
+  likes                  Like[]
+  comments               Comment[] // Added comments relationship
+
+  // Habit Tracking Relationships
+  habits         Habit[]
+  habitLogs      HabitLog[]
+  habitStreaks   HabitStreak[]
+  habitReminders HabitReminder[]
+  achievements   UserAchievement[] // Added achievements relationship
+  challenges     UserChallenge[] // Added challenges relationship
+
+  // Timestamps
   registeredAt DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
+  lastActive   DateTime @default(now()) // Added last active timestamp
 
-  // Social connections
-  blogs             Blog[]
-  likes             Like[]
-  sentRequests      FriendRequest[]   @relation("sentRequests")
-  receivedRequests  FriendRequest[]   @relation("receivedRequests")
-  chat_participants ChatParticipant[]
-  sent_messages     Message[]
-  message_reactions MessageReaction[]
+  // Stats (for quick access without calculating)
+  totalHabitsCreated   Int @default(0)
+  totalHabitsCompleted Int @default(0)
+  currentDailyStreak   Int @default(0)
+  longestDailyStreak   Int @default(0)
 
-  // Habit tracking related connections
-  habits                    Habit[]
-  habitLogs                 HabitLog[]
-  habitStreaks              HabitStreak[]
-  habitChallenges           HabitChallenge[]
-  habitTags                 HabitTag[]
-  habitStatistics           HabitStatistics?
-  habitGroups               HabitGroup[]
-  habitJournalEntries       HabitJournalEntry[]
-  habitMilestones           HabitMilestone[] // Track achievement milestones
-  habitBackups              HabitBackup[] // For backup/restore functionality
-  habitNotificationSettings NotificationSettings?
+  @@index([user_email]) // Index for faster queries
 }
 
-// Blog system models
-model Blog {
-  blog_id          Int      @id @default(autoincrement())
-  blog_title       String?
-  blog_description String?
-  blog_image       String
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  category_id Int
-  category    Category @relation(fields: [category_id], references: [category_id])
-
-  user_id Int
-  user    User   @relation(fields: [user_id], references: [user_id])
-  likes   Like[]
-}
-
-model Category {
-  category_id   Int    @id @default(autoincrement())
-  category_name String
-
-  blogs Blog[]
-}
-
-model Like {
-  like_id Int @id @default(autoincrement())
-
-  liked_by  Int
-  user      User     @relation(fields: [liked_by], references: [user_id])
-  blog_id   Int
-  blog      Blog     @relation(fields: [blog_id], references: [blog_id])
-  createdAt DateTime @default(now())
-}
-
+// 🔹 Friend Request - For Social Connection Features
 model FriendRequest {
-  request_id     Int           @id @default(autoincrement())
-  sender_id      Int
-  receiver_id    Int
-  request_status RequestStatus @default(PENDING)
-  createdAt      DateTime      @default(now())
+  request_id  Int           @id @default(autoincrement())
+  sender_id   Int
+  receiver_id Int
+  status      RequestStatus @default(PENDING)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt // Added updatedAt field
 
-  sender   User @relation(fields: [sender_id], references: [user_id], name: "sentRequests")
-  receiver User @relation(fields: [receiver_id], references: [user_id], name: "receivedRequests")
+  // Relationships - renamed to make more sense
+  sender   User @relation(fields: [sender_id], references: [user_id], name: "SentRequests", onDelete: Cascade)
+  receiver User @relation(fields: [receiver_id], references: [user_id], name: "ReceivedRequests", onDelete: Cascade)
+
+  @@unique([sender_id, receiver_id]) // Prevent duplicate friend requests
 }
 
 enum RequestStatus {
@@ -107,7 +86,123 @@ enum RequestStatus {
   REJECTED
 }
 
-// Enhanced habit domains with better organization
+// 🔹 Habit Model - Core Model for Habit Tracking
+model Habit {
+  habit_id    Int       @id @default(autoincrement())
+  user_id     Int
+  name        String
+  description String?
+  start_date  DateTime
+  end_date    DateTime?
+  is_active   Boolean   @default(true)
+  is_favorite Boolean   @default(false)
+  is_public   Boolean   @default(false) // Added public flag for social sharing
+  icon        String?
+  color       String?
+  image       String?
+
+  // Frequency & Tracking
+  frequency_type     FrequencyType @default(DAILY) // Added enum for frequency type
+  frequency_value    Int // Number of times to complete
+  frequency_interval Int // Over what period
+  custom_frequency   Json? // For complex scheduling patterns
+  specific_days      Int[] // Store days of week (0-6) for weekly habits
+
+  // Habit Type
+  tracking_type TrackingType @default(BOOLEAN)
+  duration_goal Int? // For timed habits (minutes)
+  count_goal    Int? // For countable habits
+  numeric_goal  Float? // For measurable habits
+  units         String? // Units for measurement
+
+  // Smart Features
+  skip_on_vacation     Boolean @default(false)
+  require_evidence     Boolean @default(false)
+  require_verification Boolean @default(false)
+  location_based       Boolean @default(false) // Added location-based tracking
+  location_name        String? // Optional location name
+  location_lat         Float? // Optional latitude
+  location_lng         Float? // Optional longitude
+  location_radius      Int? // Optional radius in meters
+
+  // Motivation
+  motivation_quote      String?
+  external_resource_url String?
+
+  // Tags & Categories
+  tags Json? // Array of tags as JSON (e.g., ["health", "morning"])
+
+  // Cues & Rewards (for habit building psychology)
+  cue        String? // What triggers this habit
+  reward     String? // What reward comes after completion
+  difficulty DifficultyLevel @default(MEDIUM) // Added difficulty level
+
+  // Related Records
+  habitLogs  HabitLog[]
+  streak     HabitStreak[]
+  reminders  HabitReminder[]
+  challenges HabitChallenge[] // Added challenges relationship
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Domain relationship
+  domain_id Int
+  domain    HabitDomain @relation(fields: [domain_id], references: [domain_id])
+
+  // User relationship
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id]) // Index for faster queries
+  @@index([domain_id])
+}
+
+enum FrequencyType {
+  DAILY // Every day
+  WEEKLY // Specific days of week
+  MONTHLY // Specific days of month
+  INTERVAL // Every X days
+  X_TIMES // X times per period (week/month)
+}
+
+enum DifficultyLevel {
+  VERY_EASY
+  EASY
+  MEDIUM
+  HARD
+  VERY_HARD
+}
+
+// 🔹 Habit Log - Tracks Each Completion of a Habit
+model HabitLog {
+  log_id           Int      @id @default(autoincrement())
+  habit_id         Int
+  user_id          Int
+  completed        Boolean  @default(true)
+  completion_notes String?
+  completed_at     DateTime @default(now())
+  skipped          Boolean  @default(false) // Added skipped flag
+  mood             Int? // Optional mood rating (1-5)
+
+  // For tracked habits
+  duration_completed Int? // For duration habits
+  count_completed    Int? // For count habits
+  numeric_completed  Float? // For numeric habits
+
+  // Evidence
+  evidence_image      String? // URL to evidence image
+  verified_by_user_id Int? // ID of user who verified completion
+
+  // Relationships
+  habit Habit @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([habit_id, completed_at]) // Index for faster streak calculations
+  @@index([user_id, completed_at])
+}
+
+// 🔹 Habit Domain - Categories for organizing habits
 model HabitDomain {
   domain_id   Int      @id @default(autoincrement())
   name        String
@@ -119,542 +214,267 @@ model HabitDomain {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  // Relationships
   habits Habit[]
 }
 
-// Enhanced frequency types for more flexibility
-model FrequencyType {
-  frequency_type_id Int      @id @default(autoincrement())
-  name              String // "Daily", "Weekly", "Monthly", "Custom"
-  description       String?
-  interval_type     String // "day", "week", "month", "year"
-  is_default        Boolean  @default(false)
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-
-  habits Habit[]
-}
-
-// Model for habit difficulty levels
-model DifficultyLevel {
-  difficulty_id Int      @id @default(autoincrement())
-  name          String // "Easy", "Medium", "Hard", "Very Hard"
-  points_value  Int // Points earned when completing (e.g., 5, 10, 20, 30)
-  description   String?
-  color         String // For UI display
-  icon          String?
-  is_default    Boolean  @default(false)
-  sortOrder     Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  habits Habit[]
-}
-
-// Core habit model - highly flexible for all types of habits
-model Habit {
-  habit_id    Int       @id @default(autoincrement())
-  name        String
-  description String?
-  start_date  DateTime
-  end_date    DateTime?
-  is_active   Boolean   @default(true)
-  is_archived Boolean   @default(false)
-  is_favorite Boolean   @default(false)
-  is_private  Boolean   @default(false)
-  icon        String?
-  color       String?
-  image       String?
-
-  // Enhanced frequency handling
-  frequency_value    Int // Number of times
-  frequency_interval Int // Days between repetitions
-  frequency_text     String? // Human-readable frequency (e.g., "Daily at 7:00 AM")
-  custom_frequency   Json? // For fully custom frequencies
-
-  // Enhanced tracking options
-  tracking_type TrackingType @default(BOOLEAN)
-  duration_goal Int? // For timed habits (in minutes)
-  count_goal    Int? // For countable habits (e.g., 10 glasses of water)
-  numeric_goal  Float? // For progress-based habits
-  units         String? // Units for measurement (e.g., "pages", "miles")
-
-  // Enhanced flexibility options
-  skip_on_vacation     Boolean @default(false)
-  allow_backfill       Boolean @default(true) // Can user complete past days?
-  roll_over            Boolean @default(false) // Do uncompleted instances roll over?
-  require_evidence     Boolean @default(false) // Require photo evidence of completion?
-  require_verification Boolean @default(false) // Require friend verification?
-
-  // Enhanced motivation features
-  motivation_quote      String?
-  motivation_image      String?
-  external_resource_url String?
-
-  // Smart habit features
-  is_smart_schedule    Boolean @default(false) // Use ML for auto-scheduling
-  has_location_trigger Boolean @default(false) // Trigger based on location
-  location_lat         Float? // Latitude for location trigger
-  location_long        Float? // Longitude for location trigger
-  location_radius      Int? // Radius in meters for location trigger
-  location_name        String? // Name of location (e.g., "Home", "Gym")
-
-  // Timestamps
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  // Enhanced connections
-  user_id           Int
-  user              User             @relation(fields: [user_id], references: [user_id])
-  domain_id         Int
-  domain            HabitDomain      @relation(fields: [domain_id], references: [domain_id])
-  frequency_type_id Int
-  frequencyType     FrequencyType    @relation(fields: [frequency_type_id], references: [frequency_type_id])
-  difficulty_id     Int?
-  difficulty        DifficultyLevel? @relation(fields: [difficulty_id], references: [difficulty_id])
-
-  // Related records
-  schedules           HabitSchedule[]
-  logs                HabitLog[]
-  streak              HabitStreak?
-  reminders           HabitReminder[]
-  habitTagRelations   HabitTagRelation[]
-  habitGroupItems     HabitGroupItem[]
-  habitChallengeItems HabitChallengeItem[]
-  subtasks            HabitSubtask[] // For checklist type habits
-  milestones          HabitMilestone[] // Achievement milestones
-}
-
-// Tracking types for different habit formats
-enum TrackingType {
-  BOOLEAN // Simple yes/no completion
-  COUNTABLE // Count-based (e.g., 8 glasses of water)
-  TIMER // Time-based (e.g., 30 minutes of reading)
-  NUMERIC // Progress-based (e.g., pages read, miles run)
-  CHECKLIST // Multiple subtasks to complete
-}
-
-// Enhanced schedule for more flexible timing
-model HabitSchedule {
-  schedule_id       Int        @id @default(autoincrement())
-  day_of_week       Int[] // 1-7 for weekly habits
-  day_of_month      Int[] // 1-31 for monthly habits
-  month_of_year     Int[] // 1-12 for yearly habits
-  week_of_month     Int[] // 1-5 for "first Monday" type schedules
-  times_of_day      DateTime[] // Times for daily habits
-  time_window_start DateTime? // Start of allowed completion window
-  time_window_end   DateTime? // End of allowed completion window
-  is_all_day        Boolean    @default(false) // For habits without specific time
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
-
-  habit_id Int
-  habit    Habit @relation(fields: [habit_id], references: [habit_id])
-}
-
-// Subtasks for checklist-type habits
-model HabitSubtask {
-  subtask_id  Int      @id @default(autoincrement())
-  name        String
-  description String?
-  is_required Boolean  @default(true)
-  sort_order  Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  habit_id Int
-  habit    Habit @relation(fields: [habit_id], references: [habit_id])
-
-  // Completed subtasks in logs
-  log_items ChecklistItem[]
-}
-
-// Enhanced habit logging with richer data
-model HabitLog {
-  log_id            Int      @id @default(autoincrement())
-  completed_at      DateTime
-  notes             String?
-  mood_rating       Int? // 1-5 scale
-  energy_rating     Int? // 1-5 scale
-  difficulty_rating Int? // 1-5 scale
-  skipped           Boolean  @default(false)
-  skip_reason       String? // Reason for skipping
-  count_value       Int? // For countable habits
-  duration_value    Int? // For timer habits in minutes
-  numeric_value     Float? // For numeric progress habits
-  location          String? // Where habit was completed
-  location_lat      Float? // Latitude where completed
-  location_long     Float? // Longitude where completed
-  evidence_photo    String? // URL to evidence photo
-  verified_by       Int? // User ID of verifier
-  was_prompted      Boolean  @default(false) // Was this from a notification
-  completion_source String? // "manual", "notification", "widget", "shortcut"
-  createdAt         DateTime @default(now())
-
-  habit_id Int
-  habit    Habit @relation(fields: [habit_id], references: [habit_id])
-  user_id  Int
-  user     User  @relation(fields: [user_id], references: [user_id])
-
-  // For checklist type habits
-  checklist_items ChecklistItem[]
-}
-
-// Checklist items in habit logs
-model ChecklistItem {
-  item_id      Int       @id @default(autoincrement())
-  is_completed Boolean   @default(false)
-  completed_at DateTime?
-
-  log_id   Int
-  habitLog HabitLog @relation(fields: [log_id], references: [log_id])
-
-  subtask_id   Int?
-  habitSubtask HabitSubtask? @relation(fields: [subtask_id], references: [subtask_id])
-}
-
-// Enhanced streak tracking
+// 🔹 Habit Streak - Tracks Consistency of Habit Completion
 model HabitStreak {
-  streak_id         Int       @id @default(autoincrement())
-  current_streak    Int       @default(1)
-  longest_streak    Int       @default(1)
-  total_completions Int       @default(1)
-  success_rate      Float     @default(100.0) // Percentage of successful completions
-  start_date        DateTime // When the current streak started
-  last_completed_at DateTime? // Last completion date
-  freeze_until      DateTime? // Streak freeze until date
-  freeze_count      Int       @default(0) // Number of freezes used
-  updated_at        DateTime  @updatedAt
+  streak_id      Int       @id @default(autoincrement())
+  habit_id       Int
+  user_id        Int
+  current_streak Int       @default(0)
+  longest_streak Int       @default(0)
+  last_completed DateTime?
 
-  // For weekly/monthly streaks
-  current_week_streak  Int @default(0)
-  longest_week_streak  Int @default(0)
-  current_month_streak Int @default(0)
-  longest_month_streak Int @default(0)
+  // Added fields for streak history
+  start_date     DateTime? // When current streak started
+  streak_history Json? // History of all streaks for visualization
 
-  habit_id Int   @unique
-  habit    Habit @relation(fields: [habit_id], references: [habit_id])
-  user_id  Int
-  user     User  @relation(fields: [user_id], references: [user_id])
+  // Relationships
+  habit Habit @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([habit_id])
+  @@index([user_id])
 }
 
-// Enhanced reminders with smart notifications
+// 🔹 Habit Reminder - For Notification System
 model HabitReminder {
-  reminder_id     Int          @id @default(autoincrement())
-  reminder_times  DateTime[] // Array of times to send reminders
-  is_enabled      Boolean      @default(true)
-  reminder_type   ReminderType @default(PUSH)
-  sound           String? // Custom notification sound
-  smart_reminder  Boolean      @default(false) // Use ML to suggest optimal times
-  adaptive_timing Boolean      @default(false) // Adjust timing based on completion history
-  message         String? // Custom reminder message
-  snooze_enabled  Boolean      @default(true) // Allow snoozing reminder
-  snooze_duration Int          @default(10) // Snooze duration in minutes
-  only_when_due   Boolean      @default(true) // Only remind for due habits
-  reminder_days   Int[] // Days to send reminders (1-7)
-  created_at      DateTime     @default(now())
-  updated_at      DateTime     @updatedAt
-
-  habit_id Int
-  habit    Habit @relation(fields: [habit_id], references: [habit_id])
-}
-
-// Reminder types
-enum ReminderType {
-  PUSH // Push notification
-  EMAIL // Email notification
-  SMS // SMS notification
-  CALENDAR // Calendar integration
-  WIDGET // Home screen widget
-}
-
-// User-defined tags for organizing habits
-model HabitTag {
-  tag_id     Int      @id @default(autoincrement())
-  name       String
-  color      String   @default("#808080")
-  icon       String?
-  is_default Boolean  @default(false)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  user_id Int
-  user    User @relation(fields: [user_id], references: [user_id])
-
-  habits HabitTagRelation[]
-}
-
-// Many-to-many relationship between habits and tags
-model HabitTagRelation {
-  relation_id Int      @id @default(autoincrement())
-  habit_id    Int
-  tag_id      Int
-  created_at  DateTime @default(now())
-
-  habit Habit    @relation(fields: [habit_id], references: [habit_id])
-  tag   HabitTag @relation(fields: [tag_id], references: [tag_id])
-
-  @@unique([habit_id, tag_id])
-}
-
-// Habit groups (morning routine, workout plan, etc.)
-model HabitGroup {
-  group_id    Int      @id @default(autoincrement())
-  name        String
-  description String?
-  icon        String?
-  color       String   @default("#808080")
-  is_active   Boolean  @default(true)
-  is_default  Boolean  @default(false)
-  sort_order  Int      @default(0)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-
-  user_id Int
-  user    User @relation(fields: [user_id], references: [user_id])
-
-  habits HabitGroupItem[]
-}
-
-// Many-to-many relationship between habits and groups
-model HabitGroupItem {
-  item_id    Int      @id @default(autoincrement())
-  habit_id   Int
-  group_id   Int
-  sort_order Int      @default(0) // For ordering habits within a group
-  created_at DateTime @default(now())
-
-  habit Habit      @relation(fields: [habit_id], references: [habit_id])
-  group HabitGroup @relation(fields: [group_id], references: [group_id])
-
-  @@unique([habit_id, group_id])
-}
-
-// Habit challenges for social motivation
-model HabitChallenge {
-  challenge_id  Int      @id @default(autoincrement())
-  name          String
-  description   String?
-  start_date    DateTime
-  end_date      DateTime
-  is_public     Boolean  @default(false)
-  is_featured   Boolean  @default(false)
-  image         String?
-  reward_points Int      @default(100)
-  difficulty    String? // "beginner", "intermediate", "advanced"
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
-
-  creator_id Int
-  creator    User @relation(fields: [creator_id], references: [user_id])
-
-  habits       HabitChallengeItem[]
-  participants HabitChallengeParticipant[]
-}
-
-// Many-to-many relationship between habits and challenges
-model HabitChallengeItem {
-  item_id              Int      @id @default(autoincrement())
+  reminder_id          Int            @id @default(autoincrement())
   habit_id             Int
-  challenge_id         Int
-  required_completions Int      @default(1) // How many times to complete
-  created_at           DateTime @default(now())
+  user_id              Int
+  reminder_time        DateTime
+  repeat               ReminderRepeat @default(DAILY) // Changed to enum
+  notification_message String?
+  is_enabled           Boolean        @default(true) // Added enabled flag
+  smart_reminder       Boolean        @default(false) // Added smart reminder flag
+  snooze_count         Int            @default(0) // Track how many times reminders are snoozed
 
-  habit     Habit          @relation(fields: [habit_id], references: [habit_id])
-  challenge HabitChallenge @relation(fields: [challenge_id], references: [challenge_id])
-
-  @@unique([habit_id, challenge_id])
+  // Relationships
+  habit Habit @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
+  user  User  @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
 }
 
-// Challenge participants
-model HabitChallengeParticipant {
-  participant_id Int       @id @default(autoincrement())
-  challenge_id   Int
+enum ReminderRepeat {
+  ONCE
+  DAILY
+  WEEKDAYS
+  WEEKENDS
+  WEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+// 🔹 Tracking Type - Enum for Different Habit Tracking Methods
+enum TrackingType {
+  BOOLEAN
+  DURATION
+  COUNT
+  NUMERIC
+}
+
+// 🔹 Achievement - For Gamification
+model Achievement {
+  achievement_id Int             @id @default(autoincrement())
+  name           String
+  description    String
+  icon           String
+  badge_image    String?
+  criteria_type  AchievementType
+  criteria_value Int // Value needed to unlock (e.g. 7 for 7-day streak)
+  xp_value       Int             @default(0) // Experience points for gamification
+  is_hidden      Boolean         @default(false) // Some achievements can be surprises
+
+  // Relationships
+  userAchievements UserAchievement[]
+}
+
+// User-Achievement join table
+model UserAchievement {
   user_id        Int
-  joined_at      DateTime  @default(now())
-  completed      Boolean   @default(false)
-  progress       Float     @default(0.0) // Percentage complete (0-100)
-  completions    Int       @default(0) // Number of habits completed
-  last_activity  DateTime?
+  achievement_id Int
+  unlocked_at    DateTime @default(now())
 
-  challenge HabitChallenge @relation(fields: [challenge_id], references: [challenge_id])
+  // Relationships
+  user        User        @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievement_id], references: [achievement_id], onDelete: Cascade)
 
-  @@unique([challenge_id, user_id])
+  @@id([user_id, achievement_id]) // Composite primary key
 }
 
-// Overall habit statistics for analytics
-model HabitStatistics {
-  stats_id              Int      @id @default(autoincrement())
-  habits_created        Int      @default(0)
-  habits_completed      Int      @default(0)
-  habits_active         Int      @default(0)
-  total_active_days     Int      @default(0)
-  longest_active_streak Int      @default(0)
-  current_active_streak Int      @default(0)
-  completion_rate       Float    @default(0.0)
-  most_productive_day   Int      @default(1) // 1-7 for day of week
-  most_productive_time  Int      @default(9) // 0-23 for hour of day
-  most_skipped_habit_id Int?
-  last_synced           DateTime @default(now())
-  updated_at            DateTime @updatedAt
-
-  // Monthly statistics
-  current_month_completions Int   @default(0)
-  last_month_completions    Int   @default(0)
-  month_over_month_growth   Float @default(0.0)
-
-  user_id Int  @unique
-  user    User @relation(fields: [user_id], references: [user_id])
+enum AchievementType {
+  STREAK_LENGTH
+  TOTAL_COMPLETIONS
+  CONSECUTIVE_DAYS
+  PERFECT_WEEK
+  PERFECT_MONTH
+  HABIT_DIVERSITY
+  DOMAIN_MASTERY
+  SOCIAL_ENGAGEMENT
 }
 
-// Journal entries related to habit progress
-model HabitJournalEntry {
-  entry_id   Int      @id @default(autoincrement())
-  title      String?
-  content    String
-  mood       Int? // 1-5 scale
-  energy     Int? // 1-5 scale
-  tags       String[] // Array of tags
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
+// 🔹 Challenge - For Social Challenges
+model Challenge {
+  challenge_id Int      @id @default(autoincrement())
+  name         String
+  description  String
+  start_date   DateTime
+  end_date     DateTime
+  created_by   Int // User who created the challenge
+  is_public    Boolean  @default(false)
+  image        String?
 
-  user_id Int
-  user    User @relation(fields: [user_id], references: [user_id])
+  // Relationships
+  habitChallenges HabitChallenge[] // Which habits are part of this challenge
+  userChallenges  UserChallenge[] // Which users joined this challenge
 }
 
-// Milestone achievements
-model HabitMilestone {
-  milestone_id  Int           @id @default(autoincrement())
-  title         String
-  description   String?
-  achieved_at   DateTime?
-  reward_points Int           @default(10)
-  type          MilestoneType
-  threshold     Int // Value needed to achieve milestone
-  icon          String?
-  created_at    DateTime      @default(now())
+// Challenge-Habit join table
+model HabitChallenge {
+  challenge_id Int
+  habit_id     Int
 
-  habit_id Int?
-  habit    Habit? @relation(fields: [habit_id], references: [habit_id])
-  user_id  Int
-  user     User   @relation(fields: [user_id], references: [user_id])
+  // Relationships
+  challenge Challenge @relation(fields: [challenge_id], references: [challenge_id], onDelete: Cascade)
+  habit     Habit     @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
+
+  @@id([challenge_id, habit_id]) // Composite primary key
 }
 
-// Types of milestones
-enum MilestoneType {
-  STREAK_LENGTH // Achieve streak of certain length
-  TOTAL_COMPLETIONS // Total completions of a habit
-  PERFECT_WEEK // Complete all scheduled habits in a week
-  PERFECT_MONTH // Complete all scheduled habits in a month
-  HABITS_CREATED // Number of habits created
-  DAYS_ACTIVE // Number of days app used
+// User-Challenge join table
+model UserChallenge {
+  user_id      Int
+  challenge_id Int
+  joined_at    DateTime @default(now())
+  progress     Float    @default(0) // Percentage of completion
+  completed    Boolean  @default(false)
+
+  // Relationships
+  user      User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  challenge Challenge @relation(fields: [challenge_id], references: [challenge_id], onDelete: Cascade)
+
+  @@id([user_id, challenge_id]) // Composite primary key
 }
 
-// App notification settings
-model NotificationSettings {
-  settings_id        Int       @id @default(autoincrement())
-  general_enabled    Boolean   @default(true)
-  morning_summary    Boolean   @default(true)
-  morning_time       DateTime // Time for morning summary
-  evening_summary    Boolean   @default(true)
-  evening_time       DateTime // Time for evening summary
-  streak_alerts      Boolean   @default(true)
-  achievement_alerts Boolean   @default(true)
-  friend_activity    Boolean   @default(true)
-  challenge_updates  Boolean   @default(true)
-  quiet_hours_start  DateTime?
-  quiet_hours_end    DateTime?
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
-
-  user_id Int  @unique
-  user    User @relation(fields: [user_id], references: [user_id])
-}
-
-// Backup system for habits
-model HabitBackup {
-  backup_id   Int      @id @default(autoincrement())
-  backup_data Json // Full JSON backup of user's habits
-  backup_name String?
-  created_at  DateTime @default(now())
-
-  user_id Int
-  user    User @relation(fields: [user_id], references: [user_id])
-}
-
-// Chat system models
-model ChatRoom {
-  room_id    Int      @id @default(autoincrement())
-  name       String?
-  type       ChatType @default(DIRECT)
-  created_at DateTime @default(now())
-  updated_at DateTime @updatedAt
-
-  messages     Message[]
-  participants ChatParticipant[]
-
-  @@map("chat_rooms")
-}
-
-model ChatParticipant {
-  participant_id Int      @id @default(autoincrement())
-  user_id        Int
-  room_id        Int
-  joined_at      DateTime @default(now())
-  last_read_at   DateTime @default(now())
-  is_admin       Boolean  @default(false)
-  is_muted       Boolean  @default(false)
-
-  user      User     @relation(fields: [user_id], references: [user_id])
-  chat_room ChatRoom @relation(fields: [room_id], references: [room_id])
-
-  @@unique([user_id, room_id])
-  @@map("chat_participants")
-}
-
-model Message {
-  message_id   Int         @id @default(autoincrement())
-  room_id      Int
-  sender_id    Int
-  content      String
-  message_type MessageType @default(TEXT)
-  is_edited    Boolean     @default(false)
-  created_at   DateTime    @default(now())
-  updated_at   DateTime    @updatedAt
-
-  reply_to_id Int?
-  reply_to    Message?  @relation("ReplyChain", fields: [reply_to_id], references: [message_id])
-  replies     Message[] @relation("ReplyChain")
-
-  chat_room ChatRoom          @relation(fields: [room_id], references: [room_id])
-  sender    User              @relation(fields: [sender_id], references: [user_id])
-  reactions MessageReaction[]
-
-  @@map("messages")
-}
-
-model MessageReaction {
-  reaction_id Int      @id @default(autoincrement())
-  message_id  Int
+// 🔹 Blog - For Social Sharing and Progress Updates
+model Blog {
+  blog_id     Int      @id @default(autoincrement())
   user_id     Int
-  emoji       String
-  created_at  DateTime @default(now())
+  category_id Int
+  title       String
+  content     String
+  image       String?
+  is_featured Boolean  @default(false) // Added featured flag for highlighting quality content
+  view_count  Int      @default(0) // Track popularity
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt // Added updatedAt field
 
-  message Message @relation(fields: [message_id], references: [message_id])
-  user    User    @relation(fields: [user_id], references: [user_id])
+  // Relationships
+  user     User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  category Category  @relation(fields: [category_id], references: [category_id])
+  likes    Like[]
+  comments Comment[] // Added comments relationship
 
-  @@unique([message_id, user_id, emoji])
-  @@map("message_reactions")
+  @@index([user_id, createdAt]) // Index for faster timeline queries
 }
 
-enum ChatType {
-  DIRECT
-  GROUP
+// 🔹 Category Model - For Organizing Blog Posts
+model Category {
+  category_id   Int     @id @default(autoincrement())
+  category_name String
+  icon          String?
+  color         String?
+  sortOrder     Int     @default(0) // Added sort order for UI
+
+  // Relationships
+  blogs Blog[]
 }
 
-enum MessageType {
-  TEXT
-  IMAGE
-  FILE
-  SYSTEM
+// 🔹 Like - For Social Engagement with Blogs
+model Like {
+  like_id   Int      @id @default(autoincrement())
+  user_id   Int
+  blog_id   Int
+  createdAt DateTime @default(now())
+
+  // Relationships
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  blog Blog @relation(fields: [blog_id], references: [blog_id], onDelete: Cascade)
+
+  @@unique([user_id, blog_id]) // Prevent duplicate likes
+}
+
+// 🔹 Comment - For Social Interaction on Blogs
+model Comment {
+  comment_id Int      @id @default(autoincrement())
+  user_id    Int
+  blog_id    Int
+  content    String
+  parent_id  Int? // For nested comments/replies
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Relationships
+  user    User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  blog    Blog      @relation(fields: [blog_id], references: [blog_id], onDelete: Cascade)
+  parent  Comment?  @relation("CommentReplies", fields: [parent_id], references: [comment_id], onDelete: SetNull)
+  replies Comment[] @relation("CommentReplies")
+}
+
+// 🔹 Message - For Chat Functionality
+model Message {
+  message_id  Int       @id @default(autoincrement())
+  sender_id   Int
+  receiver_id Int
+  content     String
+  is_read     Boolean   @default(false) // Added read status
+  sentAt      DateTime  @default(now())
+  readAt      DateTime? // Added read timestamp
+
+  // Relationships
+  sender   User @relation(fields: [sender_id], references: [user_id], name: "SentMessages", onDelete: Cascade)
+  receiver User @relation(fields: [receiver_id], references: [user_id], name: "ReceivedMessages", onDelete: Cascade)
+
+  @@index([receiver_id, is_read]) // Index for unread message queries
+}
+
+// 🔹 Notification - For System Notifications
+model Notification {
+  notification_id Int              @id @default(autoincrement())
+  user_id         Int
+  title           String
+  content         String
+  type            NotificationType
+  is_read         Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+  readAt          DateTime?
+  action_url      String? // Optional URL to navigate to when clicked
+
+  // Relationships are handled through the type and related_id fields
+  related_id Int? // ID of related entity (habit_id, challenge_id, etc.)
+}
+
+enum NotificationType {
+  STREAK_MILESTONE
+  ACHIEVEMENT_UNLOCKED
+  FRIEND_REQUEST
+  CHALLENGE_INVITE
+  REMINDER
+  SYSTEM_MESSAGE
+  BLOG_COMMENT
+}
+
+// 🔹 UserStats - For Analytics Dashboard
+model UserStats {
+  stat_id Int      @id @default(autoincrement())
+  user_id Int      @unique
+  date    DateTime @default(now())
+
+  // Daily stats
+  total_habits_completed Int     @default(0)
+  total_duration_tracked Int     @default(0) // In minutes
+  streak_maintained      Boolean @default(false)
+
+  // Weekly/Monthly aggregates can be calculated from daily stats
 }
