@@ -4,6 +4,7 @@ const habitRoute = require('./habitRoute');
 const blogRoute = require('./blogRoute');
 const chatbotRoute = require('./chatbotRoute');
 const domainRoute = require('./domainRoute');
+const friendshipRoute = require('./friendshipRoute');
 
 const router = express.Router();
 
@@ -19,7 +20,10 @@ router.use('/blog', blogRoute)
 // routes related to blog (/api/blog)
 router.use('/chatbot', chatbotRoute)
 
-// routes related to blog (/api/domain)
+// routes related to domain (/api/domain)
 router.use('/domain', domainRoute)
+
+// routes related to friends (/api/friends)
+router.use('/friends', friendshipRoute)
 
 module.exports = router;

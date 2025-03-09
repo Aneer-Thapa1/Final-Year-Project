@@ -1,113 +1,141 @@
-import { View, Text, Image, TouchableOpacity, useColorScheme } from 'react-native'
-import React, { useCallback, useState } from 'react'
-import { MotiView, AnimatePresence } from 'moti'
-import { Trophy, Search, Plus, MessageCircle, UserPlus, X, Check, Filter } from 'lucide-react-native'
-import * as Haptics from 'expo-haptics'
+import { View, Text, Image, TouchableOpacity, useColorScheme, ActivityIndicator, TextInput, Alert } from 'react-native';
+import React, { useCallback, useState, useEffect } from 'react';
+import { useDispatch, useSelector } from 'react-redux';
+import { MotiView, AnimatePresence } from 'moti';
+import { Trophy, Search, Filter, MessageCircle, UserPlus, X, Check, Clock } from 'lucide-react-native';
+import * as Haptics from 'expo-haptics';
+import { debounce } from 'lodash';
 
-const FriendsComponent = ({ isDark }) => {
+// Import Redux actions
+import {
+    fetchFriends,
+    fetchPendingRequests,
+    fetchFriendSuggestions,
+    sendFriendRequest,
+    respondToFriendRequest,
+    removeFriend,
+    searchUsers,
+    clearSearchResults
+} from '../store/slices/friendshipSlice';
+
+const FriendsComponent = ({ isDark, navigation }) => {
     // If isDark is not passed as prop, use system setting
     const systemColorScheme = useColorScheme();
     const darkMode = isDark !== undefined ? isDark : systemColorScheme === 'dark';
+    const dispatch = useDispatch();
 
+    // Get friendship data from Redux store
+    const {
+        friends,
+        pendingRequests,
+        suggestions,
+        searchResults,
+        loading,
+        error
+    } = useSelector(state => state.friendship);
+
+    // Search state
     const [searchActive, setSearchActive] = useState(false);
-    const [pendingRequests, setPendingRequests] = useState([
-        {
-            id: '7',
-            name: 'Rajesh Tamang',
-            username: '@rajeshtmg',
-            points: 735,
-            imageUrl: 'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?fit=crop&w=200&h=200',
-            requestTime: '2h ago'
+    const [searchQuery, setSearchQuery] = useState('');
+
+    // Fetch all data on initial mount
+    useEffect(() => {
+        dispatch(fetchFriends());
+        dispatch(fetchPendingRequests());
+        dispatch(fetchFriendSuggestions());
+    }, [dispatch]);
+
+    // Show errors in alert instead of toast
+    useEffect(() => {
+        if (error) {
+            Alert.alert('Error', error);
         }
-    ]);
+    }, [error]);
 
-    // Friends data with Nepali names
-    const friends = [
-        {
-            id: '1',
-            name: 'Aarav Sharma',
-            username: '@aaravs',
-            points: 1250,
-            imageUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?fit=crop&w=200&h=200',
-            online: true,
-            streak: 14
-        },
-        {
-            id: '2',
-            name: 'Sita Adhikari',
-            username: '@sitaa',
-            points: 980,
-            imageUrl: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?fit=crop&w=200&h=200',
-            online: false,
-            streak: 8
-        },
-        {
-            id: '3',
-            name: 'Niraj Poudel',
-            username: '@nirajp',
-            points: 1430,
-            imageUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?fit=crop&w=200&h=200',
-            online: true,
-            streak: 21
-        },
-        {
-            id: '4',
-            name: 'Priya Gurung',
-            username: '@priyag',
-            points: 890,
-            imageUrl: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?fit=crop&w=200&h=200',
-            online: false,
-            streak: 5
-        },
-    ]
+    // Handle search with debounce
+    const debouncedSearch = useCallback(
+        debounce((query) => {
+            if (query.length >= 2) {
+                dispatch(searchUsers(query));
+            } else {
+                dispatch(clearSearchResults());
+            }
+        }, 500),
+        [dispatch]
+    );
 
-    // Suggested friends data with Nepali names
-    const suggestedFriends = [
-        {
-            id: '5',
-            name: 'Anisha Thapa',
-            username: '@anishat',
-            points: 1100,
-            imageUrl: 'https://images.unsplash.com/photo-1607746882042-944635dfe10e?fit=crop&w=200&h=200',
-            mutualFriends: 3
-        },
-        {
-            id: '6',
-            name: 'Rohan KC',
-            username: '@rohank',
-            points: 1320,
-            imageUrl: 'https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?fit=crop&w=200&h=200',
-            mutualFriends: 5
-        },
-    ]
+    // Handle search input changes
+    useEffect(() => {
+        debouncedSearch(searchQuery);
+        return () => debouncedSearch.cancel();
+    }, [searchQuery, debouncedSearch]);
 
-    const handleAddFriend = useCallback((friendId) => {
+    // Handle adding friend
+    const handleAddFriend = useCallback((userId) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-        // Add friend logic would go here
-        // For now, just remove from suggested list in UI
-        const updatedSuggested = suggestedFriends.filter(friend => friend.id !== friendId);
-        // In real app, would call API and update state
-    }, []);
 
+        dispatch(sendFriendRequest(userId))
+            .unwrap()
+            .then(() => {
+                Alert.alert('Success', 'Friend request sent successfully');
+            })
+            .catch((error) => {
+                Alert.alert('Error', error || 'Failed to send friend request');
+            });
+    }, [dispatch]);
+
+    // Handle accepting friend request
     const handleAcceptRequest = useCallback((requestId) => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        // Remove from pending requests
-        setPendingRequests(prev => prev.filter(req => req.id !== requestId));
-        // In real app, would add to friends list and call API
-    }, []);
 
+        dispatch(respondToFriendRequest({ requestId, accept: true }))
+            .unwrap()
+            .then(() => {
+                Alert.alert('Success', 'Friend request accepted');
+            })
+            .catch((error) => {
+                Alert.alert('Error', error || 'Failed to accept request');
+            });
+    }, [dispatch]);
+
+    // Handle rejecting friend request
     const handleRejectRequest = useCallback((requestId) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        // Remove from pending requests
-        setPendingRequests(prev => prev.filter(req => req.id !== requestId));
-        // In real app, would call API
-    }, []);
 
-    const handleMessageFriend = useCallback((friendId) => {
+        dispatch(respondToFriendRequest({ requestId, accept: false }))
+            .unwrap()
+            .then(() => {
+                Alert.alert('Info', 'Friend request rejected');
+            })
+            .catch((error) => {
+                Alert.alert('Error', error || 'Failed to reject request');
+            });
+    }, [dispatch]);
+
+    // Handle messaging a friend
+    const handleMessageFriend = useCallback((friendId, friendName) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        // Open message thread with friend
-        console.log(`Opening message with friend: ${friendId}`);
-    }, []);
+        // Navigate to messaging screen
+        if (navigation) {
+            navigation.navigate('Messages', { friendId, friendName });
+        } else {
+            console.log(`Opening message with friend: ${friendId}`);
+        }
+    }, [navigation]);
+
+    // Handle removing a friend
+    const handleRemoveFriend = useCallback((friendId) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        dispatch(removeFriend(friendId))
+            .unwrap()
+            .then(() => {
+                Alert.alert('Success', 'Friend removed successfully');
+            })
+            .catch((error) => {
+                Alert.alert('Error', error || 'Failed to remove friend');
+            });
+    }, [dispatch]);
 
     // Theme-based styles
     const styles = {
@@ -135,219 +163,421 @@ const FriendsComponent = ({ isDark }) => {
             <View className={`rounded-xl overflow-hidden ${searchActive ? 'mb-4' : ''}`}>
                 <View className={`${styles.searchBg} rounded-full px-4 py-3 flex-row items-center mb-2`}>
                     <Search size={18} color={darkMode ? "#9CA3AF" : "#6B7280"} className="mr-2" />
-                    <Text className={`flex-1 ${styles.textMuted} font-montserrat-regular`}>
-                        Search friends...
-                    </Text>
+                    {searchActive ? (
+                        <TextInput
+                            className={`flex-1 ${styles.textMuted} font-montserrat-regular`}
+                            placeholder="Search friends..."
+                            placeholderTextColor={darkMode ? "#9CA3AF" : "#6B7280"}
+                            value={searchQuery}
+                            onChangeText={setSearchQuery}
+                            autoFocus
+                        />
+                    ) : (
+                        <TouchableOpacity
+                            className="flex-1"
+                            onPress={() => setSearchActive(true)}
+                            activeOpacity={0.8}
+                        >
+                            <Text className={`${styles.textMuted} font-montserrat-regular`}>
+                                Search friends...
+                            </Text>
+                        </TouchableOpacity>
+                    )}
                     <TouchableOpacity
                         className={`p-1 rounded-full ${styles.actionBtnBg}`}
                         onPress={() => {
                             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                             setSearchActive(!searchActive);
+                            if (searchActive) {
+                                setSearchQuery('');
+                                dispatch(clearSearchResults());
+                            }
                         }}
                     >
-                        <Filter size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                        {searchActive ? (
+                            <X size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                        ) : (
+                            <Filter size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                        )}
                     </TouchableOpacity>
                 </View>
             </View>
 
-            {/* Friend Requests Section - Only show if there are pending requests */}
-            {pendingRequests.length > 0 && (
-                <MotiView
-                    from={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="mb-2"
-                >
-                    <Text className={`text-lg font-montserrat-semibold ${styles.text} mb-3`}>
-                        Friend Requests <Text className="text-primary-500 text-sm">{pendingRequests.length}</Text>
-                    </Text>
-
-                    {pendingRequests.map((request) => (
-                        <MotiView
-                            key={request.id}
-                            from={{ opacity: 0, scale: 0.95 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
-                            transition={{ type: 'spring', damping: 15 }}
-                            className={`${styles.cardBgAlt} rounded-xl p-4 mb-3 shadow-sm flex-row items-center`}
-                        >
-                            <Image
-                                source={{ uri: request.imageUrl }}
-                                className="h-12 w-12 rounded-full"
-                            />
-
-                            <View className="flex-1 ml-3">
-                                <Text className={`font-montserrat-semibold ${styles.text}`}>
-                                    {request.name}
-                                </Text>
-                                <View className="flex-row items-center">
-                                    <Text className={`font-montserrat-regular ${styles.textMuted} text-sm`}>
-                                        {request.username}
-                                    </Text>
-                                    <Text className={`font-montserrat-regular ${styles.textSecondary} text-xs ml-2`}>
-                                        · {request.requestTime}
-                                    </Text>
-                                </View>
-                            </View>
-
-                            <View className="flex-row items-center space-x-2">
-                                <TouchableOpacity
-                                    onPress={() => handleRejectRequest(request.id)}
-                                    className={`h-9 w-9 rounded-full ${styles.actionBtnBg} items-center justify-center`}
-                                >
-                                    <X size={18} color={darkMode ? "#F87171" : "#EF4444"} />
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    onPress={() => handleAcceptRequest(request.id)}
-                                    className="h-9 w-9 rounded-full bg-primary-500 items-center justify-center"
-                                >
-                                    <Check size={18} color="#FFFFFF" />
-                                </TouchableOpacity>
-                            </View>
-                        </MotiView>
-                    ))}
-                </MotiView>
-            )}
-
-            {/* My Friends */}
-            <View>
-                <Text className={`text-lg font-montserrat-semibold ${styles.text} mb-3`}>
-                    My Friends <Text className="text-sm text-gray-400">{friends.length}</Text>
-                </Text>
-
-                {friends.map((friend, index) => (
+            {/* Search Results */}
+            <AnimatePresence>
+                {searchActive && (
                     <MotiView
-                        key={friend.id}
-                        from={{ opacity: 0, translateY: 10 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        transition={{
-                            type: 'timing',
-                            duration: 350,
-                            delay: index * 100  // Stagger animation
-                        }}
-                        className={`${styles.cardBg} rounded-xl p-4 mb-3 shadow-sm flex-row items-center`}
+                        from={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="mb-2"
                     >
-                        <View className="relative">
-                            <Image
-                                source={{ uri: friend.imageUrl }}
-                                className="h-12 w-12 rounded-full"
-                            />
-                            {friend.online && (
-                                <View className="h-3 w-3 bg-green-500 rounded-full absolute right-0 bottom-0 border-2 border-white" />
+                        {loading.search ? (
+                            <View className="py-8 items-center justify-center">
+                                <ActivityIndicator color="#4F46E5" />
+                                <Text className={`${styles.textMuted} mt-3 font-montserrat-regular`}>
+                                    Searching...
+                                </Text>
+                            </View>
+                        ) : searchQuery.length >= 2 && searchResults.length === 0 ? (
+                            <View className="py-8 items-center justify-center">
+                                <Text className={`${styles.textMuted} font-montserrat-medium`}>
+                                    No users found
+                                </Text>
+                            </View>
+                        ) : searchResults.length > 0 ? (
+                            <>
+                                <Text className={`text-lg font-montserrat-semibold ${styles.text} mb-3`}>
+                                    Search Results
+                                </Text>
+                                {searchResults.map((user, index) => (
+                                    <MotiView
+                                        key={user.user_id}
+                                        from={{ opacity: 0, scale: 0.95 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.9 }}
+                                        transition={{ type: 'spring', damping: 15, delay: index * 50 }}
+                                        className={`${styles.cardBgAlt} rounded-xl p-4 mb-3 shadow-sm flex-row items-center`}
+                                    >
+                                        <Image
+                                            source={{ uri: user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.user_name)}` }}
+                                            className="h-12 w-12 rounded-full"
+                                        />
+
+                                        <View className="flex-1 ml-3">
+                                            <Text className={`font-montserrat-semibold ${styles.text}`}>
+                                                {user.user_name}
+                                                {user.premium_status && (
+                                                    <Text className="text-amber-500"> ★</Text>
+                                                )}
+                                            </Text>
+                                            {user.lastActive && (
+                                                <Text className={`font-montserrat-regular ${styles.textMuted} text-sm`}>
+                                                    Last active: {formatLastActive(user.lastActive)}
+                                                </Text>
+                                            )}
+                                        </View>
+
+                                        <TouchableOpacity
+                                            onPress={() => handleAddFriend(user.user_id)}
+                                            disabled={user.request_sent || user.request_received || loading.action}
+                                            className={`h-9 w-9 rounded-full ${
+                                                user.request_sent || user.request_received
+                                                    ? styles.actionBtnBg
+                                                    : 'bg-primary-500'
+                                            } items-center justify-center`}
+                                        >
+                                            {user.request_sent ? (
+                                                <Clock size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                                            ) : user.request_received ? (
+                                                <Check size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                                            ) : (
+                                                <UserPlus size={16} color="#FFFFFF" />
+                                            )}
+                                        </TouchableOpacity>
+                                    </MotiView>
+                                ))}
+                            </>
+                        ) : null}
+                    </MotiView>
+                )}
+            </AnimatePresence>
+
+            {/* Main Content - Only show when not actively searching */}
+            {!searchActive && (
+                <>
+                    {/* Friend Requests Section */}
+                    <AnimatePresence>
+                        {pendingRequests.length > 0 && (
+                            <MotiView
+                                from={{ opacity: 0, height: 0 }}
+                                animate={{ opacity: 1, height: 'auto' }}
+                                exit={{ opacity: 0, height: 0 }}
+                                className="mb-2"
+                            >
+                                <View className="flex-row justify-between items-center mb-3">
+                                    <Text className={`text-lg font-montserrat-semibold ${styles.text}`}>
+                                        Friend Requests {pendingRequests.length > 0 && (
+                                        <Text className="text-primary-500 text-sm">{pendingRequests.length}</Text>
+                                    )}
+                                    </Text>
+
+                                    {loading.requests && (
+                                        <ActivityIndicator size="small" color="#4F46E5" />
+                                    )}
+                                </View>
+
+                                {pendingRequests.map((request) => (
+                                    <MotiView
+                                        key={request.request_id}
+                                        from={{ opacity: 0, scale: 0.95 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.9 }}
+                                        transition={{ type: 'spring', damping: 15 }}
+                                        className={`${styles.cardBgAlt} rounded-xl p-4 mb-3 shadow-sm flex-row items-center`}
+                                    >
+                                        {request.sender && (
+                                            <>
+                                                <Image
+                                                    source={{ uri: request.sender.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(request.sender.user_name)}` }}
+                                                    className="h-12 w-12 rounded-full"
+                                                />
+
+                                                <View className="flex-1 ml-3">
+                                                    <Text className={`font-montserrat-semibold ${styles.text}`}>
+                                                        {request.sender.user_name}
+                                                    </Text>
+                                                    <View className="flex-row items-center">
+                                                        <Text className={`font-montserrat-regular ${styles.textSecondary} text-xs`}>
+                                                            {formatRequestTime(request.createdAt)}
+                                                        </Text>
+                                                    </View>
+                                                </View>
+
+                                                <View className="flex-row items-center space-x-2">
+                                                    <TouchableOpacity
+                                                        onPress={() => handleRejectRequest(request.request_id)}
+                                                        className={`h-9 w-9 rounded-full ${styles.actionBtnBg} items-center justify-center`}
+                                                        disabled={loading.action}
+                                                    >
+                                                        <X size={18} color={darkMode ? "#F87171" : "#EF4444"} />
+                                                    </TouchableOpacity>
+
+                                                    <TouchableOpacity
+                                                        onPress={() => handleAcceptRequest(request.request_id)}
+                                                        className="h-9 w-9 rounded-full bg-primary-500 items-center justify-center"
+                                                        disabled={loading.action}
+                                                    >
+                                                        <Check size={18} color="#FFFFFF" />
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </>
+                                        )}
+                                    </MotiView>
+                                ))}
+                            </MotiView>
+                        )}
+                    </AnimatePresence>
+
+                    {/* My Friends */}
+                    <View>
+                        <View className="flex-row justify-between items-center mb-3">
+                            <Text className={`text-lg font-montserrat-semibold ${styles.text}`}>
+                                My Friends <Text className="text-sm text-gray-400">{friends.length}</Text>
+                            </Text>
+
+                            {loading.friends && (
+                                <ActivityIndicator size="small" color="#4F46E5" />
                             )}
                         </View>
 
-                        <View className="flex-1 ml-3">
-                            <Text className={`font-montserrat-semibold ${styles.text}`}>
-                                {friend.name}
-                            </Text>
-                            <View className="flex-row items-center">
-                                <Text className={`font-montserrat-regular ${styles.textMuted} text-sm`}>
-                                    {friend.username}
+                        {!loading.friends && friends.length === 0 ? (
+                            <View className={`${styles.cardBg} rounded-xl p-6 mb-3 items-center justify-center`}>
+                                <Text className={`font-montserrat-medium ${styles.textMuted} text-center mb-2`}>
+                                    You don't have any friends yet
                                 </Text>
-                                {friend.streak > 0 && (
-                                    <View className="flex-row items-center ml-2">
-                                        <Text className="text-amber-500 text-xs">🔥 {friend.streak} days</Text>
+                                <Text className={`font-montserrat-regular ${styles.textSecondary} text-center text-sm`}>
+                                    Search for users or check the suggested friends below
+                                </Text>
+                            </View>
+                        ) : (
+                            friends.map((friend, index) => (
+                                <MotiView
+                                    key={friend.user_id}
+                                    from={{ opacity: 0, translateY: 10 }}
+                                    animate={{ opacity: 1, translateY: 0 }}
+                                    transition={{
+                                        type: 'timing',
+                                        duration: 350,
+                                        delay: index * 100  // Stagger animation
+                                    }}
+                                    className={`${styles.cardBg} rounded-xl p-4 mb-3 shadow-sm flex-row items-center`}
+                                >
+                                    <View className="relative">
+                                        <Image
+                                            source={{ uri: friend.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(friend.user_name)}` }}
+                                            className="h-12 w-12 rounded-full"
+                                        />
+                                        {isRecentlyActive(friend.lastActive) && (
+                                            <View className="h-3 w-3 bg-green-500 rounded-full absolute right-0 bottom-0 border-2 border-white" />
+                                        )}
                                     </View>
-                                )}
-                            </View>
-                        </View>
 
-                        <View className="flex-row items-center">
-                            <View className={`${styles.badgeBg} px-3 py-1 rounded-full flex-row items-center mr-2`}>
-                                <Trophy size={14} color={darkMode ? "#818CF8" : "#4F46E5"} className="mr-1" />
-                                <Text className={`font-montserrat-medium ${styles.badgeText}`}>
-                                    {friend.points}
-                                </Text>
-                            </View>
+                                    <View className="flex-1 ml-3">
+                                        <Text className={`font-montserrat-semibold ${styles.text}`}>
+                                            {friend.user_name}
+                                            {friend.premium_status && (
+                                                <Text className="text-amber-500"> ★</Text>
+                                            )}
+                                        </Text>
+                                        <View className="flex-row items-center">
+                                            <Text className={`font-montserrat-regular ${styles.textMuted} text-sm`}>
+                                                {formatLastActive(friend.lastActive)}
+                                            </Text>
+                                            {friend.streak > 0 && (
+                                                <View className="flex-row items-center ml-2">
+                                                    <Text className="text-amber-500 text-xs">🔥 {friend.streak} days</Text>
+                                                </View>
+                                            )}
+                                        </View>
+                                    </View>
 
-                            <TouchableOpacity
-                                onPress={() => handleMessageFriend(friend.id)}
-                                className={`h-9 w-9 rounded-full ${styles.actionBtnBg} items-center justify-center`}
-                            >
-                                <MessageCircle size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
-                            </TouchableOpacity>
-                        </View>
-                    </MotiView>
-                ))}
-            </View>
+                                    <View className="flex-row items-center space-x-3">
+                                        <TouchableOpacity
+                                            onPress={() => handleMessageFriend(friend.user_id, friend.user_name)}
+                                            className={`h-9 w-9 rounded-full ${styles.actionBtnBg} items-center justify-center`}
+                                        >
+                                            <MessageCircle size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                                        </TouchableOpacity>
 
-            {/* Suggested Friends */}
-            <View>
-                <Text className={`text-lg font-montserrat-semibold ${styles.text} mb-3`}>
-                    Suggested Friends
-                </Text>
+                                        <TouchableOpacity
+                                            onPress={() => handleRemoveFriend(friend.user_id)}
+                                            className={`h-9 w-9 rounded-full ${styles.actionBtnBg} items-center justify-center`}
+                                            disabled={loading.action}
+                                        >
+                                            <X size={16} color={darkMode ? "#F87171" : "#EF4444"} />
+                                        </TouchableOpacity>
+                                    </View>
+                                </MotiView>
+                            ))
+                        )}
+                    </View>
 
-                {suggestedFriends.map((friend, index) => (
-                    <MotiView
-                        key={friend.id}
-                        from={{ opacity: 0, translateY: 10 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        transition={{
-                            type: 'timing',
-                            duration: 350,
-                            delay: 400 + (index * 100)  // Start after Friends section
-                        }}
-                        className={`${styles.cardBgAlt} rounded-xl p-4 mb-3 shadow-sm flex-row items-center`}
-                    >
-                        <Image
-                            source={{ uri: friend.imageUrl }}
-                            className="h-12 w-12 rounded-full"
-                        />
-
-                        <View className="flex-1 ml-3">
-                            <Text className={`font-montserrat-semibold ${styles.text}`}>
-                                {friend.name}
+                    {/* Suggested Friends */}
+                    <View>
+                        <View className="flex-row justify-between items-center mb-3">
+                            <Text className={`text-lg font-montserrat-semibold ${styles.text}`}>
+                                Suggested Friends
                             </Text>
-                            <View className="flex-row items-center">
-                                <Text className={`font-montserrat-regular ${styles.textMuted} text-sm`}>
-                                    {friend.username}
-                                </Text>
-                                {friend.mutualFriends > 0 && (
-                                    <Text className={`font-montserrat-regular ${styles.textSecondary} text-xs ml-2`}>
-                                        · {friend.mutualFriends} mutual friends
-                                    </Text>
-                                )}
-                            </View>
+
+                            {loading.suggestions && (
+                                <ActivityIndicator size="small" color="#4F46E5" />
+                            )}
                         </View>
 
-                        <View className="flex-row items-center space-x-2">
-                            <View className="flex-row items-center">
-                                <Trophy size={14} color={darkMode ? "#9CA3AF" : "#6B7280"} className="mr-1" />
-                                <Text className={`font-montserrat-medium ${styles.textSecondary}`}>
-                                    {friend.points}
+                        {!loading.suggestions && suggestions.length === 0 ? (
+                            <View className={`${styles.cardBgAlt} rounded-xl p-6 mb-3 items-center justify-center`}>
+                                <Text className={`font-montserrat-medium ${styles.textMuted} text-center`}>
+                                    No suggestions available right now
                                 </Text>
                             </View>
+                        ) : (
+                            suggestions.map((user, index) => (
+                                <MotiView
+                                    key={user.user_id}
+                                    from={{ opacity: 0, translateY: 10 }}
+                                    animate={{ opacity: 1, translateY: 0 }}
+                                    transition={{
+                                        type: 'timing',
+                                        duration: 350,
+                                        delay: 400 + (index * 100)  // Start after Friends section
+                                    }}
+                                    className={`${styles.cardBgAlt} rounded-xl p-4 mb-3 shadow-sm flex-row items-center`}
+                                >
+                                    <Image
+                                        source={{ uri: user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.user_name)}` }}
+                                        className="h-12 w-12 rounded-full"
+                                    />
 
-                            <TouchableOpacity
-                                onPress={() => handleAddFriend(friend.id)}
-                                className="h-9 w-9 rounded-full bg-primary-500 items-center justify-center"
-                            >
-                                <UserPlus size={16} color="#FFFFFF" />
-                            </TouchableOpacity>
-                        </View>
+                                    <View className="flex-1 ml-3">
+                                        <Text className={`font-montserrat-semibold ${styles.text}`}>
+                                            {user.user_name}
+                                            {user.premium_status && (
+                                                <Text className="text-amber-500"> ★</Text>
+                                            )}
+                                        </Text>
+                                        <View className="flex-row items-center">
+                                            {user.mutualFriends > 0 && (
+                                                <Text className={`font-montserrat-regular ${styles.textSecondary} text-xs`}>
+                                                    {user.mutualFriends} mutual {user.mutualFriends === 1 ? 'friend' : 'friends'}
+                                                </Text>
+                                            )}
+                                        </View>
+                                    </View>
+
+                                    <TouchableOpacity
+                                        onPress={() => handleAddFriend(user.user_id)}
+                                        className="h-9 w-9 rounded-full bg-primary-500 items-center justify-center"
+                                        disabled={loading.action}
+                                    >
+                                        <UserPlus size={16} color="#FFFFFF" />
+                                    </TouchableOpacity>
+                                </MotiView>
+                            ))
+                        )}
+                    </View>
+
+                    {/* Find More Friends button */}
+                    <MotiView
+                        from={{ opacity: 0, scale: 0.95 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ type: 'spring', delay: 600 }}
+                    >
+                        <TouchableOpacity
+                            className={`${styles.cardBg} rounded-xl py-3 items-center justify-center border border-gray-200 ${darkMode ? 'border-gray-700' : ''}`}
+                            onPress={() => {
+                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                setSearchActive(true);
+                            }}
+                        >
+                            <Text className="text-primary-500 font-montserrat-semibold">
+                                Find More Friends
+                            </Text>
+                        </TouchableOpacity>
                     </MotiView>
-                ))}
-            </View>
-
-            {/* Find More Friends button */}
-            <MotiView
-                from={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ type: 'spring', delay: 600 }}
-            >
-                <TouchableOpacity
-                    className={`${styles.cardBg} rounded-xl py-3 items-center justify-center border border-gray-200 ${darkMode ? 'border-gray-700' : ''}`}
-                    onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-                >
-                    <Text className="text-primary-500 font-montserrat-semibold">
-                        Find More Friends
-                    </Text>
-                </TouchableOpacity>
-            </MotiView>
+                </>
+            )}
         </MotiView>
-    )
-}
+    );
+};
 
-export default FriendsComponent
+// Helper function to format last active time
+const formatLastActive = (timestamp) => {
+    if (!timestamp) return 'Unknown';
+
+    const lastActive = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - lastActive.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+
+    return lastActive.toLocaleDateString();
+};
+
+// Helper function to check if user was active in the last 15 minutes
+const isRecentlyActive = (timestamp) => {
+    if (!timestamp) return false;
+
+    const lastActive = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - lastActive.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+
+    return diffMins < 15;
+};
+
+// Helper function to format request time
+const formatRequestTime = (timestamp) => {
+    if (!timestamp) return '';
+
+    const requestTime = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now.getTime() - requestTime.getTime();
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+
+    return requestTime.toLocaleDateString();
+};
+
+export default FriendsComponent;
