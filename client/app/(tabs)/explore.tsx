@@ -7,15 +7,17 @@ import {
   Alert,
   TouchableOpacity,
   Share,
-  FlatList
+  FlatList,
+  InteractionManager,
+  Animated
 } from "react-native";
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { MotiView } from "moti";
 import * as Haptics from "expo-haptics";
 import { useFocusEffect } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ArrowUpCircle } from 'lucide-react-native';
+import { TabBar } from "@/components/TabBar";
 
 // Components
 import BlogPostCreator from "../../components/BlogPostCreator";
@@ -26,39 +28,57 @@ import icons from "../../constants/images";
 // Import the blog service
 import * as blogService from "../../services/blogService";
 
+// Utility function to generate truly unique keys
+const generateUniqueId = () => {
+  return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+};
+
 const Explore = ({ navigation }) => {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
 
   // State management
   const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [lastLoadedBlogId, setLastLoadedBlogId] = useState(0);
   const [hasMorePosts, setHasMorePosts] = useState(true);
   const [creatingPost, setCreatingPost] = useState(false);
-  const [scrollY, setScrollY] = useState(0);
-  const [showScrollToTop, setShowScrollToTop] = useState(false);
-  const [page, setPage] = useState(1);
   const [loadingMore, setLoadingMore] = useState(false);
 
   // Refs
   const flatListRef = useRef(null);
   const isMounted = useRef(true);
-  const PAGE_SIZE = 10; // Number of posts to load per page
+  const isLoadingMoreRef = useRef(false);
+  const prevScrollY = useRef(0);
+  const PAGE_SIZE = 6; // Reduced for smoother loading
+
+  // Animated values for tab bar
+  const tabBarOpacity = useRef(new Animated.Value(1)).current;
 
   // Get user from Redux
   const user = useSelector(state => state.user);
   const userId = user?.user?.user?.user_id || user?.id;
 
+  // Theme-specific styles
+  const themeStyles = {
+    container: isDark ? 'bg-gray-900' : 'bg-gray-50',
+    card: isDark ? 'bg-gray-800' : 'bg-white',
+    text: isDark ? 'text-white' : 'text-gray-900',
+    subtext: isDark ? 'text-gray-400' : 'text-gray-600'
+  };
+
   // Normalize blog post data to ensure consistent structure
-  const normalizeBlogData = (post) => {
+  const normalizeBlogData = useCallback((post) => {
     if (!post) return null;
+
+    // Add a unique clientId for each post to use as a reliable React key
+    const uniqueClientId = generateUniqueId();
 
     return {
       ...post,
       blog_id: post.blog_id || 0,
+      clientId: uniqueClientId, // Add this unique client-side ID
       title: post.title || '',
       content: post.content || '',
       image: post.image || null,
@@ -69,21 +89,31 @@ const Explore = ({ navigation }) => {
       createdAt: post.createdAt || new Date().toISOString(),
       isLiked: !!post.isLiked
     };
-  };
+  }, []);
 
-  // Initial load of posts
-  const initialLoadPosts = async () => {
+  // Initial load of posts with performance optimizations
+  const initialLoadPosts = useCallback(async () => {
+    if (!isMounted.current) return;
+
     try {
       setInitialLoading(true);
-      setPage(1);
       setLastLoadedBlogId(0);
 
       const response = await blogService.getBlogs(0, PAGE_SIZE);
 
-      if (response && response.success && Array.isArray(response.data)) {
-        const normalizedPosts = response.data.map(normalizeBlogData).filter(Boolean);
+      // Cancel if component unmounted during network request
+      if (!isMounted.current) return;
 
-        if (isMounted.current) {
+      // Use InteractionManager to process data after animations
+      InteractionManager.runAfterInteractions(() => {
+        if (!isMounted.current) return;
+
+        if (response && response.success && Array.isArray(response.data)) {
+          // Ensure each post has a unique identifier
+          const normalizedPosts = response.data
+              .map(normalizeBlogData)
+              .filter(Boolean);
+
           setPosts(normalizedPosts);
 
           if (normalizedPosts.length > 0) {
@@ -93,81 +123,110 @@ const Explore = ({ navigation }) => {
           } else {
             setHasMorePosts(false);
           }
-        }
-      } else {
-        if (isMounted.current) {
+        } else {
           setPosts([]);
           setHasMorePosts(false);
         }
-      }
+
+        setInitialLoading(false);
+      });
     } catch (error) {
       console.error('Error loading initial posts:', error);
+
       if (isMounted.current) {
         Alert.alert('Error', 'Failed to load posts. Please try again.');
-      }
-    } finally {
-      if (isMounted.current) {
         setInitialLoading(false);
       }
     }
-  };
+  }, [normalizeBlogData]);
 
-  // Load more posts (lazy loading)
-  const loadMorePosts = async () => {
-    if (!hasMorePosts || loadingMore || refreshing) return;
+  // Load more posts with improved lazy loading implementation
+  const loadMorePosts = useCallback(async () => {
+    // Protect against concurrent calls and unnecessary loading
+    if (!hasMorePosts || isLoadingMoreRef.current || refreshing || posts.length === 0) return;
+
+    // Set loading state with both ref and state for different purposes
+    isLoadingMoreRef.current = true;
+    setLoadingMore(true);
 
     try {
-      setLoadingMore(true);
+      // Small delay to allow UI to breathe
+      await new Promise(resolve => setTimeout(resolve, 100));
 
       const response = await blogService.getBlogs(lastLoadedBlogId, PAGE_SIZE);
 
+      // Early exit if component unmounted
+      if (!isMounted.current) return;
+
       if (response && response.success && Array.isArray(response.data)) {
-        const normalizedPosts = response.data.map(normalizeBlogData).filter(Boolean);
+        // Split the new data into smaller chunks for smoother processing
+        const newData = response.data;
+        const chunkSize = 3;
 
-        if (isMounted.current) {
-          if (normalizedPosts.length > 0) {
-            setPosts(prev => [...prev, ...normalizedPosts]);
-            setPage(prev => prev + 1);
+        // Process in smaller chunks
+        for (let i = 0; i < newData.length; i += chunkSize) {
+          if (!isMounted.current) return;
 
-            const lastPost = normalizedPosts[normalizedPosts.length - 1];
-            setLastLoadedBlogId(lastPost.blog_id);
-            setHasMorePosts(normalizedPosts.length >= PAGE_SIZE);
-          } else {
-            setHasMorePosts(false);
+          const chunk = newData.slice(i, i + chunkSize);
+          const normalizedChunk = chunk.map(normalizeBlogData).filter(Boolean);
+
+          setPosts(prev => {
+            // Check for duplicates by blog_id before adding new posts
+            const existingIds = new Set(prev.map(p => p.blog_id));
+            const uniquePosts = normalizedChunk.filter(p => !existingIds.has(p.blog_id));
+            return [...prev, ...uniquePosts];
+          });
+
+          // Give UI thread time to breathe between chunks
+          if (i + chunkSize < newData.length) {
+            await new Promise(resolve => setTimeout(resolve, 16));
           }
         }
-      } else {
-        if (isMounted.current) {
+
+        // Update pagination info
+        if (newData.length > 0) {
+          const lastItem = newData[newData.length - 1];
+          setLastLoadedBlogId(lastItem.blog_id);
+          setHasMorePosts(newData.length >= PAGE_SIZE);
+        } else {
           setHasMorePosts(false);
         }
+      } else {
+        setHasMorePosts(false);
       }
     } catch (error) {
       console.error('Error loading more posts:', error);
-      // Don't show alert for lazy loading errors to avoid annoying users
+      // Silent fail for pagination errors to avoid disrupting UX
     } finally {
       if (isMounted.current) {
         setLoadingMore(false);
+        isLoadingMoreRef.current = false;
       }
     }
-  };
+  }, [hasMorePosts, lastLoadedBlogId, normalizeBlogData, posts.length, refreshing]);
 
   // Handle refresh (pull-to-refresh)
-  const handleRefresh = async () => {
+  const handleRefresh = useCallback(async () => {
     if (refreshing) return;
 
     try {
       setRefreshing(true);
-
-      // Reset pagination
-      setPage(1);
       setLastLoadedBlogId(0);
 
       const response = await blogService.getBlogs(0, PAGE_SIZE);
 
-      if (response && response.success && Array.isArray(response.data)) {
-        const normalizedPosts = response.data.map(normalizeBlogData).filter(Boolean);
+      // Early exit if component unmounted
+      if (!isMounted.current) return;
 
-        if (isMounted.current) {
+      InteractionManager.runAfterInteractions(() => {
+        if (!isMounted.current) return;
+
+        if (response && response.success && Array.isArray(response.data)) {
+          // Normalize with unique client IDs
+          const normalizedPosts = response.data
+              .map(normalizeBlogData)
+              .filter(Boolean);
+
           setPosts(normalizedPosts);
 
           if (normalizedPosts.length > 0) {
@@ -177,30 +236,27 @@ const Explore = ({ navigation }) => {
           } else {
             setHasMorePosts(false);
           }
-        }
-      } else {
-        if (isMounted.current) {
+        } else {
           setPosts([]);
           setHasMorePosts(false);
         }
-      }
 
-      // Provide haptic feedback after successful refresh
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        // Provide haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        setRefreshing(false);
+      });
     } catch (error) {
       console.error('Error refreshing posts:', error);
+
       if (isMounted.current) {
         Alert.alert('Error', 'Failed to refresh posts. Please try again.');
-      }
-    } finally {
-      if (isMounted.current) {
         setRefreshing(false);
       }
     }
-  };
+  }, [refreshing, normalizeBlogData]);
 
   // Create new post
-  const handleCreatePost = async (postData) => {
+  const handleCreatePost = useCallback(async (postData) => {
     try {
       setCreatingPost(true);
 
@@ -216,6 +272,7 @@ const Explore = ({ navigation }) => {
       if (response && response.success) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert('Success', 'Your post has been created!');
+
         // Refresh to show the new post
         handleRefresh();
       } else {
@@ -227,14 +284,12 @@ const Explore = ({ navigation }) => {
     } finally {
       setCreatingPost(false);
     }
-  };
+  }, [handleRefresh]);
 
-  // Handle liking a post
-  const handleLikePost = async (blogId, isLiked) => {
+  // Handle liking a post with optimistic UI update
+  const handleLikePost = useCallback(async (blogId, isLiked) => {
     try {
-      await blogService.toggleLikeBlog(blogId);
-
-      // Update post in local state
+      // Optimistic UI update
       setPosts(currentPosts =>
           currentPosts.map(post =>
               post.blog_id === blogId
@@ -246,19 +301,31 @@ const Explore = ({ navigation }) => {
                   : post
           )
       );
+
+      // API call in background
+      await blogService.toggleLikeBlog(blogId);
     } catch (error) {
       console.error('Error liking post:', error);
-      // If API call fails, we don't need to alert the user
-      // The Blog component handles its own state
+
+      // Revert optimistic update if API fails
+      setPosts(currentPosts =>
+          currentPosts.map(post =>
+              post.blog_id === blogId
+                  ? {
+                    ...post,
+                    isLiked: isLiked,
+                    likesCount: isLiked ? post.likesCount : post.likesCount - 1
+                  }
+                  : post
+          )
+      );
     }
-  };
+  }, []);
 
-  // Handle adding a comment
-  const handleAddComment = async (blogId, comment) => {
+  // Handle adding a comment with optimistic UI update
+  const handleAddComment = useCallback(async (blogId, comment) => {
     try {
-      await blogService.addComment(blogId, { content: comment });
-
-      // Update comment count in local state
+      // Optimistic UI update
       setPosts(currentPosts =>
           currentPosts.map(post =>
               post.blog_id === blogId
@@ -266,14 +333,27 @@ const Explore = ({ navigation }) => {
                   : post
           )
       );
+
+      // API call
+      await blogService.addComment(blogId, { content: comment });
     } catch (error) {
       console.error('Error adding comment:', error);
+
+      // Revert optimistic update
+      setPosts(currentPosts =>
+          currentPosts.map(post =>
+              post.blog_id === blogId
+                  ? { ...post, commentsCount: Math.max(0, post.commentsCount - 1) }
+                  : post
+          )
+      );
+
       Alert.alert('Error', 'Failed to add comment. Please try again.');
     }
-  };
+  }, []);
 
   // Handle sharing a post
-  const handleSharePost = async (blogId) => {
+  const handleSharePost = useCallback(async (blogId) => {
     try {
       const post = posts.find(p => p.blog_id === blogId);
       const title = post?.title || 'Check out this post';
@@ -285,10 +365,10 @@ const Explore = ({ navigation }) => {
     } catch (error) {
       console.error('Error sharing post:', error);
     }
-  };
+  }, [posts]);
 
   // Handle bookmarking a post
-  const handleBookmarkPost = async (blogId, isBookmarked) => {
+  const handleBookmarkPost = useCallback(async (blogId, isBookmarked) => {
     try {
       // In a real app, you would call an API to save/unsave the post
       console.log(`Post ${blogId} ${isBookmarked ? 'bookmarked' : 'unbookmarked'}`);
@@ -298,48 +378,66 @@ const Explore = ({ navigation }) => {
     } catch (error) {
       console.error('Error bookmarking post:', error);
     }
-  };
+  }, []);
 
-  // Scroll to top function
-  const scrollToTop = () => {
-    if (flatListRef.current) {
-      flatListRef.current.scrollToOffset({ offset: 0, animated: true });
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    }
-  };
-
-  // Handle scroll events
-  const handleScroll = (event) => {
+  // Handle scroll events for tab bar hiding
+  const handleScroll = useCallback((event) => {
     const currentScrollY = event.nativeEvent.contentOffset.y;
-    setScrollY(currentScrollY);
-    setShowScrollToTop(currentScrollY > 300);
-  };
+    const isScrollingDown = currentScrollY > prevScrollY.current;
+
+    // Show tab bar when scrolling up, hide when scrolling down
+    if (isScrollingDown) {
+      Animated.timing(tabBarOpacity, {
+        toValue: 0,
+        duration: 200,
+        useNativeDriver: true
+      }).start();
+    } else {
+      Animated.timing(tabBarOpacity, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true
+      }).start();
+    }
+
+    prevScrollY.current = currentScrollY;
+  }, [tabBarOpacity]);
 
   // Load posts when screen is focused
   useFocusEffect(
       useCallback(() => {
-        initialLoadPosts();
+        // Small delay to ensure smooth transition
+        const timer = setTimeout(() => {
+          initialLoadPosts();
+          // Reset tab bar to visible state when screen gains focus
+          tabBarOpacity.setValue(1);
+        }, 100);
 
         return () => {
-          // This will run when the screen loses focus
+          clearTimeout(timer);
         };
-      }, [])
+      }, [initialLoadPosts, tabBarOpacity])
   );
 
   // Initialize component
   useEffect(() => {
     isMounted.current = true;
 
-    // Initial load
-    initialLoadPosts();
+    // Ensure tab bar is visible when component mounts
+    tabBarOpacity.setValue(1);
+
+    // Set up global tab bar context if needed
+    if (global.TabBarContext) {
+      global.TabBarContext.setOpacity(tabBarOpacity);
+    }
 
     return () => {
       isMounted.current = false;
     };
-  }, []);
+  }, [tabBarOpacity]);
 
   // Header component for FlatList
-  const ListHeader = useCallback(() => (
+  const ListHeader = useMemo(() => (
       <View className="px-4 pb-2">
         {/* Blog Creator */}
         <BlogPostCreator
@@ -350,43 +448,39 @@ const Explore = ({ navigation }) => {
 
         {/* Section heading */}
         <View className="flex-row items-center justify-between mt-4 mb-2">
-          <Text className={`text-xl font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+          <Text className={`text-xl font-bold ${themeStyles.text}`}>
             Community Feed
           </Text>
         </View>
       </View>
-  ), [isDark, creatingPost, handleCreatePost]);
+  ), [isDark, creatingPost, handleCreatePost, themeStyles.text]);
 
   // Empty state component when no posts are available
-  const EmptyComponent = useCallback(() => (
-      <View className={`p-6 rounded-xl mx-4 mt-4 ${isDark ? 'bg-gray-800' : 'bg-gray-100'}`}>
-        <Text className={`text-center font-bold text-lg mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+  const EmptyComponent = useMemo(() => (
+      <View className={`p-6 rounded-xl mx-4 mt-4 ${themeStyles.card}`}>
+        <Text className={`text-center font-bold text-lg mb-2 ${themeStyles.text}`}>
           No posts available
         </Text>
-        <Text className={`text-center ${isDark ? 'text-gray-400' : 'text-gray-600'} mb-4`}>
+        <Text className={`text-center ${themeStyles.subtext} mb-4`}>
           Be the first to share your progress with the community.
         </Text>
         <TouchableOpacity
             onPress={() => {
-              // Scroll up to post creator
-              scrollToTop();
-              // Add a short delay to let animation complete
-              setTimeout(() => {
-                // Logic to focus on post creator
-              }, 300);
+              if (flatListRef.current) {
+                flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+              }
             }}
             className="bg-primary-500 py-2 px-4 rounded-lg self-center"
         >
           <Text className="text-white font-medium">Create Post</Text>
         </TouchableOpacity>
       </View>
-  ), [isDark, scrollToTop]);
+  ), [themeStyles]);
 
-  // Render a single blog post
+  // Render a single blog post with memoization
   const renderBlog = useCallback(({ item }) => {
-    // Add defensive check to avoid rendering null/undefined items
+    // Add defensive check
     if (!item || typeof item !== 'object' || !item.blog_id) {
-      console.warn('Invalid blog post data:', item);
       return null;
     }
 
@@ -405,13 +499,13 @@ const Explore = ({ navigation }) => {
     );
   }, [isDark, handleLikePost, handleAddComment, handleSharePost, handleBookmarkPost]);
 
-  // Footer component to show loading indicator or end of list message
-  const ListFooter = useCallback(() => {
+  // Footer component with memoization
+  const ListFooter = useMemo(() => {
     if (loadingMore) {
       return (
           <View className="py-6 items-center">
             <ActivityIndicator size="small" color="#6366F1" />
-            <Text className={`mt-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            <Text className={`mt-2 ${themeStyles.subtext}`}>
               Loading more posts...
             </Text>
           </View>
@@ -421,28 +515,45 @@ const Explore = ({ navigation }) => {
     if (!hasMorePosts && posts.length > 0) {
       return (
           <View className="py-6 items-center">
-            <Text className={`${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+            <Text className={themeStyles.subtext}>
               You've reached the end!
             </Text>
+            {/* Add extra padding at the bottom to prevent tab bar from covering content */}
+            <View className="h-20" />
           </View>
       );
     }
 
-    return <View className="h-20" />;
-  }, [loadingMore, hasMorePosts, posts.length, isDark]);
+    // Extra padding at the bottom to prevent tab bar from covering content
+    return <View className="h-32" />;
+  }, [loadingMore, hasMorePosts, posts.length, themeStyles.subtext]);
+
+  // Get item layout for FlatList optimization
+  const getItemLayout = useCallback((data, index) => ({
+    length: 240, // Approximate height of a blog post
+    offset: 240 * index,
+    index,
+  }), []);
+
+  // Key extractor using the clientId we added in normalization
+  const keyExtractor = useCallback(item => {
+    // Use the clientId we created during normalization
+    return item?.clientId || `fallback-${generateUniqueId()}`;
+  }, []);
 
   return (
-      <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+      <SafeAreaView className={`flex-1 ${themeStyles.container}`} edges={['left', 'right']}>
         <FlatList
             ref={flatListRef}
             data={posts}
             renderItem={renderBlog}
-            keyExtractor={(item) => (item?.blog_id || Math.random()).toString()}
+            keyExtractor={keyExtractor}
             ListHeaderComponent={ListHeader}
             ListEmptyComponent={!initialLoading ? EmptyComponent : null}
             ListFooterComponent={ListFooter}
             onEndReached={loadMorePosts}
-            onEndReachedThreshold={0.5}
+            onEndReachedThreshold={0.2}
+            contentContainerStyle={{ paddingTop: 0 }}
             refreshControl={
               <RefreshControl
                   refreshing={refreshing}
@@ -452,44 +563,32 @@ const Explore = ({ navigation }) => {
               />
             }
             onScroll={handleScroll}
-            scrollEventThrottle={16}
+            scrollEventThrottle={16} // Increased sensitivity for better tab bar animation
             showsVerticalScrollIndicator={false}
-            initialNumToRender={5}
-            maxToRenderPerBatch={10}
-            updateCellsBatchingPeriod={50}
-            windowSize={21}
+
+            // Performance optimizations
+            removeClippedSubviews={true}
+            initialNumToRender={2}
+            maxToRenderPerBatch={2}
+            updateCellsBatchingPeriod={100}
+            windowSize={5}
+            getItemLayout={getItemLayout}
+            extraData={loadingMore}
         />
 
         {/* Initial Loading Overlay */}
         {initialLoading && (
             <View className="absolute inset-0 justify-center items-center bg-black/20">
-              <View className={`p-4 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+              <View className={`p-4 rounded-xl ${themeStyles.card}`}>
                 <ActivityIndicator size="large" color="#6366F1" />
-                <Text className={`mt-2 text-center ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                <Text className={`mt-2 text-center ${themeStyles.text}`}>
                   Loading posts...
                 </Text>
               </View>
             </View>
         )}
 
-        {/* Scroll to top button */}
-        {showScrollToTop && (
-            <MotiView
-                from={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ type: 'timing', duration: 300 }}
-                className="absolute bottom-6 right-6"
-            >
-              <TouchableOpacity
-                  onPress={scrollToTop}
-                  className={`w-12 h-12 rounded-full shadow-lg items-center justify-center ${
-                      isDark ? 'bg-gray-800' : 'bg-white'
-                  }`}
-              >
-                <ArrowUpCircle size={24} color={isDark ? '#60A5FA' : '#3B82F6'} />
-              </TouchableOpacity>
-            </MotiView>
-        )}
+        {/* Note: The tab bar component will use the tabBarOpacity animated value from context */}
       </SafeAreaView>
   );
 };
