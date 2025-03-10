@@ -3,43 +3,64 @@ const express = require('express');
 const router = express.Router();
 const validateToken = require('../middleware/authMiddleware');
 const chatController = require('../controllers/chatController');
-const { upload, handleUploadError } = require('../config/multer');
+const { upload, handleUploadError } = require('../config/multerConfig');
 
-// Chat Room Routes
-// route to create a new chat room (/api/chat/createRoom)
-router.post('/createRoom', validateToken, chatController.createChatRoom);
+// Chat Room Management Routes
+// Create a new group chat
+router.post('/rooms', validateToken, chatController.createChatRoom);
 
-// route to get user's chat rooms (/api/chat/getRooms)
-router.get('/getRooms', validateToken, chatController.getUserChatRooms);
+// Create a direct message chat or return existing one
+router.post('/direct', validateToken, chatController.createDirectChat);
 
-// Message Routes
-// route to get messages from a room (/api/chat/getMessages/:roomId)
-router.get('/getMessages/:roomId', validateToken, chatController.getChatMessages);
+// Get user's chat rooms
+router.get('/rooms', validateToken, chatController.getUserChatRooms);
 
-// route to send message with attachments (/api/chat/sendMessage/:roomId)
-router.post('/sendMessage/:roomId',
-    validateToken,
-    upload.array('files', 5),
-    handleUploadError,
-    chatController.sendMessage
-);
+// Get specific chat room details
+router.get('/rooms/:roomId', validateToken, chatController.getChatRoomDetails);
 
-// Participant Routes
-// route to update room participants (/api/chat/updateParticipants/:roomId)
-router.put('/updateParticipants/:roomId', validateToken, chatController.updateChatParticipants);
+// Update chat room details (name, description, avatar)
+router.patch('/rooms/:roomId', validateToken, chatController.updateChatRoom);
+
+// Leave a chat room
+router.post('/rooms/:roomId/leave', validateToken, chatController.leaveChat);
 
 // Message Management Routes
-// route to delete a message (/api/chat/deleteMessage/:messageId)
-router.delete('/deleteMessage/:messageId', validateToken, chatController.deleteMessage);
+// Get messages from a room with pagination
+router.get('/rooms/:roomId/messages', validateToken, chatController.getChatMessages);
 
-// route to mark messages as read (/api/chat/markRead/:roomId)
-router.post('/markRead/:roomId', validateToken, chatController.markMessagesAsRead);
+// Send text message to a room
+router.post('/rooms/:roomId/messages', validateToken, chatController.sendMessage);
 
-// Message Reaction Routes
-// route to add reaction to message (/api/chat/addReaction/:messageId)
-router.post('/addReaction/:messageId', validateToken, chatController.addMessageReaction);
+// Upload and send media files to a room
+router.post('/rooms/:roomId/media',
+    validateToken,
+    upload.single('file'),
+    handleUploadError,
+    chatController.uploadMedia
+);
 
-// route to remove reaction from message (/api/chat/removeReaction/:messageId/:emoji)
-router.delete('/removeReaction/:messageId/:emoji', validateToken, chatController.removeMessageReaction);
+// Edit a message
+router.put('/messages/:messageId', validateToken, chatController.editMessage);
+
+// Delete a message
+router.delete('/messages/:messageId', validateToken, chatController.deleteMessage);
+
+// Mark messages as read
+router.post('/rooms/:roomId/read', validateToken, chatController.markMessagesAsRead);
+
+// Participant Management Routes
+// Update room participants (add/remove)
+router.patch('/rooms/:roomId/participants', validateToken, chatController.updateChatParticipants);
+
+// Update participant role (admin status)
+router.patch('/rooms/:roomId/participants/:participantId', validateToken, chatController.updateParticipantRole);
+
+// Typing Status
+// Update typing status
+router.post('/rooms/:roomId/typing', validateToken, chatController.updateTypingStatus);
+
+// Socket Setup
+// Setup user's socket connections
+router.get('/socket/setup', validateToken, chatController.setupUserSocket);
 
 module.exports = router;

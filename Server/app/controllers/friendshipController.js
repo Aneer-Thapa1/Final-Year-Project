@@ -142,7 +142,7 @@ const sendFriendRequest = async (req, res) => {
 const respondToFriendRequest = async (req, res) => {
     try {
         const { request_id, status } = req.body;
-        const user_id = req.user.id || req.user.user_id;
+        const user_id = parseInt(req.user) || req.user.user_id;
 
         // Validate status
         if (!['ACCEPTED', 'REJECTED'].includes(status)) {
@@ -228,7 +228,7 @@ const respondToFriendRequest = async (req, res) => {
  */
 const getFriends = async (req, res) => {
     try {
-        const user_id = req.user.id || req.user.user_id;
+        const user_id = parseInt(req.user) || req.user.user_id;
 
         // Find all accepted friend requests where user is either sender or receiver
         const friendships = await prisma.friendRequest.findMany({

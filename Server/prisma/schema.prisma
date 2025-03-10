@@ -37,10 +37,14 @@ model User {
   sentFriendRequests     FriendRequest[] @relation("SentRequests")
   receivedFriendRequests FriendRequest[] @relation("ReceivedRequests")
   blogs                  Blog[]
-  sentMessages           Message[]       @relation("SentMessages")
-  receivedMessages       Message[]       @relation("ReceivedMessages")
   likes                  Like[]
   comments               Comment[] // Added comments relationship
+
+  // Chat relationships
+  sentMessages       Message[]         @relation("SentMessages")
+  chatParticipations ChatParticipant[] // Chats the user is part of
+  readReceipts       ReadReceipt[] // Messages the user has read
+  createdChatRooms   ChatRoom[]        @relation("CreatedChatRooms") // For group chats created by this user
 
   // Habit Tracking Relationships
   habits         Habit[]
@@ -84,6 +88,114 @@ enum RequestStatus {
   PENDING
   ACCEPTED
   REJECTED
+}
+
+// 🔹 Chat Room - For Both Direct Messages and Group Chats
+model ChatRoom {
+  room_id     Int          @id @default(autoincrement())
+  type        ChatRoomType @default(DM) // 'DM' for direct messages, 'GROUP' for group chats
+  name        String? // Optional for group chats, null for DMs
+  description String? // Optional description for group chats
+  avatar      String? // Group chat avatar
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  // Only used for group chats
+  created_by_id Int? // Creator of the group (null for system-created DMs)
+  is_private    Boolean @default(false) // Whether the group is invite-only
+
+  // Relationships
+  creator      User?             @relation("CreatedChatRooms", fields: [created_by_id], references: [user_id], onDelete: SetNull)
+  messages     Message[] // Chat messages in this room
+  participants ChatParticipant[] // Users in this chat room
+
+  @@index([type]) // Index for faster querying by type
+}
+
+enum ChatRoomType {
+  DM // Direct message between two users
+  GROUP // Group chat with multiple participants
+}
+
+// 🔹 Chat Participant - Maps Users to Chat Rooms
+model ChatParticipant {
+  user_id  Int
+  room_id  Int
+  joinedAt DateTime  @default(now())
+  isAdmin  Boolean   @default(false) // For group chat admin privileges
+  nickname String? // Optional custom nickname in this chat
+  muted    Boolean   @default(false) // Whether the user has muted this chat
+  lastRead DateTime? // Last time the user read messages in this chat
+
+  // Relationships
+  user User     @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  room ChatRoom @relation(fields: [room_id], references: [room_id], onDelete: Cascade)
+
+  @@id([user_id, room_id]) // Composite primary key
+  @@index([user_id]) // Index for faster queries
+  @@index([room_id])
+}
+
+// 🔹 Message - For Chat Functionality
+model Message {
+  message_id   Int         @id @default(autoincrement())
+  room_id      Int // The chat room this message belongs to
+  sender_id    Int // User who sent the message
+  content      String // Message content
+  message_type MessageType @default(TEXT) // Type of message
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  // Message delivery status tracking
+  delivered_at DateTime? // When the message was delivered to recipients
+  read_at      DateTime? // When the message was read by recipient (for DMs)
+
+  // Additional fields for media messages
+  media_url      String? // URL to image/video/file
+  media_type     String? // MIME type of media
+  media_size     Int? // Size in bytes
+  media_width    Int? // For images/videos
+  media_height   Int? // For images/videos
+  media_duration Int? // For audio/video in seconds
+
+  // Reply functionality
+  reply_to_id Int? // ID of message being replied to
+
+  // Relationships
+  sender       User          @relation("SentMessages", fields: [sender_id], references: [user_id], onDelete: Cascade)
+  room         ChatRoom      @relation(fields: [room_id], references: [room_id], onDelete: Cascade)
+  reply_to     Message?      @relation("MessageReplies", fields: [reply_to_id], references: [message_id], onDelete: SetNull)
+  replies      Message[]     @relation("MessageReplies")
+  readReceipts ReadReceipt[] // Track who has read this message in group chats
+
+  @@index([room_id, createdAt]) // Index for faster message retrieval
+  @@index([sender_id])
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  FILE
+  AUDIO
+  LOCATION
+  CONTACT
+  SYSTEM // For system messages like "User X joined the group"
+  HABIT // For sharing habit information
+  CHALLENGE // For sharing challenge information
+}
+
+// 🔹 Read Receipt - For tracking message reads in group chats
+model ReadReceipt {
+  message_id Int
+  user_id    Int
+  read_at    DateTime @default(now())
+
+  // Relationships
+  message Message @relation(fields: [message_id], references: [message_id], onDelete: Cascade)
+  user    User    @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@id([message_id, user_id]) // Composite primary key
 }
 
 // 🔹 Habit Model - Core Model for Habit Tracking
@@ -422,23 +534,6 @@ model Comment {
   replies Comment[] @relation("CommentReplies")
 }
 
-// 🔹 Message - For Chat Functionality
-model Message {
-  message_id  Int       @id @default(autoincrement())
-  sender_id   Int
-  receiver_id Int
-  content     String
-  is_read     Boolean   @default(false) // Added read status
-  sentAt      DateTime  @default(now())
-  readAt      DateTime? // Added read timestamp
-
-  // Relationships
-  sender   User @relation(fields: [sender_id], references: [user_id], name: "SentMessages", onDelete: Cascade)
-  receiver User @relation(fields: [receiver_id], references: [user_id], name: "ReceivedMessages", onDelete: Cascade)
-
-  @@index([receiver_id, is_read]) // Index for unread message queries
-}
-
 // 🔹 Notification - For System Notifications
 model Notification {
   notification_id Int              @id @default(autoincrement())
@@ -463,6 +558,8 @@ enum NotificationType {
   REMINDER
   SYSTEM_MESSAGE
   BLOG_COMMENT
+  NEW_MESSAGE
+  GROUP_INVITATION
 }
 
 // 🔹 UserStats - For Analytics Dashboard
