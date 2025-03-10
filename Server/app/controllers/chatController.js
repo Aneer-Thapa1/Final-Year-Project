@@ -1,23 +1,35 @@
-
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const { getIO } = require('../config/socketConfig');
+const fs = require('fs');
 
-// Create a new chat room (DM or Group)
+/**
+ * Create a new chat room (DM or Group)
+ * @route POST /api/chat/rooms
+ */
 const createChatRoom = async (req, res) => {
     try {
-        const { name, type, participants } = req.body;
-        const userId = req.user.user_id;
+        const { name, type, description, participants, is_private = false } = req.body;
+        const userId = parseInt(req.user);
 
+        console.log(userId);
+
+        // Create the room first
         const chatRoom = await prisma.chatRoom.create({
             data: {
                 name: type === 'GROUP' ? name : null,
+                description: type === 'GROUP' ? description : null,
                 type,
+                is_private: type === 'GROUP' ? is_private : false,
+                created_by_id: type === 'GROUP' ? userId : null,
                 participants: {
                     create: [
-                        { user_id: userId, is_admin: true },
+                        {
+                            user_id: userId,
+                            isAdmin: type === 'GROUP' // Creator is admin for group chats
+                        },
                         ...participants.map(participantId => ({
-                            user_id: participantId
+                            user_id: parseInt(participantId)
                         }))
                     ]
                 }
@@ -29,13 +41,34 @@ const createChatRoom = async (req, res) => {
                             select: {
                                 user_id: true,
                                 user_name: true,
-                                avatar: true
+                                avatar: true,
+                                lastActive: true
                             }
                         }
                     }
                 }
             }
         });
+
+        // For group chats, create a system message about creation
+        if (type === 'GROUP') {
+            await prisma.message.create({
+                data: {
+                    room_id: chatRoom.room_id,
+                    sender_id: userId,
+                    content: `${req.user.user_name} created this group`,
+                    message_type: 'SYSTEM'
+                }
+            });
+        }
+
+        // Notify all participants about the new chat room via socket
+        const io = getIO();
+        participants.forEach(participantId => {
+            io.to(`user:${participantId}`).emit('chatRoom:created', chatRoom);
+        });
+        // Also notify the creator
+        io.to(`user:${userId}`).emit('chatRoom:created', chatRoom);
 
         res.status(201).json({
             success: true,
@@ -45,12 +78,146 @@ const createChatRoom = async (req, res) => {
         console.error('Error creating chat room:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to create chat room'
+            message: 'Failed to create chat room',
+            error: error.message
         });
     }
 };
 
-// Get all chat rooms for a user
+/**
+ * Create a direct message chat room or return existing one
+ * @route POST /api/chat/direct
+ */
+const createDirectChat = async (req, res) => {
+    try {
+        const { recipientId } = req.body;
+        const userId = parseInt(req.user);
+
+        // Check if DM already exists between these users
+        const existingRoom = await prisma.chatRoom.findFirst({
+            where: {
+                type: 'DM',
+                participants: {
+                    every: {
+                        user_id: {
+                            in: [userId, parseInt(recipientId)]
+                        }
+                    },
+                    // Make sure it's only these two users
+                    none: {
+                        user_id: {
+                            notIn: [userId, parseInt(recipientId)]
+                        }
+                    }
+                }
+            },
+            include: {
+                participants: {
+                    include: {
+                        user: {
+                            select: {
+                                user_id: true,
+                                user_name: true,
+                                avatar: true,
+                                lastActive: true
+                            }
+                        }
+                    }
+                },
+                messages: {
+                    take: 1,
+                    orderBy: {
+                        createdAt: 'desc'
+                    },
+                    include: {
+                        sender: {
+                            select: {
+                                user_id: true,
+                                user_name: true,
+                                avatar: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        if (existingRoom) {
+            return res.status(200).json({
+                success: true,
+                data: {
+                    ...existingRoom,
+                    lastMessage: existingRoom.messages[0] || null,
+                    messages: undefined // Remove messages array since we've extracted lastMessage
+                },
+                isNew: false
+            });
+        }
+
+        // Check if recipientId exists
+        const recipient = await prisma.user.findUnique({
+            where: { user_id: parseInt(recipientId) },
+            select: { user_id: true, user_name: true }
+        });
+
+        if (!recipient) {
+            return res.status(404).json({
+                success: false,
+                message: 'Recipient not found'
+            });
+        }
+
+        // Create new DM room
+        const chatRoom = await prisma.chatRoom.create({
+            data: {
+                type: 'DM',
+                participants: {
+                    create: [
+                        { user_id: userId },
+                        { user_id: parseInt(recipientId) }
+                    ]
+                }
+            },
+            include: {
+                participants: {
+                    include: {
+                        user: {
+                            select: {
+                                user_id: true,
+                                user_name: true,
+                                avatar: true,
+                                lastActive: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Notify both users about the new chat room
+        const io = getIO();
+        io.to(`user:${recipientId}`).emit('chatRoom:created', chatRoom);
+        io.to(`user:${userId}`).emit('chatRoom:created', chatRoom);
+
+        res.status(201).json({
+            success: true,
+            data: chatRoom,
+            isNew: true
+        });
+    } catch (error) {
+        console.error('Error creating direct chat:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to create direct chat',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get all chat rooms for a user
+ * @route GET /api/chat/rooms
+ */
 const getUserChatRooms = async (req, res) => {
     try {
         const userId = req.user.user_id;
@@ -70,7 +237,8 @@ const getUserChatRooms = async (req, res) => {
                             select: {
                                 user_id: true,
                                 user_name: true,
-                                avatar: true
+                                avatar: true,
+                                lastActive: true
                             }
                         }
                     }
@@ -78,7 +246,7 @@ const getUserChatRooms = async (req, res) => {
                 messages: {
                     take: 1,
                     orderBy: {
-                        created_at: 'desc'
+                        createdAt: 'desc'
                     },
                     include: {
                         sender: {
@@ -92,24 +260,63 @@ const getUserChatRooms = async (req, res) => {
                 }
             },
             orderBy: {
-                updated_at: 'desc'
+                updatedAt: 'desc'
             }
         });
 
+        // Count unread messages for each room
+        const enhancedChatRooms = await Promise.all(chatRooms.map(async (room) => {
+            const participant = room.participants.find(p => p.user_id === userId);
+
+            // Count unread messages based on lastRead timestamp
+            const unreadCount = await prisma.message.count({
+                where: {
+                    room_id: room.room_id,
+                    createdAt: {
+                        gt: participant?.lastRead || new Date(0)
+                    },
+                    sender_id: {
+                        not: userId
+                    }
+                }
+            });
+
+            // For DM rooms, get the other participant's name for display
+            let displayName = room.name;
+            if (room.type === 'DM') {
+                const otherParticipant = room.participants.find(p => p.user_id !== userId);
+                if (otherParticipant?.user) {
+                    displayName = otherParticipant.user.user_name;
+                }
+            }
+
+            return {
+                ...room,
+                displayName,
+                lastMessage: room.messages[0] || null,
+                unreadCount,
+                messages: undefined // Remove messages array since we've extracted lastMessage
+            };
+        }));
+
         res.json({
             success: true,
-            data: chatRooms
+            data: enhancedChatRooms
         });
     } catch (error) {
         console.error('Error fetching chat rooms:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to fetch chat rooms'
+            message: 'Failed to fetch chat rooms',
+            error: error.message
         });
     }
 };
 
-// Get messages for a specific chat room
+/**
+ * Get messages for a specific chat room
+ * @route GET /api/chat/rooms/:roomId/messages
+ */
 const getChatMessages = async (req, res) => {
     try {
         const { roomId } = req.params;
@@ -136,14 +343,14 @@ const getChatMessages = async (req, res) => {
             where: {
                 room_id: parseInt(roomId),
                 ...(cursor ? {
-                    created_at: {
+                    createdAt: {
                         lt: new Date(cursor)
                     }
                 } : {})
             },
             take: parseInt(limit),
             orderBy: {
-                created_at: 'desc'
+                createdAt: 'desc'
             },
             include: {
                 sender: {
@@ -153,7 +360,7 @@ const getChatMessages = async (req, res) => {
                         avatar: true
                     }
                 },
-                reactions: {
+                readReceipts: {
                     include: {
                         user: {
                             select: {
@@ -177,6 +384,7 @@ const getChatMessages = async (req, res) => {
             }
         });
 
+        // Update last read timestamp
         await prisma.chatParticipant.update({
             where: {
                 user_id_room_id: {
@@ -185,25 +393,71 @@ const getChatMessages = async (req, res) => {
                 }
             },
             data: {
-                last_read_at: new Date()
+                lastRead: new Date()
             }
+        });
+
+        // For group chats, create read receipts for all messages
+        const room = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            select: { type: true }
+        });
+
+        if (room.type === 'GROUP') {
+            // Create read receipts in bulk for all messages without existing receipts from this user
+            // First get messages without receipts from this user
+            const messagesWithoutReceipts = await prisma.message.findMany({
+                where: {
+                    room_id: parseInt(roomId),
+                    sender_id: { not: userId }, // Skip own messages
+                    readReceipts: {
+                        none: {
+                            user_id: userId
+                        }
+                    }
+                },
+                select: { message_id: true }
+            });
+
+            if (messagesWithoutReceipts.length > 0) {
+                // Create read receipts for these messages
+                await prisma.readReceipt.createMany({
+                    data: messagesWithoutReceipts.map(msg => ({
+                        message_id: msg.message_id,
+                        user_id: userId
+                    })),
+                    skipDuplicates: true
+                });
+            }
+        }
+
+        // Notify others that this user has read messages
+        const io = getIO();
+        io.to(`room:${roomId}`).emit('messages:read', {
+            user_id: userId,
+            room_id: parseInt(roomId),
+            timestamp: new Date()
         });
 
         res.json({
             success: true,
-            data: messages,
+            data: messages.reverse(), // Reverse to get chronological order
             hasMore: messages.length === parseInt(limit)
         });
     } catch (error) {
         console.error('Error fetching messages:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to fetch messages'
+            message: 'Failed to fetch messages',
+            error: error.message
         });
     }
 };
 
-// Update chat participants
+/**
+ * Update chat participants (add or remove)
+ * @route PATCH /api/chat/rooms/:roomId/participants
+ */
 const updateChatParticipants = async (req, res) => {
     try {
         const { roomId } = req.params;
@@ -219,29 +473,65 @@ const updateChatParticipants = async (req, res) => {
             }
         });
 
-        if (!userParticipant?.is_admin) {
+        if (!userParticipant?.isAdmin) {
             return res.status(403).json({
                 success: false,
                 message: 'Only admins can modify participants'
             });
         }
 
+        const room = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            include: {
+                participants: true
+            }
+        });
+
+        // Don't allow modifications to DM rooms
+        if (room.type === 'DM') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot modify participants in direct message rooms'
+            });
+        }
+
+        // Add new participants
         if (addParticipants.length > 0) {
             await prisma.chatParticipant.createMany({
                 data: addParticipants.map(participantId => ({
-                    user_id: participantId,
+                    user_id: parseInt(participantId),
                     room_id: parseInt(roomId)
                 })),
                 skipDuplicates: true
             });
         }
 
+        // Remove participants, but prevent removing the last admin
         if (removeParticipants.length > 0) {
+            // Check if trying to remove the last admin
+            const admins = await prisma.chatParticipant.findMany({
+                where: {
+                    room_id: parseInt(roomId),
+                    isAdmin: true
+                }
+            });
+
+            const adminIds = admins.map(admin => admin.user_id);
+            const removingAllAdmins = removeParticipants.length > 0 &&
+                adminIds.every(adminId => removeParticipants.includes(adminId.toString()));
+
+            if (removingAllAdmins) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Cannot remove all admins from the group'
+                });
+            }
+
             await prisma.chatParticipant.deleteMany({
                 where: {
                     room_id: parseInt(roomId),
                     user_id: {
-                        in: removeParticipants
+                        in: removeParticipants.map(id => parseInt(id))
                     }
                 }
             });
@@ -264,6 +554,51 @@ const updateChatParticipants = async (req, res) => {
             }
         });
 
+        // Create system message about participant changes
+        let systemMessage = '';
+        if (addParticipants.length > 0) {
+            const addedUsers = await prisma.user.findMany({
+                where: { user_id: { in: addParticipants.map(id => parseInt(id)) } },
+                select: { user_name: true }
+            });
+            const addedNames = addedUsers.map(u => u.user_name).join(', ');
+            systemMessage += `${addedNames} ${addParticipants.length > 1 ? 'were' : 'was'} added to the group. `;
+        }
+
+        if (removeParticipants.length > 0) {
+            const removedUsers = await prisma.user.findMany({
+                where: { user_id: { in: removeParticipants.map(id => parseInt(id)) } },
+                select: { user_name: true }
+            });
+            const removedNames = removedUsers.map(u => u.user_name).join(', ');
+            systemMessage += `${removedNames} ${removeParticipants.length > 1 ? 'were' : 'was'} removed from the group.`;
+        }
+
+        if (systemMessage) {
+            await prisma.message.create({
+                data: {
+                    room_id: parseInt(roomId),
+                    sender_id: userId,
+                    content: systemMessage,
+                    message_type: 'SYSTEM'
+                }
+            });
+        }
+
+        // Notify all participants about changes
+        const io = getIO();
+        io.to(`room:${roomId}`).emit('participants:updated', updatedRoom);
+
+        // Subscribe new participants to the room
+        addParticipants.forEach(newUserId => {
+            io.to(`user:${newUserId}`).emit('chatRoom:joined', updatedRoom);
+        });
+
+        // Notify removed participants
+        removeParticipants.forEach(removedUserId => {
+            io.to(`user:${removedUserId}`).emit('chatRoom:removed', { roomId: parseInt(roomId) });
+        });
+
         res.json({
             success: true,
             data: updatedRoom
@@ -272,19 +607,24 @@ const updateChatParticipants = async (req, res) => {
         console.error('Error updating participants:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to update participants'
+            message: 'Failed to update participants',
+            error: error.message
         });
     }
 };
 
-// Delete a message
+/**
+ * Delete a message
+ * @route DELETE /api/chat/messages/:messageId
+ */
 const deleteMessage = async (req, res) => {
     try {
         const { messageId } = req.params;
         const userId = req.user.user_id;
 
         const message = await prisma.message.findUnique({
-            where: { message_id: parseInt(messageId) }
+            where: { message_id: parseInt(messageId) },
+            include: { readReceipts: true }
         });
 
         if (!message) {
@@ -294,15 +634,39 @@ const deleteMessage = async (req, res) => {
             });
         }
 
-        if (message.sender_id !== userId) {
+        // Check if user is sender or admin of the room
+        const isAdmin = await prisma.chatParticipant.findFirst({
+            where: {
+                room_id: message.room_id,
+                user_id: userId,
+                isAdmin: true
+            }
+        });
+
+        if (message.sender_id !== userId && !isAdmin) {
             return res.status(403).json({
                 success: false,
-                message: 'Can only delete own messages'
+                message: 'Not authorized to delete this message'
             });
         }
 
+        // Delete read receipts first
+        if (message.readReceipts.length > 0) {
+            await prisma.readReceipt.deleteMany({
+                where: { message_id: parseInt(messageId) }
+            });
+        }
+
+        // Then delete the message
         await prisma.message.delete({
             where: { message_id: parseInt(messageId) }
+        });
+
+        // Notify room about the deleted message
+        const io = getIO();
+        io.to(`room:${message.room_id}`).emit('message:deleted', {
+            messageId: parseInt(messageId),
+            roomId: message.room_id
         });
 
         res.json({
@@ -313,17 +677,23 @@ const deleteMessage = async (req, res) => {
         console.error('Error deleting message:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to delete message'
+            message: 'Failed to delete message',
+            error: error.message
         });
     }
 };
 
-// Mark messages as read
+/**
+ * Mark messages as read
+ * @route POST /api/chat/rooms/:roomId/read
+ */
 const markMessagesAsRead = async (req, res) => {
     try {
         const { roomId } = req.params;
         const userId = req.user.user_id;
+        const currentTime = new Date();
 
+        // Update participant's last read timestamp
         await prisma.chatParticipant.update({
             where: {
                 user_id_room_id: {
@@ -332,95 +702,93 @@ const markMessagesAsRead = async (req, res) => {
                 }
             },
             data: {
-                last_read_at: new Date()
+                lastRead: currentTime
             }
+        });
+
+        // For group chats, create read receipts for unread messages
+        const room = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            select: { type: true }
+        });
+
+        if (room.type === 'GROUP') {
+            // Get all unread messages
+            const unreadMessages = await prisma.message.findMany({
+                where: {
+                    room_id: parseInt(roomId),
+                    sender_id: { not: userId }, // Skip own messages
+                    readReceipts: {
+                        none: {
+                            user_id: userId
+                        }
+                    }
+                },
+                select: { message_id: true }
+            });
+
+            if (unreadMessages.length > 0) {
+                // Create read receipts
+                await prisma.readReceipt.createMany({
+                    data: unreadMessages.map(msg => ({
+                        message_id: msg.message_id,
+                        user_id: userId
+                    })),
+                    skipDuplicates: true
+                });
+            }
+        }
+
+        // Get unread count to help UI update
+        const unreadCount = await prisma.message.count({
+            where: {
+                room_id: parseInt(roomId),
+                createdAt: {
+                    gt: currentTime
+                },
+                sender_id: {
+                    not: userId
+                }
+            }
+        });
+
+        // Notify room members about read status
+        const io = getIO();
+        io.to(`room:${roomId}`).emit('messages:read', {
+            user_id: userId,
+            room_id: parseInt(roomId),
+            timestamp: currentTime
         });
 
         res.json({
             success: true,
-            message: 'Messages marked as read'
+            message: 'Messages marked as read',
+            data: {
+                unreadCount,
+                user_id: userId,
+                room_id: parseInt(roomId),
+                timestamp: currentTime
+            }
         });
     } catch (error) {
         console.error('Error marking messages as read:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to mark messages as read'
+            message: 'Failed to mark messages as read',
+            error: error.message
         });
     }
 };
 
-// Add reaction to message
-const addMessageReaction = async (req, res) => {
-    try {
-        const { messageId } = req.params;
-        const { emoji } = req.body;
-        const userId = req.user.user_id;
-
-        const reaction = await prisma.messageReaction.create({
-            data: {
-                message_id: parseInt(messageId),
-                user_id: userId,
-                emoji
-            },
-            include: {
-                user: {
-                    select: {
-                        user_id: true,
-                        user_name: true,
-                        avatar: true
-                    }
-                }
-            }
-        });
-
-        res.json({
-            success: true,
-            data: reaction
-        });
-    } catch (error) {
-        console.error('Error adding reaction:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to add reaction'
-        });
-    }
-};
-
-// Remove reaction from message
-const removeMessageReaction = async (req, res) => {
-    try {
-        const { messageId, emoji } = req.params;
-        const userId = req.user.user_id;
-
-        await prisma.messageReaction.delete({
-            where: {
-                message_id_user_id_emoji: {
-                    message_id: parseInt(messageId),
-                    user_id: userId,
-                    emoji
-                }
-            }
-        });
-
-        res.json({
-            success: true,
-            message: 'Reaction removed successfully'
-        });
-    } catch (error) {
-        console.error('Error removing reaction:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to remove reaction'
-        });
-    }
-};
-
+/**
+ * Send a message to a chat room
+ * @route POST /api/chat/rooms/:roomId/messages
+ */
 const sendMessage = async (req, res) => {
     try {
         const { roomId } = req.params;
-        const { content, replyToId } = req.body;
-        const userId = req.user.user_id;
-        const files = req.files; // From multer
+        const { content, message_type = 'TEXT', reply_to_id, media_url, media_type, media_size, media_width, media_height, media_duration } = req.body;
+        const userId = parseInt(req.user);
 
         // Check if user is participant of the room
         const isParticipant = await prisma.chatParticipant.findUnique({
@@ -433,23 +801,21 @@ const sendMessage = async (req, res) => {
         });
 
         if (!isParticipant) {
-            // Clean up uploaded files if any
-            if (files?.length) {
-                files.forEach(file => {
-                    fs.unlinkSync(file.path);
-                });
-            }
             return res.status(403).json({
                 success: false,
                 message: 'Not authorized to send messages in this chat room'
             });
         }
 
-        // Process file uploads if any
-        let fileUrls = [];
-        if (files?.length) {
-            fileUrls = files.map(file => `/uploads/${file.filename}`);
-        }
+        // Get room type and participants
+        const room = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            include: {
+                participants: {
+                    select: { user_id: true }
+                }
+            }
+        });
 
         // Create the message
         const message = await prisma.message.create({
@@ -457,9 +823,15 @@ const sendMessage = async (req, res) => {
                 room_id: parseInt(roomId),
                 sender_id: userId,
                 content,
-                message_type: files?.length ? 'FILE' : 'TEXT',
-                files: fileUrls,
-                reply_to_id: replyToId ? parseInt(replyToId) : null
+                message_type,
+                reply_to_id: reply_to_id ? parseInt(reply_to_id) : null,
+                // Media fields for rich messages
+                media_url,
+                media_type,
+                media_size: media_size ? parseInt(media_size) : null,
+                media_width: media_width ? parseInt(media_width) : null,
+                media_height: media_height ? parseInt(media_height) : null,
+                media_duration: media_duration ? parseInt(media_duration) : null
             },
             include: {
                 sender: {
@@ -482,10 +854,417 @@ const sendMessage = async (req, res) => {
             }
         });
 
+        // For direct messages, mark as delivered immediately
+        if (room.type === 'DM') {
+            await prisma.message.update({
+                where: { message_id: message.message_id },
+                data: { delivered_at: new Date() }
+            });
+        }
+
         // Update room's last activity
         await prisma.chatRoom.update({
             where: { room_id: parseInt(roomId) },
-            data: { updated_at: new Date() }
+            data: { updatedAt: new Date() }
+        });
+
+        // Emit message to all room participants via socket
+        const io = getIO();
+        io.to(`room:${roomId}`).emit('message:received', message);
+
+        // Clear typing status for the sender
+        io.to(`room:${roomId}`).emit('user:stopTyping', {
+            roomId: parseInt(roomId),
+            userId
+        });
+
+        res.status(201).json({
+            success: true,
+            data: message
+        });
+    } catch (error) {
+        console.error('Error sending message:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to send message',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Indicate user is typing in a chat room
+ * @route POST /api/chat/rooms/:roomId/typing
+ */
+const updateTypingStatus = async (req, res) => {
+    try {
+        const { roomId } = req.params;
+        const { isTyping } = req.body;
+        const userId = req.user.user_id;
+
+        // Check if user is participant of the room
+        const isParticipant = await prisma.chatParticipant.findUnique({
+            where: {
+                user_id_room_id: {
+                    user_id: userId,
+                    room_id: parseInt(roomId)
+                }
+            }
+        });
+
+        if (!isParticipant) {
+            return res.status(403).json({
+                success: false,
+                message: 'Not authorized to update typing status in this chat room'
+            });
+        }
+
+        // Get user info for the notification
+        const user = await prisma.user.findUnique({
+            where: { user_id: userId },
+            select: { user_name: true }
+        });
+
+        // Emit typing status to all room participants via socket
+        const io = getIO();
+        if (isTyping) {
+            io.to(`room:${roomId}`).emit('user:typing', {
+                roomId: parseInt(roomId),
+                userId,
+                userName: user.user_name
+            });
+        } else {
+            io.to(`room:${roomId}`).emit('user:stopTyping', {
+                roomId: parseInt(roomId),
+                userId
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: `Typing status updated to ${isTyping ? 'typing' : 'not typing'}`
+        });
+    } catch (error) {
+        console.error('Error updating typing status:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update typing status',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Edit a message
+ * @route PUT /api/chat/messages/:messageId
+ */
+const editMessage = async (req, res) => {
+    try {
+        const { messageId } = req.params;
+        const { content } = req.body;
+        const userId = req.user.user_id;
+
+        // Find the message
+        const message = await prisma.message.findUnique({
+            where: { message_id: parseInt(messageId) }
+        });
+
+        if (!message) {
+            return res.status(404).json({
+                success: false,
+                message: 'Message not found'
+            });
+        }
+
+        // Only the sender can edit their message
+        if (message.sender_id !== userId) {
+            return res.status(403).json({
+                success: false,
+                message: 'Can only edit your own messages'
+            });
+        }
+
+        // Don't allow editing of certain message types
+        if (message.message_type === 'SYSTEM') {
+            return res.status(400).json({
+                success: false,
+                message: 'System messages cannot be edited'
+            });
+        }
+
+        // Update the message
+        const updatedMessage = await prisma.message.update({
+            where: { message_id: parseInt(messageId) },
+            data: {
+                content,
+                updatedAt: new Date() // This will mark it as edited
+            },
+            include: {
+                sender: {
+                    select: {
+                        user_id: true,
+                        user_name: true,
+                        avatar: true
+                    }
+                },
+                reply_to: {
+                    include: {
+                        sender: {
+                            select: {
+                                user_id: true,
+                                user_name: true
+                            }
+                        }
+                    }
+                },
+                readReceipts: {
+                    include: {
+                        user: {
+                            select: {
+                                user_id: true,
+                                user_name: true,
+                                avatar: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Notify room about the edited message
+        const io = getIO();
+        io.to(`room:${message.room_id}`).emit('message:edited', updatedMessage);
+
+        res.json({
+            success: true,
+            data: updatedMessage
+        });
+    } catch (error) {
+        console.error('Error editing message:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to edit message',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Leave a chat room
+ * @route POST /api/chat/rooms/:roomId/leave
+ */
+const leaveChat = async (req, res) => {
+    try {
+        const { roomId } = req.params;
+        const userId = req.user.user_id;
+
+        // Get room details
+        const room = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            include: {
+                participants: true
+            }
+        });
+
+        if (!room) {
+            return res.status(404).json({
+                success: false,
+                message: 'Chat room not found'
+            });
+        }
+
+        // Check if user is part of the room
+        const userParticipant = room.participants.find(p => p.user_id === userId);
+        if (!userParticipant) {
+            return res.status(400).json({
+                success: false,
+                message: 'You are not a participant of this chat room'
+            });
+        }
+
+        // Cannot leave a DM
+        if (room.type === 'DM') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot leave a direct message chat'
+            });
+        }
+
+        // Check if this is the last admin leaving a group
+        if (userParticipant.isAdmin) {
+            const adminCount = room.participants.filter(p => p.isAdmin).length;
+            if (adminCount === 1 && room.participants.length > 1) {
+                // Assign another participant as admin
+                const nextAdmin = room.participants.find(p => p.user_id !== userId);
+                if (nextAdmin) {
+                    await prisma.chatParticipant.update({
+                        where: {
+                            user_id_room_id: {
+                                user_id: nextAdmin.user_id,
+                                room_id: parseInt(roomId)
+                            }
+                        },
+                        data: { isAdmin: true }
+                    });
+
+                    // Create system message about admin change
+                    const newAdmin = await prisma.user.findUnique({
+                        where: { user_id: nextAdmin.user_id },
+                        select: { user_name: true }
+                    });
+
+                    await prisma.message.create({
+                        data: {
+                            room_id: parseInt(roomId),
+                            sender_id: userId,
+                            content: `${newAdmin.user_name} is now an admin of this group`,
+                            message_type: 'SYSTEM'
+                        }
+                    });
+                }
+            }
+        }
+
+        // Create a system message about the user leaving
+        await prisma.message.create({
+            data: {
+                room_id: parseInt(roomId),
+                sender_id: userId,
+                content: `${req.user.user_name} left the group`,
+                message_type: 'SYSTEM'
+            }
+        });
+
+        // Remove the user from the chat room
+        await prisma.chatParticipant.delete({
+            where: {
+                user_id_room_id: {
+                    user_id: userId,
+                    room_id: parseInt(roomId)
+                }
+            }
+        });
+
+        // If this was the last participant, delete the room
+        const remainingParticipants = await prisma.chatParticipant.count({
+            where: { room_id: parseInt(roomId) }
+        });
+
+        if (remainingParticipants === 0) {
+            // Delete all messages and the room
+            await prisma.message.deleteMany({
+                where: { room_id: parseInt(roomId) }
+            });
+
+            await prisma.chatRoom.delete({
+                where: { room_id: parseInt(roomId) }
+            });
+        }
+
+        // Notify other participants about the user leaving
+        const io = getIO();
+        io.to(`room:${roomId}`).emit('participant:left', {
+            roomId: parseInt(roomId),
+            userId: userId,
+            userName: req.user.user_name
+        });
+
+        // Remove user from the socket room
+        const socket = io.sockets.sockets.get(req.query.socketId);
+        if (socket) {
+            socket.leave(`room:${roomId}`);
+        }
+
+        res.json({
+            success: true,
+            message: 'Successfully left the chat room'
+        });
+    } catch (error) {
+        console.error('Error leaving chat room:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to leave chat room',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Upload media to a chat
+ * @route POST /api/chat/rooms/:roomId/media
+ */
+const uploadMedia = async (req, res) => {
+    try {
+        const { roomId } = req.params;
+        const userId = req.user.user_id;
+        const file = req.file; // From multer middleware
+
+        if (!file) {
+            return res.status(400).json({
+                success: false,
+                message: 'No file uploaded'
+            });
+        }
+
+        // Check if user is participant of the room
+        const isParticipant = await prisma.chatParticipant.findUnique({
+            where: {
+                user_id_room_id: {
+                    user_id: userId,
+                    room_id: parseInt(roomId)
+                }
+            }
+        });
+
+        if (!isParticipant) {
+            // Clean up uploaded file
+            fs.unlinkSync(file.path);
+
+            return res.status(403).json({
+                success: false,
+                message: 'Not authorized to send media in this chat room'
+            });
+        }
+
+        // Determine media type based on mimetype
+        let messageType = 'FILE';
+        if (file.mimetype.startsWith('image/')) {
+            messageType = 'IMAGE';
+        } else if (file.mimetype.startsWith('video/')) {
+            messageType = 'VIDEO';
+        } else if (file.mimetype.startsWith('audio/')) {
+            messageType = 'AUDIO';
+        }
+
+        // Create the message with the media
+        const message = await prisma.message.create({
+            data: {
+                room_id: parseInt(roomId),
+                sender_id: userId,
+                content: file.originalname, // Use filename as content
+                message_type: messageType,
+                media_url: `/uploads/${file.filename}`,
+                media_type: file.mimetype,
+                media_size: file.size
+                // Note: For images and videos, you might want to add dimensions
+                // For audio/video, you might want to add duration
+                // These would require additional processing
+            },
+            include: {
+                sender: {
+                    select: {
+                        user_id: true,
+                        user_name: true,
+                        avatar: true
+                    }
+                }
+            }
+        });
+
+        // Update room's last activity
+        await prisma.chatRoom.update({
+            where: { room_id: parseInt(roomId) },
+            data: { updatedAt: new Date() }
         });
 
         // Emit message to all room participants via socket
@@ -497,29 +1276,418 @@ const sendMessage = async (req, res) => {
             data: message
         });
     } catch (error) {
-        // Clean up uploaded files if any
-        if (req.files?.length) {
-            req.files.forEach(file => {
-                fs.unlinkSync(file.path);
-            });
+        // Clean up uploaded file if there was an error
+        if (req.file) {
+            fs.unlinkSync(req.file.path);
         }
 
-        console.error('Error sending message:', error);
+        console.error('Error uploading media:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to send message'
+            message: 'Failed to upload media',
+            error: error.message
         });
     }
 };
 
+/**
+ * Update chat room details (name, description, avatar)
+ * @route PATCH /api/chat/rooms/:roomId
+ */
+const updateChatRoom = async (req, res) => {
+    try {
+        const { roomId } = req.params;
+        const { name, description, avatar } = req.body;
+        const userId = req.user.user_id;
+
+        // Check if user is admin of the room
+        const userParticipant = await prisma.chatParticipant.findUnique({
+            where: {
+                user_id_room_id: {
+                    user_id: userId,
+                    room_id: parseInt(roomId)
+                }
+            }
+        });
+
+        if (!userParticipant?.isAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only admins can update room details'
+            });
+        }
+
+        // Get room type
+        const room = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            select: { type: true }
+        });
+
+        if (room.type === 'DM') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot update direct message room details'
+            });
+        }
+
+        // Update the room
+        const updatedRoom = await prisma.chatRoom.update({
+            where: { room_id: parseInt(roomId) },
+            data: {
+                name: name,
+                description: description,
+                avatar: avatar
+            },
+            include: {
+                participants: {
+                    include: {
+                        user: {
+                            select: {
+                                user_id: true,
+                                user_name: true,
+                                avatar: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Create system message about the update
+        let changes = [];
+        if (name) changes.push('name');
+        if (description) changes.push('description');
+        if (avatar) changes.push('avatar');
+
+        if (changes.length > 0) {
+            const changeStr = changes.join(', ');
+            await prisma.message.create({
+                data: {
+                    room_id: parseInt(roomId),
+                    sender_id: userId,
+                    content: `${req.user.user_name} updated the group ${changeStr}`,
+                    message_type: 'SYSTEM'
+                }
+            });
+        }
+
+        // Notify all participants about the room update
+        const io = getIO();
+        io.to(`room:${roomId}`).emit('chatRoom:updated', updatedRoom);
+
+        res.json({
+            success: true,
+            data: updatedRoom
+        });
+    } catch (error) {
+        console.error('Error updating chat room:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update chat room',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Update participant admin status
+ * @route PATCH /api/chat/rooms/:roomId/participants/:participantId
+ */
+const updateParticipantRole = async (req, res) => {
+    try {
+        const { roomId, participantId } = req.params;
+        const { isAdmin } = req.body;
+        const userId = req.user.user_id;
+
+        // Check if user is admin of the room
+        const userParticipant = await prisma.chatParticipant.findUnique({
+            where: {
+                user_id_room_id: {
+                    user_id: userId,
+                    room_id: parseInt(roomId)
+                }
+            }
+        });
+
+        if (!userParticipant?.isAdmin) {
+            return res.status(403).json({
+                success: false,
+                message: 'Only admins can update participant roles'
+            });
+        }
+
+        // Get room type
+        const room = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            select: { type: true }
+        });
+
+        if (room.type === 'DM') {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot update roles in direct message rooms'
+            });
+        }
+
+        // Update participant role
+        await prisma.chatParticipant.update({
+            where: {
+                user_id_room_id: {
+                    user_id: parseInt(participantId),
+                    room_id: parseInt(roomId)
+                }
+            },
+            data: { isAdmin: isAdmin }
+        });
+
+        // Get participant name for system message
+        const participant = await prisma.user.findUnique({
+            where: { user_id: parseInt(participantId) },
+            select: { user_name: true }
+        });
+
+        // Create system message about the role change
+        const actionText = isAdmin ? 'promoted to admin' : 'removed as admin';
+        await prisma.message.create({
+            data: {
+                room_id: parseInt(roomId),
+                sender_id: userId,
+                content: `${participant.user_name} was ${actionText} by ${req.user.user_name}`,
+                message_type: 'SYSTEM'
+            }
+        });
+
+        // Get updated room data
+        const updatedRoom = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            include: {
+                participants: {
+                    include: {
+                        user: {
+                            select: {
+                                user_id: true,
+                                user_name: true,
+                                avatar: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        // Notify all participants about the role change
+        const io = getIO();
+        io.to(`room:${roomId}`).emit('participant:roleChanged', {
+            roomId: parseInt(roomId),
+            participantId: parseInt(participantId),
+            isAdmin: isAdmin,
+            room: updatedRoom
+        });
+
+        res.json({
+            success: true,
+            data: {
+                roomId: parseInt(roomId),
+                participantId: parseInt(participantId),
+                isAdmin: isAdmin
+            }
+        });
+    } catch (error) {
+        console.error('Error updating participant role:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to update participant role',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Setup user socket rooms (called when user connects)
+ * @route GET /api/chat/socket/setup
+ */
+const setupUserSocket = async (req, res) => {
+    try {
+        const userId = req.user.user_id;
+        const socketId = req.query.socketId;
+
+        if (!socketId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Socket ID is required'
+            });
+        }
+
+        // Get all rooms where user is a participant
+        const userRooms = await prisma.chatParticipant.findMany({
+            where: { user_id: userId },
+            select: { room_id: true }
+        });
+
+        const roomIds = userRooms.map(room => `room:${room.room_id}`);
+
+        // Add socket to user's personal room and all chat rooms
+        const io = getIO();
+        const socket = io.sockets.sockets.get(socketId);
+
+        if (socket) {
+            // Join personal user room
+            socket.join(`user:${userId}`);
+
+            // Join all chat rooms
+            roomIds.forEach(roomId => {
+                socket.join(roomId);
+            });
+
+            // Update user's online status
+            await prisma.user.update({
+                where: { user_id: userId },
+                data: { lastActive: new Date() }
+            });
+
+            // Broadcast to friends that user is online
+            const friends = await getFriendIds(userId);
+            if (friends.length > 0) {
+                friends.forEach(friendId => {
+                    io.to(`user:${friendId}`).emit('user:online', {
+                        userId,
+                        timestamp: new Date()
+                    });
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            message: 'Socket rooms set up successfully',
+            data: {
+                userRoom: `user:${userId}`,
+                chatRooms: roomIds
+            }
+        });
+    } catch (error) {
+        console.error('Error setting up socket rooms:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to set up socket rooms',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get chat room details
+ * @route GET /api/chat/rooms/:roomId
+ */
+const getChatRoomDetails = async (req, res) => {
+    try {
+        const { roomId } = req.params;
+        const userId = req.user.user_id;
+
+        // Check if user is participant of the room
+        const isParticipant = await prisma.chatParticipant.findUnique({
+            where: {
+                user_id_room_id: {
+                    user_id: userId,
+                    room_id: parseInt(roomId)
+                }
+            }
+        });
+
+        if (!isParticipant) {
+            return res.status(403).json({
+                success: false,
+                message: 'Not authorized to view this chat room'
+            });
+        }
+
+        const room = await prisma.chatRoom.findUnique({
+            where: { room_id: parseInt(roomId) },
+            include: {
+                participants: {
+                    include: {
+                        user: {
+                            select: {
+                                user_id: true,
+                                user_name: true,
+                                avatar: true,
+                                lastActive: true
+                            }
+                        }
+                    }
+                },
+                creator: {
+                    select: {
+                        user_id: true,
+                        user_name: true,
+                        avatar: true
+                    }
+                }
+            }
+        });
+
+        if (!room) {
+            return res.status(404).json({
+                success: false,
+                message: 'Chat room not found'
+            });
+        }
+
+        // For DM rooms, get the other participant's info for display
+        let otherParticipant = null;
+        if (room.type === 'DM') {
+            otherParticipant = room.participants.find(p => p.user_id !== userId)?.user;
+        }
+
+        res.json({
+            success: true,
+            data: {
+                ...room,
+                otherParticipant
+            }
+        });
+    } catch (error) {
+        console.error('Error fetching chat room details:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch chat room details',
+            error: error.message
+        });
+    }
+};
+
+// Helper function to get user's friend IDs
+const getFriendIds = async (userId) => {
+    const friendships = await prisma.friendRequest.findMany({
+        where: {
+            OR: [
+                { sender_id: userId },
+                { receiver_id: userId }
+            ],
+            status: 'ACCEPTED'
+        }
+    });
+
+    return friendships.map(f =>
+        f.sender_id === userId ? f.receiver_id : f.sender_id
+    );
+};
+
 module.exports = {
     createChatRoom,
+    createDirectChat,
     getUserChatRooms,
+    getChatRoomDetails,
     getChatMessages,
+    updateChatRoom,
     updateChatParticipants,
+    updateParticipantRole,
+    leaveChat,
     deleteMessage,
     markMessagesAsRead,
-    addMessageReaction,
-    removeMessageReaction,
-    sendMessage
+    sendMessage,
+    uploadMedia,
+    updateTypingStatus,
+    editMessage,
+    setupUserSocket
 };

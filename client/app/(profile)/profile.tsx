@@ -77,7 +77,7 @@ const Profile = () => {
 
     const handleSettingsPress = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push('/settings');
+        router.push('/settings/');
     };
 
     return (

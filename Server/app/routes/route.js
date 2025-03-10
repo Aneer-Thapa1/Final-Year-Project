@@ -5,6 +5,7 @@ const blogRoute = require('./blogRoute');
 const chatbotRoute = require('./chatbotRoute');
 const domainRoute = require('./domainRoute');
 const friendshipRoute = require('./friendshipRoute');
+const chatRoute = require('./chatRoute');
 
 const router = express.Router();
 
@@ -19,6 +20,10 @@ router.use('/blog', blogRoute)
 
 // routes related to blog (/api/blog)
 router.use('/chatbot', chatbotRoute)
+
+// routes related to blog (/api/blog)
+router.use('/chat', chatRoute)
+
 
 // routes related to domain (/api/domain)
 router.use('/domain', domainRoute)

@@ -15,7 +15,7 @@ router.post('/request', validateToken, [body('user_id')
     .withMessage('User ID is required')], friendshipController.sendFriendRequest);
 
 // Respond to a friend request
-router.patch('/respond', validateToken, [body('request_id')
+router.put('/respond', validateToken, [body('request_id')
     .isInt()
     .withMessage('Request ID must be an integer')
     .notEmpty()

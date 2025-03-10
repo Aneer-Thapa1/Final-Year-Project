@@ -1,10 +1,12 @@
+// src/components/FriendsComponent.tsx
 import { View, Text, Image, TouchableOpacity, useColorScheme, ActivityIndicator, TextInput, Alert } from 'react-native';
 import React, { useCallback, useState, useEffect } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { useAppDispatch, useAppSelector, RootState } from '../store/store';
 import { MotiView, AnimatePresence } from 'moti';
 import { Trophy, Search, Filter, MessageCircle, UserPlus, X, Check, Clock } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { debounce } from 'lodash';
+import { useRouter } from 'expo-router';
 
 // Import Redux actions
 import {
@@ -18,11 +20,23 @@ import {
     clearSearchResults
 } from '../store/slices/friendshipSlice';
 
-const FriendsComponent = ({ isDark, navigation }) => {
+// Import chat actions
+import {
+    connectSocket,
+    createDirectChat,
+    openExistingChat
+} from '../store/slices/chatSlice';
+
+interface FriendsComponentProps {
+    isDark?: boolean;
+}
+
+const FriendsComponent: React.FC<FriendsComponentProps> = ({ isDark }) => {
     // If isDark is not passed as prop, use system setting
     const systemColorScheme = useColorScheme();
     const darkMode = isDark !== undefined ? isDark : systemColorScheme === 'dark';
-    const dispatch = useDispatch();
+    const dispatch = useAppDispatch();
+    const router = useRouter();
 
     // Get friendship data from Redux store
     const {
@@ -32,11 +46,21 @@ const FriendsComponent = ({ isDark, navigation }) => {
         searchResults,
         loading,
         error
-    } = useSelector(state => state.friendship);
+    } = useAppSelector((state: RootState) => state.friendship);
+
+    // Get chat data from Redux store
+    const { chatRooms, loadingChat, socketConnected } = useAppSelector((state: RootState) => state.chat);
 
     // Search state
     const [searchActive, setSearchActive] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+
+    // Initialize socket connection when component mounts
+    useEffect(() => {
+        if (!socketConnected) {
+            dispatch(connectSocket());
+        }
+    }, [dispatch, socketConnected]);
 
     // Fetch all data on initial mount
     useEffect(() => {
@@ -54,7 +78,7 @@ const FriendsComponent = ({ isDark, navigation }) => {
 
     // Handle search with debounce
     const debouncedSearch = useCallback(
-        debounce((query) => {
+        debounce((query: string) => {
             if (query.length >= 2) {
                 dispatch(searchUsers(query));
             } else {
@@ -71,7 +95,7 @@ const FriendsComponent = ({ isDark, navigation }) => {
     }, [searchQuery, debouncedSearch]);
 
     // Handle adding friend
-    const handleAddFriend = useCallback((userId) => {
+    const handleAddFriend = useCallback((userId: string) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
         dispatch(sendFriendRequest(userId))
@@ -79,13 +103,13 @@ const FriendsComponent = ({ isDark, navigation }) => {
             .then(() => {
                 Alert.alert('Success', 'Friend request sent successfully');
             })
-            .catch((error) => {
+            .catch((error: any) => {
                 Alert.alert('Error', error || 'Failed to send friend request');
             });
     }, [dispatch]);
 
     // Handle accepting friend request
-    const handleAcceptRequest = useCallback((requestId) => {
+    const handleAcceptRequest = useCallback((requestId: string) => {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
         dispatch(respondToFriendRequest({ requestId, accept: true }))
@@ -93,13 +117,13 @@ const FriendsComponent = ({ isDark, navigation }) => {
             .then(() => {
                 Alert.alert('Success', 'Friend request accepted');
             })
-            .catch((error) => {
+            .catch((error: any) => {
                 Alert.alert('Error', error || 'Failed to accept request');
             });
     }, [dispatch]);
 
     // Handle rejecting friend request
-    const handleRejectRequest = useCallback((requestId) => {
+    const handleRejectRequest = useCallback((requestId: string) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
         dispatch(respondToFriendRequest({ requestId, accept: false }))
@@ -107,24 +131,96 @@ const FriendsComponent = ({ isDark, navigation }) => {
             .then(() => {
                 Alert.alert('Info', 'Friend request rejected');
             })
-            .catch((error) => {
+            .catch((error: any) => {
                 Alert.alert('Error', error || 'Failed to reject request');
             });
     }, [dispatch]);
 
-    // Handle messaging a friend
-    const handleMessageFriend = useCallback((friendId, friendName) => {
+    // Enhanced handle messaging a friend
+    const handleMessageFriend = useCallback(async (friendId: string, friendName: string) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        // Navigate to messaging screen
-        if (navigation) {
-            navigation.navigate('Messages', { friendId, friendName });
+
+        // Check if chat room already exists
+        const existingRoom = chatRooms.find(room => {
+            // Comprehensive logging for each room
+            console.log('Analyzing Room:', {
+                roomId: room.room_id,
+                type: room.type,
+                participantsCount: room.participants.length,
+                participants: room.participants.map(p => ({
+                    userId: p.user_id,
+                    // Add any other relevant participant info
+                }))
+            });
+
+            // Check if it's a direct message with exactly 2 participants
+            if (room.type !== 'DM' || room.participants.length !== 2) {
+                console.log(`Room does not meet DM criteria: type=${room.type}, participants=${room.participants.length}`);
+                return false;
+            }
+
+            // Check if both the friend's ID and current user's ID are in the participants
+            const participantUserIds = room.participants.map(p => p.user_id);
+
+            console.log('Participants User IDs:', participantUserIds);
+            console.log('Friend ID:', friendId);
+            console.log('Current User ID:', currentUserId);
+
+            const roomContainsBothUsers = participantUserIds.includes(friendId) &&
+                participantUserIds.includes(currentUserId);
+
+            console.log('Room Contains Both Users:', roomContainsBothUsers);
+
+            return roomContainsBothUsers;
+        });
+
+// Additional comprehensive logging
+        console.log('Full ChatRooms:', chatRooms);
+        console.log('Existing Room:', existingRoom);
+        if (existingRoom) {
+            dispatch(openExistingChat(existingRoom.room_id))
+                .unwrap()
+                .then(() => {
+
+                    // Use replace instead of push to ensure navigation
+                    router.push({
+                        pathname: `/(chat)/${existingRoom.room_id}`,
+                        params: {
+                            name: friendName || '',
+                            isDirect: 'true'
+                        }
+                    });
+                })
+                .catch((error) => {
+                    console.error('Chat Room Opening Error:', error);
+                    Alert.alert(
+                        'Navigation Error',
+                        'Unable to open chat room. Please try again.',
+                        [{ text: 'OK' }]
+                    );
+                });
         } else {
-            console.log(`Opening message with friend: ${friendId}`);
+            // Create new direct chat room
+            dispatch(createDirectChat(friendId))
+                .unwrap()
+                .then((roomData) => {
+
+                    router.push({
+                        pathname: `/(chat)/${existingRoom.room_id}`,
+                        params: {
+                            name: friendName || '',
+                            isDirect: 'true'
+                        }
+                    });
+                })
+                .catch(() => {
+                    Alert.alert('Error', 'Failed to create chat room');
+                });
         }
-    }, [navigation]);
+    }, [router, dispatch, chatRooms]);
 
     // Handle removing a friend
-    const handleRemoveFriend = useCallback((friendId) => {
+    const handleRemoveFriend = useCallback((friendId: string) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
         dispatch(removeFriend(friendId))
@@ -132,7 +228,7 @@ const FriendsComponent = ({ isDark, navigation }) => {
             .then(() => {
                 Alert.alert('Success', 'Friend removed successfully');
             })
-            .catch((error) => {
+            .catch((error: any) => {
                 Alert.alert('Error', error || 'Failed to remove friend');
             });
     }, [dispatch]);
@@ -150,6 +246,9 @@ const FriendsComponent = ({ isDark, navigation }) => {
         badgeBg: darkMode ? 'bg-primary-900/30' : 'bg-primary-50',
         badgeText: darkMode ? 'text-primary-300' : 'text-primary-700',
         actionBtnBg: darkMode ? 'bg-gray-700' : 'bg-gray-100',
+        actionBtnActive: 'bg-primary-500',
+        rejectBtnBg: darkMode ? 'bg-red-900/20' : 'bg-red-50',
+        acceptBtnBg: darkMode ? 'bg-green-900/20' : 'bg-green-50',
     };
 
     return (
@@ -230,7 +329,7 @@ const FriendsComponent = ({ isDark, navigation }) => {
                                 <Text className={`text-lg font-montserrat-semibold ${styles.text} mb-3`}>
                                     Search Results
                                 </Text>
-                                {searchResults.map((user, index) => (
+                                {searchResults.map((user: any, index: number) => (
                                     <MotiView
                                         key={user.user_id}
                                         from={{ opacity: 0, scale: 0.95 }}
@@ -307,7 +406,7 @@ const FriendsComponent = ({ isDark, navigation }) => {
                                     )}
                                 </View>
 
-                                {pendingRequests.map((request) => (
+                                {pendingRequests.map((request: any) => (
                                     <MotiView
                                         key={request.request_id}
                                         from={{ opacity: 0, scale: 0.95 }}
@@ -334,21 +433,27 @@ const FriendsComponent = ({ isDark, navigation }) => {
                                                     </View>
                                                 </View>
 
-                                                <View className="flex-row items-center space-x-2">
+                                                <View className="flex-row items-center space-x-4">
                                                     <TouchableOpacity
                                                         onPress={() => handleRejectRequest(request.request_id)}
-                                                        className={`h-9 w-9 rounded-full ${styles.actionBtnBg} items-center justify-center`}
+                                                        className={`px-3 py-2 rounded-full ${styles.rejectBtnBg} items-center justify-center flex-row`}
                                                         disabled={loading.action}
                                                     >
                                                         <X size={18} color={darkMode ? "#F87171" : "#EF4444"} />
+                                                        <Text className={`ml-1 text-sm font-montserrat-medium ${darkMode ? "text-red-300" : "text-red-500"}`}>
+                                                            Reject
+                                                        </Text>
                                                     </TouchableOpacity>
 
                                                     <TouchableOpacity
                                                         onPress={() => handleAcceptRequest(request.request_id)}
-                                                        className="h-9 w-9 rounded-full bg-primary-500 items-center justify-center"
+                                                        className={`px-3 py-2 rounded-full bg-primary-500 items-center justify-center flex-row`}
                                                         disabled={loading.action}
                                                     >
                                                         <Check size={18} color="#FFFFFF" />
+                                                        <Text className="ml-1 text-sm font-montserrat-medium text-white">
+                                                            Accept
+                                                        </Text>
                                                     </TouchableOpacity>
                                                 </View>
                                             </>
@@ -381,7 +486,7 @@ const FriendsComponent = ({ isDark, navigation }) => {
                                 </Text>
                             </View>
                         ) : (
-                            friends.map((friend, index) => (
+                            friends.map((friend: any, index: number) => (
                                 <MotiView
                                     key={friend.user_id}
                                     from={{ opacity: 0, translateY: 10 }}
@@ -422,12 +527,13 @@ const FriendsComponent = ({ isDark, navigation }) => {
                                         </View>
                                     </View>
 
-                                    <View className="flex-row items-center space-x-3">
+                                    <View className="flex-row items-center gap-3 space-x-3">
                                         <TouchableOpacity
                                             onPress={() => handleMessageFriend(friend.user_id, friend.user_name)}
-                                            className={`h-9 w-9 rounded-full ${styles.actionBtnBg} items-center justify-center`}
+                                            className={`h-9 w-9 rounded-full ${loadingChat ? styles.actionBtnBg : 'bg-primary-500/85'} items-center justify-center`}
+                                            disabled={loadingChat}
                                         >
-                                            <MessageCircle size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                                            <MessageCircle size={16} color={loadingChat ? (darkMode ? "#9CA3AF" : "#6B7280") : "#FFFFFF"} />
                                         </TouchableOpacity>
 
                                         <TouchableOpacity
@@ -462,7 +568,7 @@ const FriendsComponent = ({ isDark, navigation }) => {
                                 </Text>
                             </View>
                         ) : (
-                            suggestions.map((user, index) => (
+                            suggestions.map((user: any, index: number) => (
                                 <MotiView
                                     key={user.user_id}
                                     from={{ opacity: 0, translateY: 10 }}
@@ -532,7 +638,7 @@ const FriendsComponent = ({ isDark, navigation }) => {
 };
 
 // Helper function to format last active time
-const formatLastActive = (timestamp) => {
+const formatLastActive = (timestamp: string): string => {
     if (!timestamp) return 'Unknown';
 
     const lastActive = new Date(timestamp);
@@ -551,7 +657,7 @@ const formatLastActive = (timestamp) => {
 };
 
 // Helper function to check if user was active in the last 15 minutes
-const isRecentlyActive = (timestamp) => {
+const isRecentlyActive = (timestamp: string): boolean => {
     if (!timestamp) return false;
 
     const lastActive = new Date(timestamp);
@@ -563,7 +669,7 @@ const isRecentlyActive = (timestamp) => {
 };
 
 // Helper function to format request time
-const formatRequestTime = (timestamp) => {
+const formatRequestTime = (timestamp: string): string => {
     if (!timestamp) return '';
 
     const requestTime = new Date(timestamp);
