@@ -67,9 +67,11 @@ interface ChatState {
     typingUsers: Record<number, TypingUser[]>;
     unreadCounts: Record<number, number>;
     loading: boolean;
+    loadingChat: boolean; // Added to match your FriendsComponent state usage
     sending: boolean;
     error: string | null;
     socket: Socket | null;
+    socketConnected: boolean; // Added to match your FriendsComponent state usage
 }
 
 // Socket singleton
@@ -139,6 +141,32 @@ export const fetchChatMessages = createAsyncThunk(
             return { roomId, messages: response.data.data };
         } catch (error: any) {
             return rejectWithValue(error.response?.data?.message || 'Failed to fetch messages');
+        }
+    }
+);
+
+// Add the missing openExistingChat action
+export const openExistingChat = createAsyncThunk(
+    'chat/openExistingChat',
+    async (roomId: number, { rejectWithValue, dispatch, getState }) => {
+        try {
+            // Join the room via socket
+            const state = getState() as { chat: ChatState };
+            if (state.chat.socket?.connected) {
+                state.chat.socket.emit('join:room', roomId);
+            }
+
+            // Mark as read
+            await dispatch(markMessagesAsRead(roomId)).unwrap();
+
+            // Fetch messages if needed
+            if (!state.chat.messages[roomId] || state.chat.messages[roomId].length === 0) {
+                await dispatch(fetchChatMessages(roomId)).unwrap();
+            }
+
+            return roomId;
+        } catch (error: any) {
+            return rejectWithValue(error.response?.data?.message || 'Failed to open chat');
         }
     }
 );
@@ -216,9 +244,11 @@ const initialState: ChatState = {
     typingUsers: {},
     unreadCounts: {},
     loading: false,
+    loadingChat: false, // Added to match your FriendsComponent state usage
     sending: false,
     error: null,
-    socket: null
+    socket: null,
+    socketConnected: false // Added to match your FriendsComponent state usage
 };
 
 // Slice
@@ -290,8 +320,18 @@ const chatSlice = createSlice({
     extraReducers: (builder) => {
         builder
             // Connect socket
+            .addCase(connectSocket.pending, (state) => {
+                state.loading = true;
+            })
             .addCase(connectSocket.fulfilled, (state, action) => {
                 state.socket = action.payload;
+                state.socketConnected = true;
+                state.loading = false;
+            })
+            .addCase(connectSocket.rejected, (state) => {
+                state.loading = false;
+                state.socketConnected = false;
+                state.error = 'Failed to connect to chat server';
             })
 
             // Fetch chat rooms
@@ -329,6 +369,20 @@ const chatSlice = createSlice({
                 state.error = action.payload as string;
             })
 
+            // Open existing chat
+            .addCase(openExistingChat.pending, (state) => {
+                state.loadingChat = true;
+            })
+            .addCase(openExistingChat.fulfilled, (state, action) => {
+                state.activeRoomId = action.payload;
+                state.loadingChat = false;
+                state.unreadCounts[action.payload] = 0;
+            })
+            .addCase(openExistingChat.rejected, (state, action) => {
+                state.loadingChat = false;
+                state.error = action.payload as string;
+            })
+
             // Send message
             .addCase(sendMessage.pending, (state) => {
                 state.sending = true;
@@ -363,7 +417,7 @@ const chatSlice = createSlice({
 
             // Create direct chat
             .addCase(createDirectChat.pending, (state) => {
-                state.loading = true;
+                state.loadingChat = true;
             })
             .addCase(createDirectChat.fulfilled, (state, action) => {
                 const existingIndex = state.chatRooms.findIndex(
@@ -375,10 +429,10 @@ const chatSlice = createSlice({
                 }
 
                 state.activeRoomId = action.payload.room_id;
-                state.loading = false;
+                state.loadingChat = false;
             })
             .addCase(createDirectChat.rejected, (state, action) => {
-                state.loading = false;
+                state.loadingChat = false;
                 state.error = action.payload as string;
             })
 

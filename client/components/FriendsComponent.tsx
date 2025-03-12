@@ -48,6 +48,9 @@ const FriendsComponent: React.FC<FriendsComponentProps> = ({ isDark }) => {
         error
     } = useAppSelector((state: RootState) => state.friendship);
 
+    // Get user data from Redux store
+    const currentUserId = useAppSelector((state: RootState) => state.user.user?.user?.user_id);
+
     // Get chat data from Redux store
     const { chatRooms, loadingChat, socketConnected } = useAppSelector((state: RootState) => state.chat);
 
@@ -140,84 +143,55 @@ const FriendsComponent: React.FC<FriendsComponentProps> = ({ isDark }) => {
     const handleMessageFriend = useCallback(async (friendId: string, friendName: string) => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-        // Check if chat room already exists
-        const existingRoom = chatRooms.find(room => {
-            // Comprehensive logging for each room
-            console.log('Analyzing Room:', {
-                roomId: room.room_id,
-                type: room.type,
-                participantsCount: room.participants.length,
-                participants: room.participants.map(p => ({
-                    userId: p.user_id,
-                    // Add any other relevant participant info
-                }))
+        // Ensure we have the current user ID
+        if (!currentUserId) {
+            Alert.alert('Error', 'User information not available');
+            return;
+        }
+
+        try {
+            // Check if chat room already exists
+            const existingRoom = chatRooms.find(room => {
+                // Check if it's a direct message with exactly 2 participants
+                if (room.type !== 'DM' || room.participants.length !== 2) {
+                    return false;
+                }
+
+                // Check if both the friend's ID and current user's ID are in the participants
+                const participantUserIds = room.participants.map(p => p.user_id);
+                return participantUserIds.includes(friendId) && participantUserIds.includes(currentUserId);
             });
 
-            // Check if it's a direct message with exactly 2 participants
-            if (room.type !== 'DM' || room.participants.length !== 2) {
-                console.log(`Room does not meet DM criteria: type=${room.type}, participants=${room.participants.length}`);
-                return false;
+            if (existingRoom) {
+                // Open existing chat room
+                await dispatch(openExistingChat(existingRoom.room_id)).unwrap();
+
+                // Navigate to the chat room
+                router.push({
+                    pathname: `/(chat)/${existingRoom.room_id}`,
+                    params: {
+                        name: friendName || '',
+                        isDirect: 'true'
+                    }
+                });
+            } else {
+                // Create new direct chat room
+                const roomData = await dispatch(createDirectChat(friendId)).unwrap();
+
+                // Navigate to the new chat room
+                router.push({
+                    pathname: `/(chat)/${roomData.room_id}`,
+                    params: {
+                        name: friendName || '',
+                        isDirect: 'true'
+                    }
+                });
             }
-
-            // Check if both the friend's ID and current user's ID are in the participants
-            const participantUserIds = room.participants.map(p => p.user_id);
-
-            console.log('Participants User IDs:', participantUserIds);
-            console.log('Friend ID:', friendId);
-            console.log('Current User ID:', currentUserId);
-
-            const roomContainsBothUsers = participantUserIds.includes(friendId) &&
-                participantUserIds.includes(currentUserId);
-
-            console.log('Room Contains Both Users:', roomContainsBothUsers);
-
-            return roomContainsBothUsers;
-        });
-
-// Additional comprehensive logging
-        console.log('Full ChatRooms:', chatRooms);
-        console.log('Existing Room:', existingRoom);
-        if (existingRoom) {
-            dispatch(openExistingChat(existingRoom.room_id))
-                .unwrap()
-                .then(() => {
-
-                    // Use replace instead of push to ensure navigation
-                    router.push({
-                        pathname: `/(chat)/${existingRoom.room_id}`,
-                        params: {
-                            name: friendName || '',
-                            isDirect: 'true'
-                        }
-                    });
-                })
-                .catch((error) => {
-                    console.error('Chat Room Opening Error:', error);
-                    Alert.alert(
-                        'Navigation Error',
-                        'Unable to open chat room. Please try again.',
-                        [{ text: 'OK' }]
-                    );
-                });
-        } else {
-            // Create new direct chat room
-            dispatch(createDirectChat(friendId))
-                .unwrap()
-                .then((roomData) => {
-
-                    router.push({
-                        pathname: `/(chat)/${existingRoom.room_id}`,
-                        params: {
-                            name: friendName || '',
-                            isDirect: 'true'
-                        }
-                    });
-                })
-                .catch(() => {
-                    Alert.alert('Error', 'Failed to create chat room');
-                });
+        } catch (error) {
+            console.error('Chat error:', error);
+            Alert.alert('Error', 'Failed to open chat conversation');
         }
-    }, [router, dispatch, chatRooms]);
+    }, [router, dispatch, chatRooms, currentUserId]);
 
     // Handle removing a friend
     const handleRemoveFriend = useCallback((friendId: string) => {
