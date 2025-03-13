@@ -1,4 +1,4 @@
-// screens/add/index.js - Completely fixed with attractive design
+// screens/add/index.js - Updated with latest habit tracking features
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -26,9 +26,11 @@ import {
   Info,
   ChevronDown,
   ChevronUp,
-  Share2 as Share,
   Plus,
-  X
+  X,
+  Heart,
+  Shield,
+  Settings
 } from 'lucide-react-native';
 import { router } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -45,7 +47,6 @@ const defaultHabitState = {
   start_date: new Date(),
   end_date: null,
   is_favorite: false,
-  is_public: false,
   frequency_type: "DAILY",
   frequency_value: 1,
   frequency_interval: 1,
@@ -62,7 +63,9 @@ const defaultHabitState = {
   reward: "",
   difficulty: "MEDIUM",
   tags: [],
-  reminders: []
+  reminders: [],
+  grace_period_enabled: true,
+  grace_period_hours: 24
 };
 
 const AddHabitScreen = () => {
@@ -91,6 +94,7 @@ const AddHabitScreen = () => {
     reminders: false,
     motivation: false,
     advanced: false,
+    streaks: false
   });
 
   // Date picker states
@@ -103,6 +107,7 @@ const AddHabitScreen = () => {
   // Dropdown states
   const [showDomainPicker, setShowDomainPicker] = useState(false);
   const [showDifficultyPicker, setShowDifficultyPicker] = useState(false);
+  const [showFrequencyPicker, setShowFrequencyPicker] = useState(false);
 
   // Fetch domains on component mount
   useEffect(() => {
@@ -158,8 +163,20 @@ const AddHabitScreen = () => {
       return false;
     }
 
-    if (habitData.frequency_type === "WEEKLY" && habitData.specific_days.length === 0) {
+    if (habitData.frequency_type === "SPECIFIC_DAYS" && habitData.specific_days.length === 0) {
       setErrorMessage("Please select at least one day of the week");
+      setShowErrorToast(true);
+      return false;
+    }
+
+    if (habitData.frequency_type === "X_TIMES_WEEK" && (!habitData.frequency_value || habitData.frequency_value < 1)) {
+      setErrorMessage("Please specify how many times per week");
+      setShowErrorToast(true);
+      return false;
+    }
+
+    if (habitData.frequency_type === "INTERVAL" && (!habitData.frequency_interval || habitData.frequency_interval < 1)) {
+      setErrorMessage("Please specify the interval");
       setShowErrorToast(true);
       return false;
     }
@@ -189,7 +206,10 @@ const AddHabitScreen = () => {
         reminders: habitData.reminders.length > 0 ? habitData.reminders.map(reminder => ({
           time: reminder.time,
           repeat: reminder.repeat || "DAILY",
-          message: reminder.message || `Time to complete your ${habitData.name} habit!`
+          message: reminder.message || `Time to complete your ${habitData.name} habit!`,
+          pre_notification_minutes: reminder.pre_notification_minutes || 10,
+          follow_up_enabled: reminder.follow_up_enabled || true,
+          follow_up_minutes: reminder.follow_up_minutes || 30
         })) : null
       };
 
@@ -256,7 +276,10 @@ const AddHabitScreen = () => {
     const newReminder = {
       time: reminderTime.toISOString(),
       repeat: "DAILY",
-      message: `Time to complete your ${habitData.name} habit!`
+      message: `Time to complete your ${habitData.name} habit!`,
+      pre_notification_minutes: 10,
+      follow_up_enabled: true,
+      follow_up_minutes: 30
     };
 
     if (editingReminderIndex !== null) {
@@ -609,6 +632,26 @@ const AddHabitScreen = () => {
             onClose={() => setShowDifficultyPicker(false)}
         />
 
+        {/* Frequency Type Picker Modal */}
+        <DropdownModal
+            visible={showFrequencyPicker}
+            title="Select Frequency Type"
+            options={[
+              { label: "Daily", value: "DAILY" },
+              { label: "Weekdays Only", value: "WEEKDAYS" },
+              { label: "Weekends Only", value: "WEEKENDS" },
+              { label: "Specific Days", value: "SPECIFIC_DAYS" },
+              { label: "X Times per Week", value: "X_TIMES_WEEK" },
+              { label: "X Times per Month", value: "X_TIMES_MONTH" },
+              { label: "Every X Days", value: "INTERVAL" }
+            ]}
+            onSelect={(option) => {
+              setHabitData(prev => ({ ...prev, frequency_type: option.value }));
+              setShowFrequencyPicker(false);
+            }}
+            onClose={() => setShowFrequencyPicker(false)}
+        />
+
         {/* Date Pickers */}
         {renderDatePicker(
             showStartDatePicker,
@@ -795,33 +838,23 @@ const AddHabitScreen = () => {
                 expanded={expandedSections.frequency}
                 onToggle={() => toggleSection("frequency")}
             >
-              <Text className={`mb-2 ${getSecondaryTextColor()}`}>How often do you want to do this habit?</Text>
-
-              <RadioOption
-                  label="Daily"
-                  selected={habitData.frequency_type === "DAILY"}
-                  onSelect={() => setHabitData(prev => ({ ...prev, frequency_type: "DAILY" }))}
+              <SelectField
+                  label="Frequency Type"
+                  value={
+                    habitData.frequency_type === "DAILY" ? "Daily" :
+                        habitData.frequency_type === "WEEKDAYS" ? "Weekdays Only" :
+                            habitData.frequency_type === "WEEKENDS" ? "Weekends Only" :
+                                habitData.frequency_type === "SPECIFIC_DAYS" ? "Specific Days" :
+                                    habitData.frequency_type === "X_TIMES_WEEK" ? "X Times per Week" :
+                                        habitData.frequency_type === "X_TIMES_MONTH" ? "X Times per Month" :
+                                            habitData.frequency_type === "INTERVAL" ? "Every X Days" : "Daily"
+                  }
+                  placeholder="Select frequency"
+                  onPress={() => setShowFrequencyPicker(true)}
+                  required={true}
               />
 
-              <RadioOption
-                  label="Weekly (specific days)"
-                  selected={habitData.frequency_type === "WEEKLY"}
-                  onSelect={() => setHabitData(prev => ({ ...prev, frequency_type: "WEEKLY" }))}
-              />
-
-              <RadioOption
-                  label="X times per week"
-                  selected={habitData.frequency_type === "X_TIMES"}
-                  onSelect={() => setHabitData(prev => ({ ...prev, frequency_type: "X_TIMES" }))}
-              />
-
-              <RadioOption
-                  label="Every X days"
-                  selected={habitData.frequency_type === "INTERVAL"}
-                  onSelect={() => setHabitData(prev => ({ ...prev, frequency_type: "INTERVAL" }))}
-              />
-
-              {habitData.frequency_type === "WEEKLY" && (
+              {habitData.frequency_type === "SPECIFIC_DAYS" && (
                   <View className="mt-3">
                     <View className="flex-row items-center mb-1.5">
                       <Text className={`font-medium ${getSecondaryTextColor()}`}>Select Days</Text>
@@ -853,7 +886,7 @@ const AddHabitScreen = () => {
                   </View>
               )}
 
-              {habitData.frequency_type === "X_TIMES" && (
+              {habitData.frequency_type === "X_TIMES_WEEK" && (
                   <View className="mt-3">
                     <View className="flex-row items-center mb-1.5">
                       <Text className={`font-medium ${getSecondaryTextColor()}`}>How many times per week?</Text>
@@ -869,6 +902,26 @@ const AddHabitScreen = () => {
                           className={`p-3 rounded-lg border w-1/3 ${getBorderColor()} ${getTextColor()} ${getInputBgColor()}`}
                       />
                       <Text className={`ml-3 ${getTextColor()}`}>times per week</Text>
+                    </View>
+                  </View>
+              )}
+
+              {habitData.frequency_type === "X_TIMES_MONTH" && (
+                  <View className="mt-3">
+                    <View className="flex-row items-center mb-1.5">
+                      <Text className={`font-medium ${getSecondaryTextColor()}`}>How many times per month?</Text>
+                      <Text className="text-red-500 ml-1">*</Text>
+                    </View>
+                    <View className="flex-row items-center">
+                      <TextInputFocusable
+                          value={habitData.frequency_value?.toString() || ""}
+                          onChangeText={(text) => handleTextChange(text.replace(/[^0-9]/g, ""), "frequency_value")}
+                          keyboardType="numeric"
+                          placeholder="e.g., 8"
+                          placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
+                          className={`p-3 rounded-lg border w-1/3 ${getBorderColor()} ${getTextColor()} ${getInputBgColor()}`}
+                      />
+                      <Text className={`ml-3 ${getTextColor()}`}>times per month</Text>
                     </View>
                   </View>
               )}
@@ -956,6 +1009,70 @@ const AddHabitScreen = () => {
               </View>
             </Section>
 
+            {/* Streak Management Section */}
+            <Section
+                title="Streak Management"
+                icon={<Heart size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />}
+                expanded={expandedSections.streaks}
+                onToggle={() => toggleSection("streaks")}
+            >
+              <View className={`p-3 rounded-lg border ${getBorderColor()} mb-3 ${getInputBgColor()}`}>
+                <View className="flex-row justify-between items-center">
+                  <View className="flex-row items-center">
+                    <Shield size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />
+                    <Text className={`ml-2 ${getTextColor()}`}>Enable Grace Period</Text>
+                  </View>
+                  <Switch
+                      value={habitData.grace_period_enabled}
+                      onValueChange={(value) => setHabitData(prev => ({ ...prev, grace_period_enabled: value }))}
+                      trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
+                      thumbColor="#FFFFFF"
+                  />
+                </View>
+                <Text className={`mt-1 text-xs ${getMutedTextColor()}`}>
+                  Grace period allows you to maintain your streak even if you miss a day occasionally
+                </Text>
+              </View>
+
+              {habitData.grace_period_enabled && (
+                  <View className="mb-3">
+                    <Text className={`mb-1.5 font-medium ${getSecondaryTextColor()}`}>Grace Period Hours</Text>
+                    <View className="flex-row items-center">
+                      <TextInputFocusable
+                          value={habitData.grace_period_hours?.toString() || "24"}
+                          onChangeText={(text) => handleTextChange(text.replace(/[^0-9]/g, ""), "grace_period_hours")}
+                          keyboardType="numeric"
+                          placeholder="e.g., 24"
+                          placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
+                          className={`p-3 rounded-lg border w-1/3 ${getBorderColor()} ${getTextColor()} ${getInputBgColor()}`}
+                      />
+                      <Text className={`ml-3 ${getTextColor()}`}>hours</Text>
+                    </View>
+                    <Text className={`mt-1 text-xs ${getMutedTextColor()}`}>
+                      How many hours after missing a habit you can still complete it without breaking your streak
+                    </Text>
+                  </View>
+              )}
+
+              <View className={`p-3 rounded-lg border ${getBorderColor()} ${getInputBgColor()}`}>
+                <View className="flex-row justify-between items-center">
+                  <View className="flex-row items-center">
+                    <Umbrella size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />
+                    <Text className={`ml-2 ${getTextColor()}`}>Skip on Vacation</Text>
+                  </View>
+                  <Switch
+                      value={habitData.skip_on_vacation}
+                      onValueChange={(value) => setHabitData(prev => ({ ...prev, skip_on_vacation: value }))}
+                      trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
+                      thumbColor="#FFFFFF"
+                  />
+                </View>
+                <Text className={`mt-1 text-xs ${getMutedTextColor()}`}>
+                  Maintain your streak when skipping during vacation mode
+                </Text>
+              </View>
+            </Section>
+
             {/* Reminders Section */}
             <Section
                 title="Reminders"
@@ -1010,6 +1127,10 @@ const AddHabitScreen = () => {
                 <Plus size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />
                 <Text className={`ml-2 ${getAccentTextColor()} font-medium`}>Add Reminder</Text>
               </TouchableOpacity>
+
+              <Text className={`mt-2 text-xs ${getMutedTextColor()}`}>
+                Reminders will be sent 10 minutes before scheduled time and include follow-ups if you miss them
+              </Text>
             </Section>
 
             {/* Motivation Section */}
@@ -1059,7 +1180,7 @@ const AddHabitScreen = () => {
             {/* Advanced Options Section */}
             <Section
                 title="Advanced Options"
-                icon={<Tag size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />}
+                icon={<Settings size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />}
                 expanded={expandedSections.advanced}
                 onToggle={() => toggleSection("advanced")}
             >
@@ -1109,34 +1230,22 @@ const AddHabitScreen = () => {
                 </View>
               </View>
 
-              <View className={`p-3 rounded-lg border ${getBorderColor()} mb-2 ${getInputBgColor()}`}>
-                <View className="flex-row justify-between items-center">
-                  <View className="flex-row items-center">
-                    <Share size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />
-                    <Text className={`ml-2 ${getTextColor()}`}>Make Public</Text>
-                  </View>
-                  <Switch
-                      value={habitData.is_public}
-                      onValueChange={(value) => setHabitData(prev => ({ ...prev, is_public: value }))}
-                      trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
-                      thumbColor="#FFFFFF"
-                  />
-                </View>
-              </View>
-
               <View className={`p-3 rounded-lg border ${getBorderColor()} ${getInputBgColor()}`}>
                 <View className="flex-row justify-between items-center">
                   <View className="flex-row items-center">
-                    <Umbrella size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />
-                    <Text className={`ml-2 ${getTextColor()}`}>Skip on Vacation</Text>
+                    <Shield size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />
+                    <Text className={`ml-2 ${getTextColor()}`}>Require Evidence</Text>
                   </View>
                   <Switch
-                      value={habitData.skip_on_vacation}
-                      onValueChange={(value) => setHabitData(prev => ({ ...prev, skip_on_vacation: value }))}
+                      value={habitData.require_evidence}
+                      onValueChange={(value) => setHabitData(prev => ({ ...prev, require_evidence: value }))}
                       trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
                       thumbColor="#FFFFFF"
                   />
                 </View>
+                <Text className={`mt-1 text-xs ${getMutedTextColor()}`}>
+                  You'll need to provide photo evidence when completing this habit
+                </Text>
               </View>
             </Section>
 

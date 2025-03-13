@@ -1,32 +1,89 @@
-import { fetchData, postData, updateData } from './api';
+import { fetchData, postData, updateData, deleteData } from './api';
 
 // Interface for habit data
-import {Habit} from '../constants/habit'
+import { Habit } from '../constants/habit';
+
+// Interfaces for different data types
+interface CompletionData {
+    completed?: boolean;
+    completed_at?: string;
+    completion_notes?: string;
+    duration_completed?: number;
+    count_completed?: number;
+    numeric_completed?: number;
+    skipped?: boolean;
+    skip_reason?: string;
+    mood?: number;
+    evidence_image?: string;
+}
+
+interface ReminderData {
+    time: string;
+    repeat?: 'ONCE' | 'DAILY' | 'WEEKDAYS' | 'WEEKENDS' | 'WEEKLY' | 'MONTHLY' | 'CUSTOM';
+    message?: string;
+    pre_notification_minutes?: number;
+    follow_up_enabled?: boolean;
+    follow_up_minutes?: number;
+}
 
 // Function to add a new habit
 export const addHabit = async (habitData: Habit) => {
     try {
-
         return await postData('/api/habit/addHabit', habitData);
     } catch (error: any) {
         throw error.response?.data?.message || 'Failed to add habit';
     }
 };
 
-
-// Function to get user's habits
-export const getUserHabits = async () => {
+// Function to get all of user's habits with filtering options
+export const getUserHabits = async (
+    filters?: {
+        domain_id?: number;
+        is_active?: boolean;
+        is_favorite?: boolean;
+        sort_by?: 'name' | 'createdAt' | 'start_date' | 'updatedAt' | 'streak';
+        sort_order?: 'asc' | 'desc';
+        page?: number;
+        limit?: number;
+    }
+) => {
     try {
-        const response = await fetchData('/api/habit/getUserHabits');
+        let url = '/api/habit/getUserHabits';
+
+        // Add query parameters if filters are provided
+        if (filters) {
+            const params = new URLSearchParams();
+
+            for (const [key, value] of Object.entries(filters)) {
+                if (value !== undefined) {
+                    params.append(key, value.toString());
+                }
+            }
+
+            if (params.toString()) {
+                url += `?${params.toString()}`;
+            }
+        }
+
+        const response = await fetchData(url);
 
         // Check if response is valid and has data
         if (response && response.data) {
-            return response.data; // If response has a data property
+            return {
+                habits: response.data,
+                pagination: response.pagination
+            };
         } else if (Array.isArray(response)) {
-            return response; // If response itself is the array
+            return {
+                habits: response,
+                pagination: null
+            };
         } else {
             console.warn('Unexpected API response format in getUserHabits:', response);
-            return []; // Return empty array as fallback
+            return {
+                habits: [],
+                pagination: null
+            };
         }
     } catch (error: any) {
         console.error('Error in getUserHabits:', error);
@@ -34,35 +91,57 @@ export const getUserHabits = async () => {
     }
 };
 
-// Function to get a single habit's details
-export const getSingleHabit = async (habitId: number) => {
+// Function to get a single habit's comprehensive details
+export const getHabitById = async (habitId: number) => {
     try {
-        return await fetchData(`/api/habit/getSingleHabit/${habitId}`);
+        return await fetchData(`/api/habit/getHabit/${habitId}`);
     } catch (error: any) {
         throw error.response?.data?.message || 'Failed to fetch habit details';
     }
 };
 
-// Function to delete (archive) a habit
-export const deleteHabit = async (habitId: number) => {
+// Function to get habits by specific date
+export const getHabitsByDate = async (date: string) => {
     try {
-        return await fetchData(`/api/habit/deleteHabit/${habitId}`);
+        return await fetchData(`/api/habit/getHabitsByDate/${date}`);
     } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to archive habit';
+        throw error.response?.data?.message || 'Failed to fetch habits for this date';
     }
 };
 
-// Function to get habit statistics
-export const getHabitStats = async (habitId: number, startDate?: string, endDate?: string) => {
+// Function to get habits by domain
+export const getHabitsByDomain = async (domainId: number) => {
     try {
-
-        let url = `/api/habit/getHabitStats/${habitId}/stats`;
-        if (startDate && endDate) {
-            url += `?start_date=${startDate}&end_date=${endDate}`;
-        }
-        return await fetchData(url);
+        return await fetchData(`/api/habit/getHabitsByDomain/${domainId}`);
     } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to fetch habit statistics';
+        throw error.response?.data?.message || 'Failed to fetch habits by domain';
+    }
+};
+
+// Function to update a habit
+export const updateHabit = async (habitId: number, habitData: Partial<Habit>) => {
+    try {
+        return await updateData(`/api/habit/updateHabit/${habitId}`, habitData);
+    } catch (error: any) {
+        throw error.response?.data?.message || 'Failed to update habit';
+    }
+};
+
+// Function to toggle favorite status
+export const toggleFavorite = async (habitId: number) => {
+    try {
+        return await postData(`/api/habit/toggleFavorite/${habitId}`, {});
+    } catch (error: any) {
+        throw error.response?.data?.message || 'Failed to toggle favorite status';
+    }
+};
+
+// Function to toggle active status
+export const toggleActive = async (habitId: number) => {
+    try {
+        return await postData(`/api/habit/toggleActive/${habitId}`, {});
+    } catch (error: any) {
+        throw error.response?.data?.message || 'Failed to toggle active status';
     }
 };
 
@@ -84,54 +163,65 @@ export const logHabitCompletion = async (habitId: number, completionData: Partia
     }
 };
 
-// Function to update a habit
-export const updateHabit = async (habitId: number, habitData: Partial<Habit>) => {
+// Function to skip a habit
+export const skipHabit = async (habitId: number, skipData: { date: string; reason?: string }) => {
     try {
-        return await updateData(`/api/habit/updateHabit/${habitId}`, habitData);
+        return await postData(`/api/habit/skipHabit/${habitId}`, skipData);
     } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to update habit';
+        throw error.response?.data?.message || 'Failed to skip habit';
     }
 };
 
-// Function to get upcoming habits
-export const getUpcomingHabits = async () => {
+// Function to delete a habit log
+export const deleteHabitLog = async (logId: number) => {
     try {
-        return await fetchData('/api/habit/getUpcomingHabits');
+        return await deleteData(`/api/habit/deleteLog/${logId}`);
     } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to fetch upcoming habits';
+        throw error.response?.data?.message || 'Failed to delete habit log';
     }
 };
 
-// Function to get habits by domain
-export const getHabitsByDomain = async (domainId: number) => {
+// Function to delete a habit
+export const deleteHabit = async (habitId: number) => {
     try {
-        return await fetchData(`/api/habit/getHabitsByDomain/${domainId}`);
+        return await deleteData(`/api/habit/deleteHabit/${habitId}`);
     } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to fetch habits by domain';
+        throw error.response?.data?.message || 'Failed to delete habit';
     }
 };
 
-// Function to update habit reminders
-export const updateHabitReminders = async (habitId: number, reminderData: {
-    reminder_time?: string;
-    is_enabled?: boolean;
-}) => {
+// Function to copy/clone a habit
+export const copyHabit = async (habitId: number, newName?: string) => {
     try {
-        return await updateData(`/api/habit/updateHabitReminders/${habitId}`, reminderData);
+        return await postData(`/api/habit/copyHabit/${habitId}`, { newName });
     } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to update reminder settings';
+        throw error.response?.data?.message || 'Failed to copy habit';
     }
 };
 
-// Function to get habit completion history
-export const getHabitHistory = async (habitId: number, startDate?: string, endDate?: string) => {
+// Function to add a reminder to a habit
+export const addReminder = async (habitId: number, reminderData: ReminderData) => {
     try {
-        let url = `/api/habit/getHabitHistory/${habitId}`;
-        if (startDate && endDate) {
-            url += `?start_date=${startDate}&end_date=${endDate}`;
-        }
-        return await fetchData(url);
+        return await postData(`/api/habit/addReminder/${habitId}`, reminderData);
     } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to fetch habit history';
+        throw error.response?.data?.message || 'Failed to add reminder';
+    }
+};
+
+// Function to delete a reminder
+export const deleteReminder = async (reminderId: number) => {
+    try {
+        return await deleteData(`/api/habit/deleteReminder/${reminderId}`);
+    } catch (error: any) {
+        throw error.response?.data?.message || 'Failed to delete reminder';
+    }
+};
+
+// Function to trigger the daily habit reset process (typically should be server-side)
+export const processHabitDailyReset = async () => {
+    try {
+        return await postData('/api/habit/processHabitDailyReset', {});
+    } catch (error: any) {
+        throw error.response?.data?.message || 'Failed to process daily habit reset';
     }
 };
