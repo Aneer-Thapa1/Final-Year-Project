@@ -29,11 +29,10 @@ const initializeSocket = (httpServer) => {
         }
         try {
             const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            socket.user = decoded;
-
+            socket.user = parseInt(decoded);
             // Get user details to attach to socket
             const user = await prisma.user.findUnique({
-                where: { user_id: decoded.user_id },
+                where: { user_id: parseInt(decoded) },
                 select: { user_id: true, user_name: true }
             });
 

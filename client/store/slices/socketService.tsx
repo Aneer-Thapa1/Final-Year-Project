@@ -38,7 +38,7 @@ interface MessageData {
 
 // Singleton socket instance
 let socket: Socket | null = null;
-const SERVER_URL = 'https://e103-2400-74e0-10-31cd-3cf2-8a83-c10f-7d1b.ngrok-free.app';
+const SERVER_URL = 'https://d924-2400-74e0-10-31cd-3c27-3da1-dd33-9b9b.ngrok-free.app';
 
 /**
  * Initialize the socket connection with the server

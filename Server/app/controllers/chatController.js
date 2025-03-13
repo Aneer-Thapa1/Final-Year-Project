@@ -321,7 +321,7 @@ const getChatMessages = async (req, res) => {
     try {
         const { roomId } = req.params;
         const { cursor, limit = 50 } = req.query;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         const isParticipant = await prisma.chatParticipant.findUnique({
             where: {
@@ -690,7 +690,7 @@ const deleteMessage = async (req, res) => {
 const markMessagesAsRead = async (req, res) => {
     try {
         const { roomId } = req.params;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
         const currentTime = new Date();
 
         // Update participant's last read timestamp
