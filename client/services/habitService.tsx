@@ -101,14 +101,16 @@ export const getHabitById = async (habitId: number) => {
 };
 
 // Function to get habits by specific date
-export const getHabitsByDate = async (date: string) => {
+export const getHabitsByDate = async (date) => {
     try {
-        return await fetchData(`/api/habit/getHabitsByDate/${date}`);
-    } catch (error: any) {
+        // Ensure date is formatted properly
+        const formattedDate = typeof date === 'string' ? date : format(date, 'yyyy-MM-dd');
+        return await fetchData(`/api/habit/getHabitsByDate/${formattedDate}`);
+    } catch (error) {
+        console.error('Error in getHabitsByDate:', error);
         throw error.response?.data?.message || 'Failed to fetch habits for this date';
     }
 };
-
 // Function to get habits by domain
 export const getHabitsByDomain = async (domainId: number) => {
     try {
@@ -130,7 +132,7 @@ export const updateHabit = async (habitId: number, habitData: Partial<Habit>) =>
 // Function to toggle favorite status
 export const toggleFavorite = async (habitId: number) => {
     try {
-        return await postData(`/api/habit/toggleFavorite/${habitId}`, {});
+        return await updateData(`/api/habit/toggleFavorite/${habitId}`, {});
     } catch (error: any) {
         throw error.response?.data?.message || 'Failed to toggle favorite status';
     }

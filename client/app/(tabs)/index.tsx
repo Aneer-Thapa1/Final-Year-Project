@@ -10,9 +10,10 @@ import {
     Calendar,
     TrendingUp,
     Award,
-    CheckCircle,
+    CheckCircle2,
     Clock,
-    AlertCircle
+    AlertCircle,
+    Plus
 } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { format } from 'date-fns';
@@ -35,11 +36,14 @@ const Home = () => {
     const [completionStats, setCompletionStats] = useState({
         total: 0,
         completed: 0,
-        completionRate: 0
+        completionRate: 0,
+        goalAchieved: false,
+        dailyGoal: 0
     });
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState(null);
+    const [errorVisible, setErrorVisible] = useState(false);
 
     // Get active domains from habits
     const activeDomains = [...new Set(habits.map(habit => habit.domain?.name || 'General'))];
@@ -54,6 +58,18 @@ const Home = () => {
             loadData();
         }
     }, [isFocused]);
+
+    // Auto-hide error after 5 seconds
+    useEffect(() => {
+        if (error) {
+            setErrorVisible(true);
+            const timer = setTimeout(() => {
+                setErrorVisible(false);
+            }, 5000);
+
+            return () => clearTimeout(timer);
+        }
+    }, [error]);
 
     const loadData = async () => {
         try {
@@ -184,10 +200,19 @@ const Home = () => {
         }
     };
 
+    // Navigation function for adding a new habit
+    const navigateToAddHabit = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        router.push('/habits');
+    };
+
     if (isLoading && !isRefreshing) {
         return (
-            <View className="flex-1 justify-center items-center">
+            <View className={`flex-1 justify-center items-center ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
                 <ActivityIndicator size="large" color="#6366F1" />
+                <Text className={`mt-4 font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                    Loading your habits...
+                </Text>
             </View>
         );
     }
@@ -208,23 +233,45 @@ const Home = () => {
                         />
                     }
                 >
-                    {error && <ErrorMessage message={error} />}
+                    {errorVisible && error && (
+                        <View className="px-4">
+                            <ErrorMessage
+                                message={error}
+                                severity="error"
+                                onDismiss={() => setErrorVisible(false)}
+                                autoHide={true}
+                            />
+                        </View>
+                    )}
 
-                    {/* Header Section with Date */}
-                    <View className="px-4 mt-1 mb-4">
-                        <Text className={`text-lg font-montserrat-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                            {format(today, 'EEEE, MMM d')}
-                        </Text>
-                        <Text className={`text-2xl font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            My Habits
-                        </Text>
+                    {/* Header Section with Date and Add Button */}
+                    <View className="px-4 mt-1 mb-4 flex-row justify-between items-center">
+                        <View>
+                            <Text className={`text-lg font-montserrat-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                                {format(today, 'EEEE, MMM d')}
+                            </Text>
+                            <Text className={`text-2xl font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                My Habits
+                            </Text>
+                        </View>
+
+                        <TouchableOpacity
+                            onPress={navigateToAddHabit}
+                            className="bg-primary-500 px-4 py-2 rounded-lg items-center justify-center"
+                            style={{ elevation: 2 }}
+                        >
+                            <Text className="text-white font-montserrat-medium text-sm">
+                                Manage Habits
+                            </Text>
+                        </TouchableOpacity>
                     </View>
 
                     {/* Progress Summary Card */}
                     <View className="px-4 mb-4">
-                        <View className={`rounded-xl shadow-sm p-4 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+                        <View className={`rounded-xl shadow-sm p-4 ${isDark ? 'bg-gray-800' : 'bg-white'}`}
+                              style={{ elevation: 2 }}>
                             <View className="flex-row justify-between items-center mb-3">
-                                <Text className={`font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                <Text className={`font-montserrat-semibold text-base ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                     Today's Progress
                                 </Text>
                                 <View className={`rounded-full py-1 px-3 ${
@@ -253,8 +300,8 @@ const Home = () => {
 
                             <View className="flex-row justify-between">
                                 <View className="flex-row items-center">
-                                    <CheckCircle size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />
-                                    <Text className={`ml-1.5 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                                    <CheckCircle2 size={16} color={isDark ? "#60A5FA" : "#3B82F6"} />
+                                    <Text className={`ml-1.5 ${isDark ? 'text-gray-300' : 'text-gray-700'} font-montserrat`}>
                                         {completionStats.completed}/{completionStats.total} Completed
                                     </Text>
                                 </View>
@@ -265,7 +312,7 @@ const Home = () => {
                                             (isDark ? "#4ADE80" : "#10B981") :
                                             (isDark ? "#9CA3AF" : "#6B7280")
                                     } />
-                                    <Text className={`ml-1.5 ${
+                                    <Text className={`ml-1.5 font-montserrat ${
                                         completionStats.goalAchieved ?
                                             (isDark ? "text-green-400" : "text-green-600") :
                                             (isDark ? "text-gray-400" : "text-gray-600")
@@ -279,80 +326,21 @@ const Home = () => {
 
                     {/* Today's Habits Section */}
                     <View className="px-4 mb-6">
-                        <View className="flex-row justify-between items-center mb-3">
-                            <Text className={`text-lg font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                Today's Habits
-                            </Text>
-                            <TouchableOpacity
-                                className="flex-row items-center"
-                                onPress={() => router.push('/habits/today')}
-                            >
-                                <Text className="text-primary-500 font-montserrat-medium text-sm mr-1">
-                                    View All
-                                </Text>
-                                <ChevronRight size={16} color="#6366F1" />
-                            </TouchableOpacity>
-                        </View>
+
 
                         <TodayHabits
                             habits={todayHabits}
                             onComplete={handleComplete}
                             onSkip={handleSkip}
                             isDark={isDark}
+                            isLoading={isLoading}
+                            error={error}
+                            hideEmpty={true}
                         />
 
-                        {todayHabits.length === 0 && (
-                            <View className={`rounded-xl shadow-sm p-5 mb-2 items-center ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
-                                <AlertCircle size={32} color={isDark ? '#9CA3AF' : '#6B7280'} className="mb-2" />
-                                <Text className={`text-center font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                                    No habits scheduled for today
-                                </Text>
-                                <TouchableOpacity
-                                    className="mt-3 bg-primary-500 py-2 px-4 rounded-lg"
-                                    onPress={() => router.push('/add')}
-                                >
-                                    <Text className="text-white font-montserrat-medium">Add New Habit</Text>
-                                </TouchableOpacity>
-                            </View>
-                        )}
-                    </View>
 
-                    {/* Streak Leaders Section */}
-                    {habits.filter(h => h.streak?.current_streak > 0).length > 0 && (
-                        <View className="px-4 mb-6">
-                            <View className="flex-row justify-between items-center mb-3">
-                                <Text className={`text-lg font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                    Streak Leaders
-                                </Text>
-                                <TouchableOpacity
-                                    className="flex-row items-center"
-                                    onPress={() => router.push('/streaks')}
-                                >
-                                    <Text className="text-primary-500 font-montserrat-medium text-sm mr-1">
-                                        View All
-                                    </Text>
-                                    <ChevronRight size={16} color="#6366F1" />
-                                </TouchableOpacity>
-                            </View>
+                    </View> 
 
-                            {habits
-                                .filter(h => h.streak?.current_streak > 0)
-                                .sort((a, b) => (b.streak?.current_streak || 0) - (a.streak?.current_streak || 0))
-                                .slice(0, 3)
-                                .map((habit, index) => (
-                                    <HabitStreakCard
-                                        key={habit.habit_id || index}
-                                        habit={habit}
-                                        isDark={isDark}
-                                        onPress={() => router.push({
-                                            pathname: '/habit/[id]',
-                                            params: { id: habit.habit_id }
-                                        })}
-                                    />
-                                ))
-                            }
-                        </View>
-                    )}
 
                     {/* Domain-Based Habits Section */}
                     {activeDomains.length > 0 && (
@@ -393,14 +381,14 @@ const Home = () => {
                                         <TouchableOpacity
                                             key={domain}
                                             className={`mr-3 p-4 rounded-xl shadow-sm ${isDark ? 'bg-gray-800' : 'bg-white'} w-40`}
-                                            style={{ elevation: 1 }}
+                                            style={{ elevation: 2 }}
                                             onPress={() => router.push({
                                                 pathname: '/domain/[name]',
                                                 params: { name: domain }
                                             })}
                                         >
                                             <View className="flex-row justify-between items-center mb-2">
-                                                <View className={`p-2 rounded-full w-8 h-8 items-center justify-center`}
+                                                <View className={`p-2.5 rounded-full w-8 h-8 items-center justify-center`}
                                                       style={{ backgroundColor: `${color}20` }} // 20% opacity
                                                 >
                                                     <Zap size={16} color={color} />
@@ -440,8 +428,8 @@ const Home = () => {
                         </View>
                     )}
 
-                    {/* Add some bottom padding for better scrolling experience */}
-                    <View className="h-20" />
+                    {/* Add more bottom padding for better scrolling experience */}
+                    <View className="h-40" />
                 </ScrollView>
             </SafeAreaView>
         </GestureHandlerRootView>

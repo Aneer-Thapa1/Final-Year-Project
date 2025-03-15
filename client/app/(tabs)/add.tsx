@@ -1,4 +1,3 @@
-// screens/add/index.js - Updated with latest habit tracking features
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -11,7 +10,8 @@ import {
   Switch,
   Modal,
   Keyboard,
-  ActivityIndicator
+  ActivityIndicator,
+  TextInput
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -34,7 +34,6 @@ import {
 } from 'lucide-react-native';
 import { router } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import TextInputFocusable from '../../components/TextInputFocusable';
 import { addHabit } from '../../services/habitService';
 import { getDomains } from '../../services/domainService';
 
@@ -453,7 +452,7 @@ const AddHabitScreen = () => {
           <Text className={`font-medium ${getSecondaryTextColor()}`}>{label}</Text>
           {required && <Text className="text-red-500 ml-1">*</Text>}
         </View>
-        <TextInputFocusable
+        <TextInput
             value={value}
             onChangeText={onChangeText}
             placeholder={placeholder}
@@ -632,9 +631,10 @@ const AddHabitScreen = () => {
             onClose={() => setShowDifficultyPicker(false)}
         />
 
+
         {/* Frequency Type Picker Modal */}
-        <DropdownModal
-            visible={showFrequencyPicker}
+              <DropdownModal
+              visible={showFrequencyPicker}
             title="Select Frequency Type"
             options={[
               { label: "Daily", value: "DAILY" },
@@ -654,24 +654,24 @@ const AddHabitScreen = () => {
 
         {/* Date Pickers */}
         {renderDatePicker(
-            showStartDatePicker,
-            habitData.start_date,
-            (e, d) => handleDateChange(e, d, "start_date"),
-            "date"
+        showStartDatePicker,
+        habitData.start_date,
+        (e, d) => handleDateChange(e, d, "start_date"),
+        "date"
         )}
 
         {renderDatePicker(
-            showEndDatePicker,
-            habitData.end_date || new Date(),
-            (e, d) => handleDateChange(e, d, "end_date"),
-            "date"
+        showEndDatePicker,
+        habitData.end_date || new Date(),
+        (e, d) => handleDateChange(e, d, "end_date"),
+        "date"
         )}
 
         {renderDatePicker(
-            showReminderTimePicker,
-            reminderTime,
-            handleReminderTimeChange,
-            "time"
+        showReminderTimePicker,
+        reminderTime,
+        handleReminderTimeChange,
+        "time"
         )}
 
         {/* Content Area */}
@@ -684,8 +684,8 @@ const AddHabitScreen = () => {
               ref={scrollViewRef}
               className="flex-1 px-4"
               contentContainerClassName="pb-20 pt-4"
-              keyboardShouldPersistTaps="always"
-              keyboardDismissMode="none"
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
               showsVerticalScrollIndicator={false}
           >
             {/* Header */}
@@ -766,7 +766,7 @@ const AddHabitScreen = () => {
                       <Text className="text-red-500 ml-1">*</Text>
                     </View>
                     <View className="flex-row">
-                      <TextInputFocusable
+                      <TextInput
                           value={habitData.duration_goal?.toString() || ""}
                           onChangeText={(text) => handleTextChange(text.replace(/[^0-9]/g, ""), "duration_goal")}
                           keyboardType="numeric"
@@ -811,7 +811,7 @@ const AddHabitScreen = () => {
                       <Text className="text-red-500 ml-1">*</Text>
                     </View>
                     <View className="flex-row">
-                      <TextInputFocusable
+                      <TextInput
                           value={habitData.numeric_goal?.toString() || ""}
                           onChangeText={(text) => handleTextChange(text.replace(/[^0-9.]/g, ""), "numeric_goal")}
                           keyboardType="numeric"
@@ -819,7 +819,7 @@ const AddHabitScreen = () => {
                           placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
                           className={`flex-1 p-3 rounded-lg mr-2 border ${getBorderColor()} ${getTextColor()} ${getInputBgColor()}`}
                       />
-                      <TextInputFocusable
+                      <TextInput
                           value={habitData.units}
                           onChangeText={(text) => handleTextChange(text, "units")}
                           placeholder="units"
@@ -893,7 +893,7 @@ const AddHabitScreen = () => {
                       <Text className="text-red-500 ml-1">*</Text>
                     </View>
                     <View className="flex-row items-center">
-                      <TextInputFocusable
+                      <TextInput
                           value={habitData.frequency_value?.toString() || ""}
                           onChangeText={(text) => handleTextChange(text.replace(/[^0-9]/g, ""), "frequency_value")}
                           keyboardType="numeric"
@@ -913,7 +913,7 @@ const AddHabitScreen = () => {
                       <Text className="text-red-500 ml-1">*</Text>
                     </View>
                     <View className="flex-row items-center">
-                      <TextInputFocusable
+                      <TextInput
                           value={habitData.frequency_value?.toString() || ""}
                           onChangeText={(text) => handleTextChange(text.replace(/[^0-9]/g, ""), "frequency_value")}
                           keyboardType="numeric"
@@ -933,7 +933,7 @@ const AddHabitScreen = () => {
                       <Text className="text-red-500 ml-1">*</Text>
                     </View>
                     <View className="flex-row items-center">
-                      <TextInputFocusable
+                      <TextInput
                           value={habitData.frequency_interval?.toString() || ""}
                           onChangeText={(text) => handleTextChange(text.replace(/[^0-9]/g, ""), "frequency_interval")}
                           keyboardType="numeric"
@@ -958,8 +958,7 @@ const AddHabitScreen = () => {
                 <Text className={`mb-1.5 font-medium ${getSecondaryTextColor()}`}>Start Date</Text>
                 <TouchableOpacity
                     onPress={() => {
-                      Keyboard.dismiss();
-                      setTimeout(() => setShowStartDatePicker(true), 100);
+                      setShowStartDatePicker(true);
                     }}
                     className={`p-3 rounded-lg flex-row justify-between items-center border ${getBorderColor()} ${getInputBgColor()}`}
                 >
@@ -992,8 +991,7 @@ const AddHabitScreen = () => {
                 {habitData.end_date && (
                     <TouchableOpacity
                         onPress={() => {
-                          Keyboard.dismiss();
-                          setTimeout(() => setShowEndDatePicker(true), 100);
+                          setShowEndDatePicker(true);
                         }}
                         className={`p-3 rounded-lg flex-row justify-between items-center border ${getBorderColor()} ${getInputBgColor()}`}
                     >
@@ -1038,7 +1036,7 @@ const AddHabitScreen = () => {
                   <View className="mb-3">
                     <Text className={`mb-1.5 font-medium ${getSecondaryTextColor()}`}>Grace Period Hours</Text>
                     <View className="flex-row items-center">
-                      <TextInputFocusable
+                      <TextInput
                           value={habitData.grace_period_hours?.toString() || "24"}
                           onChangeText={(text) => handleTextChange(text.replace(/[^0-9]/g, ""), "grace_period_hours")}
                           keyboardType="numeric"
@@ -1096,10 +1094,9 @@ const AddHabitScreen = () => {
                     <View className="flex-row">
                       <TouchableOpacity
                           onPress={() => {
-                            Keyboard.dismiss();
                             setEditingReminderIndex(index);
                             setReminderTime(new Date(reminder.time));
-                            setTimeout(() => setShowReminderTimePicker(true), 100);
+                            setShowReminderTimePicker(true);
                           }}
                           className="mr-2 p-1"
                       >
@@ -1117,10 +1114,9 @@ const AddHabitScreen = () => {
 
               <TouchableOpacity
                   onPress={() => {
-                    Keyboard.dismiss();
                     setEditingReminderIndex(null);
                     setReminderTime(new Date());
-                    setTimeout(() => setShowReminderTimePicker(true), 100);
+                    setShowReminderTimePicker(true);
                   }}
                   className={`flex-row items-center justify-center mt-1 p-3 rounded-lg ${isDark ? "bg-gray-700" : "bg-primary-50"}`}
               >
@@ -1198,7 +1194,7 @@ const AddHabitScreen = () => {
                 </View>
 
                 <View className="flex-row">
-                  <TextInputFocusable
+                  <TextInput
                       value={currentTag}
                       onChangeText={setCurrentTag}
                       placeholder="Add a tag"
