@@ -1,24 +1,33 @@
 // src/components/TodayHabits.tsx
 import React, { useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, useColorScheme } from 'react-native';
-import { CheckCircle2, Calendar, AlertCircle, Filter, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { CheckCircle2, Calendar, AlertCircle, Filter, ChevronDown, ChevronUp, Award, SkipForward } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { HabitCard } from './HabitCard';
 import { CompletionData } from './CompletionFormModal';
 import { Habit } from '../constants/habit';
 
+// In TodayHabits.tsx
 interface TodayHabitsProps {
     habits: Habit[];
     isDark?: boolean;
     onComplete: (habitId: number, data: CompletionData) => void;
+    onSkip?: (habitId: number, reason?: string) => void;
     onHabitPress?: (habit: Habit) => void;
+    isLoading?: boolean;
+    error?: string | null;
+    hideEmpty?: boolean;
 }
 
 const TodayHabits: React.FC<TodayHabitsProps> = ({
                                                      habits,
                                                      isDark: forceDark,
                                                      onComplete,
-                                                     onHabitPress
+                                                     onSkip,
+                                                     onHabitPress,
+                                                     isLoading,
+                                                     error,
+                                                     hideEmpty = false
                                                  }) => {
     // Use device color scheme if isDark is not provided
     const colorScheme = useColorScheme();
@@ -29,8 +38,10 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
     const [filterOptions, setFilterOptions] = useState({
         showCompleted: true,
+        showSkipped: true,
         filterByDomain: null as string | null,
-        filterByDifficulty: null as string | null
+        filterByDifficulty: null as string | null,
+        filterByFrequency: null as string | null
     });
     const [showFilters, setShowFilters] = useState(false);
 
@@ -40,7 +51,9 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
     const formattedDate = today.toLocaleDateString('en-US', dateOptions);
 
     // Calculate completion stats
-    const completedHabits = habits.filter(habit => habit.is_completed_today).length;
+    const completedHabits = habits.filter(habit => habit.isCompleted || habit.completedToday).length;
+    const skippedHabits = habits.filter(habit => habit.isSkipped || habit.skippedToday).length;
+    const uncompletedHabits = habits.length - completedHabits - skippedHabits;
     const totalHabits = habits.length;
     const progress = totalHabits > 0 ? (completedHabits / totalHabits) * 100 : 0;
 
@@ -50,12 +63,20 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
     // Get unique difficulties for filtering
     const difficulties = [...new Set(habits.map(h => h.difficulty || 'MEDIUM'))];
 
+    // Get unique frequencies for filtering
+    const frequencies = [...new Set(habits.map(h => h.frequency_type || 'DAILY'))];
+
     // Filter and sort habits
     const processedHabits = [...habits]
         // Apply filters
         .filter(habit => {
-            // Filter completed/incomplete
-            if (!filterOptions.showCompleted && habit.is_completed_today) {
+            // Filter completed habits
+            if (!filterOptions.showCompleted && (habit.isCompleted || habit.completedToday)) {
+                return false;
+            }
+
+            // Filter skipped habits
+            if (!filterOptions.showSkipped && (habit.isSkipped || habit.skippedToday)) {
                 return false;
             }
 
@@ -68,6 +89,11 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
 
             // Filter by difficulty
             if (filterOptions.filterByDifficulty && habit.difficulty !== filterOptions.filterByDifficulty) {
+                return false;
+            }
+
+            // Filter by frequency type
+            if (filterOptions.filterByFrequency && habit.frequency_type !== filterOptions.filterByFrequency) {
                 return false;
             }
 
@@ -133,8 +159,10 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         setFilterOptions({
             showCompleted: true,
+            showSkipped: true,
             filterByDomain: null,
-            filterByDifficulty: null
+            filterByDifficulty: null,
+            filterByFrequency: null
         });
         setSortBy('time');
         setSortDirection('asc');
@@ -158,12 +186,43 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
         });
     };
 
+    // Set frequency filter
+    const setFrequencyFilter = (frequency: string | null) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setFilterOptions({
+            ...filterOptions,
+            filterByFrequency: frequency
+        });
+    };
+
     // Format difficulty for display
     const formatDifficulty = (difficulty: string) => {
         return difficulty
             .replace('_', ' ')
             .toLowerCase()
             .replace(/\b\w/g, c => c.toUpperCase());
+    };
+
+    // Format frequency for display
+    const formatFrequency = (frequency: string) => {
+        switch (frequency) {
+            case 'DAILY':
+                return 'Daily';
+            case 'WEEKDAYS':
+                return 'Weekdays';
+            case 'WEEKENDS':
+                return 'Weekends';
+            case 'SPECIFIC_DAYS':
+                return 'Specific Days';
+            case 'INTERVAL':
+                return 'Every X Days';
+            case 'X_TIMES_WEEK':
+                return 'X Times/Week';
+            case 'X_TIMES_MONTH':
+                return 'X Times/Month';
+            default:
+                return frequency.replace('_', ' ').toLowerCase();
+        }
     };
 
     // Render empty state
@@ -207,7 +266,9 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
             onComplete={(data: CompletionData) => {
                 onComplete(item.habit_id, data);
             }}
-            isCompleted={item.is_completed_today || false}
+            onSkip={onSkip ? (reason) => onSkip(item.habit_id, reason) : undefined}
+            isCompleted={item.isCompleted || item.completedToday || false}
+            isSkipped={item.isSkipped || item.skippedToday || false}
             onPress={onHabitPress ? () => onHabitPress(item) : undefined}
         />
     );
@@ -219,30 +280,40 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
                     <Text className={`text-lg font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
                         Today's Habits
                     </Text>
-                    <Text className={`${isDark ? 'text-gray-400' : 'text-gray-600'} text-xs font-montserrat`}>
-                        {formattedDate}
-                    </Text>
                 </View>
 
                 <View className="flex-row items-center">
                     {totalHabits > 0 && (
-                        <View className={`py-1 px-2.5 rounded-full ${isDark ? 'bg-gray-800' : 'bg-white'} flex-row items-center mr-2`}
-                              style={{ shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 }}>
-                            <CheckCircle2
-                                size={14}
-                                color={
-                                    progress === 100 ? '#10B981' :
-                                        progress > 0 ? '#6366F1' :
-                                            isDark ? '#6B7280' : '#9CA3AF'
-                                }
-                            />
-                            <Text className={`ml-1 text-xs font-montserrat-medium ${
-                                progress === 100 ? 'text-emerald-500' :
-                                    progress > 0 ? 'text-primary-500' :
-                                        isDark ? 'text-gray-400' : 'text-gray-500'
-                            }`}>
-                                {completedHabits}/{totalHabits}
-                            </Text>
+                        <View className="flex-row mr-2">
+                            <View className={`py-1 px-2.5 rounded-l-full ${isDark ? 'bg-gray-800' : 'bg-white'} flex-row items-center`}
+                                  style={{ shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 }}>
+                                <CheckCircle2
+                                    size={14}
+                                    color={
+                                        completedHabits > 0 ? '#10B981' : isDark ? '#6B7280' : '#9CA3AF'
+                                    }
+                                />
+                                <Text className={`ml-1 text-xs font-montserrat-medium ${
+                                    completedHabits > 0 ? 'text-emerald-500' : isDark ? 'text-gray-400' : 'text-gray-500'
+                                }`}>
+                                    {completedHabits}
+                                </Text>
+                            </View>
+
+                            <View className={`py-1 px-2.5 rounded-r-full ${isDark ? 'bg-gray-800' : 'bg-white'} flex-row items-center`}
+                                  style={{ shadowOpacity: 0.05, shadowRadius: 3, elevation: 1 }}>
+                                <SkipForward
+                                    size={14}
+                                    color={
+                                        skippedHabits > 0 ? '#F59E0B' : isDark ? '#6B7280' : '#9CA3AF'
+                                    }
+                                />
+                                <Text className={`ml-1 text-xs font-montserrat-medium ${
+                                    skippedHabits > 0 ? 'text-amber-500' : isDark ? 'text-gray-400' : 'text-gray-500'
+                                }`}>
+                                    {skippedHabits}
+                                </Text>
+                            </View>
                         </View>
                     )}
 
@@ -263,6 +334,47 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
                         className={`h-1.5 rounded-full ${progress === 100 ? 'bg-emerald-500' : 'bg-primary-500'}`}
                         style={{ width: `${progress}%` }}
                     />
+                </View>
+            )}
+
+            {/* Stats for today's habits */}
+            {totalHabits > 0 && (
+                <View className="flex-row justify-between mb-3">
+                    <View className={`flex-1 mr-1 p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+                        <View className="flex-row items-center">
+                            <CheckCircle2 size={14} color={isDark ? '#10B981' : '#059669'} />
+                            <Text className={`ml-1 text-xs font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                                Completed
+                            </Text>
+                        </View>
+                        <Text className={`mt-1 text-base font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            {completedHabits}/{totalHabits}
+                        </Text>
+                    </View>
+
+                    <View className={`flex-1 mx-1 p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+                        <View className="flex-row items-center">
+                            <SkipForward size={14} color={isDark ? '#F59E0B' : '#D97706'} />
+                            <Text className={`ml-1 text-xs font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                                Skipped
+                            </Text>
+                        </View>
+                        <Text className={`mt-1 text-base font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            {skippedHabits}/{totalHabits}
+                        </Text>
+                    </View>
+
+                    <View className={`flex-1 ml-1 p-2 rounded-lg ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+                        <View className="flex-row items-center">
+                            <Award size={14} color={isDark ? '#6366F1' : '#4F46E5'} />
+                            <Text className={`ml-1 text-xs font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                                Remaining
+                            </Text>
+                        </View>
+                        <Text className={`mt-1 text-base font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            {uncompletedHabits}/{totalHabits}
+                        </Text>
+                    </View>
                 </View>
             )}
 
@@ -311,7 +423,6 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
                     {/* Domain Filter */}
                     {domains.length > 0 && (
                         <View className="mb-3">
-                            // src/components/TodayHabits.tsx (continued)
                             <Text className={`mb-2 font-montserrat-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                                 Filter by Category
                             </Text>
@@ -349,6 +460,53 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
                                                 : isDark ? 'text-gray-300' : 'text-gray-600'
                                         }`}>
                                             {domain}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+                    )}
+
+                    {/* Frequency Filter */}
+                    {frequencies.length > 0 && (
+                        <View className="mb-3">
+                            <Text className={`mb-2 font-montserrat-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                                Filter by Frequency
+                            </Text>
+                            <View className="flex-row flex-wrap">
+                                <TouchableOpacity
+                                    onPress={() => setFrequencyFilter(null)}
+                                    className={`mr-2 mb-2 px-2.5 py-1 rounded-full ${
+                                        filterOptions.filterByFrequency === null
+                                            ? 'bg-primary-500'
+                                            : isDark ? 'bg-gray-700' : 'bg-gray-100'
+                                    }`}
+                                >
+                                    <Text className={`text-xs font-montserrat-medium ${
+                                        filterOptions.filterByFrequency === null
+                                            ? 'text-white'
+                                            : isDark ? 'text-gray-300' : 'text-gray-600'
+                                    }`}>
+                                        All
+                                    </Text>
+                                </TouchableOpacity>
+
+                                {frequencies.map((frequency) => (
+                                    <TouchableOpacity
+                                        key={frequency}
+                                        onPress={() => setFrequencyFilter(frequency)}
+                                        className={`mr-2 mb-2 px-2.5 py-1 rounded-full ${
+                                            filterOptions.filterByFrequency === frequency
+                                                ? 'bg-primary-500'
+                                                : isDark ? 'bg-gray-700' : 'bg-gray-100'
+                                        }`}
+                                    >
+                                        <Text className={`text-xs font-montserrat-medium ${
+                                            filterOptions.filterByFrequency === frequency
+                                                ? 'text-white'
+                                                : isDark ? 'text-gray-300' : 'text-gray-600'
+                                        }`}>
+                                            {formatFrequency(frequency)}
                                         </Text>
                                     </TouchableOpacity>
                                 ))}
@@ -403,33 +561,63 @@ const TodayHabits: React.FC<TodayHabitsProps> = ({
                         </View>
                     )}
 
-                    {/* Show Completed Toggle */}
-                    <View className="flex-row justify-between items-center">
-                        <Text className={`font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                            Show Completed
-                        </Text>
-                        <TouchableOpacity
-                            onPress={() => {
-                                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                setFilterOptions({
-                                    ...filterOptions,
-                                    showCompleted: !filterOptions.showCompleted
-                                });
-                            }}
-                            className={`px-3 py-1 rounded-full ${
-                                filterOptions.showCompleted
-                                    ? 'bg-primary-500'
-                                    : isDark ? 'bg-gray-700' : 'bg-gray-100'
-                            }`}
-                        >
-                            <Text className={`text-xs font-montserrat-medium ${
-                                filterOptions.showCompleted
-                                    ? 'text-white'
-                                    : isDark ? 'text-gray-300' : 'text-gray-600'
-                            }`}>
-                                {filterOptions.showCompleted ? 'Yes' : 'No'}
+                    {/* Show/Hide Toggle Controls */}
+                    <View className="flex-row justify-between mb-3">
+                        <View className="flex-1 mr-2">
+                            <Text className={`mb-1 font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                                Show Completed
                             </Text>
-                        </TouchableOpacity>
+                            <TouchableOpacity
+                                onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    setFilterOptions({
+                                        ...filterOptions,
+                                        showCompleted: !filterOptions.showCompleted
+                                    });
+                                }}
+                                className={`px-3 py-1.5 rounded-lg flex-row justify-center items-center ${
+                                    filterOptions.showCompleted
+                                        ? 'bg-primary-500'
+                                        : isDark ? 'bg-gray-700' : 'bg-gray-100'
+                                }`}
+                            >
+                                <Text className={`text-xs font-montserrat-medium ${
+                                    filterOptions.showCompleted
+                                        ? 'text-white'
+                                        : isDark ? 'text-gray-300' : 'text-gray-600'
+                                }`}>
+                                    {filterOptions.showCompleted ? 'Yes' : 'No'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <View className="flex-1 ml-2">
+                            <Text className={`mb-1 font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                                Show Skipped
+                            </Text>
+                            <TouchableOpacity
+                                onPress={() => {
+                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                    setFilterOptions({
+                                        ...filterOptions,
+                                        showSkipped: !filterOptions.showSkipped
+                                    });
+                                }}
+                                className={`px-3 py-1.5 rounded-lg flex-row justify-center items-center ${
+                                    filterOptions.showSkipped
+                                        ? 'bg-primary-500'
+                                        : isDark ? 'bg-gray-700' : 'bg-gray-100'
+                                }`}
+                            >
+                                <Text className={`text-xs font-montserrat-medium ${
+                                    filterOptions.showSkipped
+                                        ? 'text-white'
+                                        : isDark ? 'text-gray-300' : 'text-gray-600'
+                                }`}>
+                                    {filterOptions.showSkipped ? 'Yes' : 'No'}
+                                </Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
 
                     {/* Reset Button */}
