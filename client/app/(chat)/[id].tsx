@@ -191,7 +191,7 @@ export default function ChatRoomScreen() {
 
     const handleBackPress = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.back();
+        router.push('/chat');
     };
 
     // Render typing indicators
