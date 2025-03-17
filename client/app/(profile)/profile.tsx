@@ -72,12 +72,12 @@ const Profile = () => {
     // Navigation handlers
     const handleBackPress = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.back();
+        router.push('/add');
     };
 
     const handleSettingsPress = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push('/settings/');
+        router.push('/settings');
     };
 
     return (

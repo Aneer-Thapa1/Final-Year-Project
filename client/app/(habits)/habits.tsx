@@ -21,6 +21,7 @@ import {
     Layers
 } from 'lucide-react-native';
 import { useFocusEffect } from '@react-navigation/native';
+import { router } from 'expo-router';
 
 // Import services
 import {
@@ -400,9 +401,10 @@ const HabitsScreen = ({ navigation }) => {
             <View className="flex-row items-center px-4 mb-6">
                 {/* Back Button */}
                 <TouchableOpacity
-                    onPress={() => navigation.goBack()}
+                    onPress={() => router.push('/add')}
                     className="mr-4"
                 >
+
                     <ArrowLeft
                         size={24}
                         color={isDarkMode ? 'white' : 'black'}
