@@ -1,20 +1,19 @@
 const express = require('express');
 const router = express.Router();
 
-// validateToken is used to validated user if they are authenticated or not
+// validateToken is used to validate user if they are authenticated or not
 const validateToken = require('../middleware/authMiddleware');
 const blogController = require('../controllers/blogController');
-const {upload, handleUploadError} = require('../config/multerConfig');
+const { upload, handleUploadError } = require('../config/multerConfig');
 
-
-// Route to add a new blog post (protected)
+// Route to add a new blog post with image upload (protected)
 router.post('/addBlog', validateToken, upload.single('image'), handleUploadError, blogController.addBlog);
+
+// Route to edit a blog post, supporting image update (protected)
+router.put('/editBlog/:blog_id', validateToken, upload.single('image'), handleUploadError, blogController.editBlog);
 
 // Route to get blogs for the user feed (protected)
 router.get('/getBlogs', validateToken, blogController.getBlogs);
-
-// Route to edit an existing blog post (protected)
-router.put('/editBlog/:blog_id', validateToken, blogController.editBlog);
 
 // Route to delete a blog post (protected)
 router.delete('/deleteBlog/:blog_id', validateToken, blogController.deleteBlog);

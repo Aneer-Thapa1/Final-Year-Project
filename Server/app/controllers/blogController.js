@@ -171,8 +171,8 @@ const getBlogs = async (req, res) => {
 const editBlog = async (req, res) => {
     try {
         const blog_id = parseInt(req.params.blog_id);
-        const { title, content, image, category_id, is_featured } = req.body;
-        const user_id = req.user;
+        const { title, content, category_id, is_featured } = req.body;
+        const user_id = parseInt(req.user);
 
         // Input validation
         if (!title || !content || !category_id) {
@@ -216,6 +216,11 @@ const editBlog = async (req, res) => {
             });
         }
 
+        // Handle the image file - if a new one is uploaded, use that, otherwise keep the existing one
+        const imagePath = req.file
+            ? `/uploads/${req.file.filename}`
+            : existingBlog.image;
+
         // Update blog
         const updatedBlog = await prisma.blog.update({
             where: {
@@ -224,7 +229,7 @@ const editBlog = async (req, res) => {
             data: {
                 title,
                 content,
-                image,
+                image: imagePath,
                 category_id: parseInt(category_id),
                 is_featured: is_featured !== undefined ? is_featured : existingBlog.is_featured,
                 updatedAt: new Date()
