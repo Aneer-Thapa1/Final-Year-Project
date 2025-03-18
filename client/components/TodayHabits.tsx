@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, useColorScheme } from 'react-native';
 import { CheckCircle2, Calendar, AlertCircle, Filter, ChevronDown, ChevronUp, Award, SkipForward } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
-import { HabitCard } from './HabitCard';
+import HabitCard  from './HabitCard';
 import { CompletionData } from './CompletionFormModal';
 import { Habit } from '../constants/habit';
 

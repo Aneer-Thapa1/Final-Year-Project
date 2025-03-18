@@ -20,7 +20,6 @@ import { format } from 'date-fns';
 
 // Components
 import TodayHabits from '../../components/TodayHabits';
-import HabitStreakCard from '../../components/HabitStreakCard';
 import ErrorMessage from '../../components/ErrorMessage';
 
 // Services
