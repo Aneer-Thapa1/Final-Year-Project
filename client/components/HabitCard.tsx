@@ -11,9 +11,21 @@ interface Habit {
     description?: string;
     frequency?: string;
     time?: string;
-    streak?: number;
+    streak?: {
+        current_streak?: number;
+        longest_streak?: number;
+        streak_history?: any[];
+        missed_days_count?: number;
+        last_reset_reason?: string;
+        last_completed?: string;
+        start_date?: string;
+        grace_period_used?: boolean;
+    };
     isCompleted?: boolean;
     completedToday?: boolean;
+    name?: string; // Added name as it appears in the error
+    frequency_type?: string;
+    difficulty?: string;
 }
 
 interface HabitCardProps {
@@ -62,11 +74,14 @@ const HabitCard: React.FC<HabitCardProps> = ({
     };
 
     // Safely get habit properties with default values
-    const habitTitle = habit?.title || 'Unnamed Habit';
+    // Use title or name, depending on which is available
+    const habitTitle = habit?.title || habit?.name || 'Unnamed Habit';
     const habitDescription = habit?.description || 'No description';
-    const habitFrequency = habit?.frequency || 'Not specified';
+    const habitFrequency = habit?.frequency || habit?.frequency_type || 'Not specified';
     const habitTime = habit?.time || '--:--';
-    const habitStreak = habit?.streak || 0;
+
+    // Safely access the streak object
+    const habitStreak = habit?.streak?.current_streak || 0;
 
     return (
         <Swipeable

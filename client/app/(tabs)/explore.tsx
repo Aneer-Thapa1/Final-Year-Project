@@ -17,7 +17,6 @@ import * as Haptics from "expo-haptics";
 import { useFocusEffect } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { TabBar } from "@/components/TabBar";
 
 // Components
 import BlogPostCreator from "../../components/BlogPostCreator";
