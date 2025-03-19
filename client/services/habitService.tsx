@@ -155,8 +155,6 @@ export const logHabitCompletion = async (habitId: number, completionData: Partia
     }
 
     try {
-        console.log(`Logging completion for habit ID: ${habitId}`);
-        console.log('Completion data:', completionData);
 
         return await postData(`/api/habit/logHabitCompletion/${habitId}`, completionData);
     } catch (error: any) {

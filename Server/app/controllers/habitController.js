@@ -1,6 +1,170 @@
-// src/controllers/habitController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+
+/**
+ * Helper function to determine if a habit should be scheduled for a specific date
+ * based on its frequency type
+ */
+const isHabitScheduledForDate = (habit, targetDate) => {
+    // Get day of week (0-6, Sunday is 0)
+    const dayOfWeek = targetDate.getDay();
+
+    // Calculate days since start
+    const habitStartDate = new Date(habit.start_date);
+    habitStartDate.setHours(0, 0, 0, 0);
+
+    const daysSinceStart = Math.floor((targetDate - habitStartDate) / (24 * 60 * 60 * 1000));
+
+    // If habit hasn't started yet, it's not scheduled
+    if (daysSinceStart < 0) return false;
+
+    // Date is between start and end, check frequency type
+    switch (habit.frequency_type) {
+        case 'DAILY':
+            return true;
+
+        case 'WEEKDAYS':
+            // Weekdays are Monday (1) through Friday (5)
+            return dayOfWeek >= 1 && dayOfWeek <= 5;
+
+        case 'WEEKENDS':
+            // Weekend days are Saturday (6) and Sunday (0)
+            return dayOfWeek === 0 || dayOfWeek === 6;
+
+        case 'SPECIFIC_DAYS':
+            // Check if current day of week is in specific_days array
+            return habit.specific_days && habit.specific_days.includes(dayOfWeek);
+
+        case 'INTERVAL':
+            // Every X days since start date
+            return daysSinceStart % habit.frequency_interval === 0;
+
+        case 'X_TIMES_WEEK':
+            // Get the start of the week (Sunday)
+            const startOfWeek = new Date(targetDate);
+            startOfWeek.setDate(targetDate.getDate() - dayOfWeek);
+            startOfWeek.setHours(0, 0, 0, 0);
+
+            // Check if this habit has already been scheduled enough times this week
+            // This is a simplified approach - in a real app, you would check actual scheduled records
+            const scheduledDaysThisWeek =  getScheduledDaysInRange(
+                habit.habit_id,
+                startOfWeek,
+                targetDate
+            );
+
+            // If we've already scheduled it enough times this week, don't schedule more
+            if (scheduledDaysThisWeek >= habit.frequency_value) {
+                return false;
+            }
+
+            // Otherwise, tentatively schedule it
+            // In a real app, you might have more complex logic for which days of the week to pick
+            return true;
+
+        case 'X_TIMES_MONTH':
+            // Get the start of the month
+            const startOfMonth = new Date(targetDate);
+            startOfMonth.setDate(1);
+            startOfMonth.setHours(0, 0, 0, 0);
+
+            // Check if this habit has already been scheduled enough times this month
+            const scheduledDaysThisMonth =  getScheduledDaysInRange(
+                habit.habit_id,
+                startOfMonth,
+                targetDate
+            );
+
+            // If we've already scheduled it enough times this month, don't schedule more
+            if (scheduledDaysThisMonth >= habit.frequency_value) {
+                return false;
+            }
+
+            // Otherwise, tentatively schedule it
+            return true;
+
+        default:
+            // Unknown frequency type, default to scheduled
+            return true;
+    }
+};
+
+/**
+ * Helper function to get the count of days a habit has been scheduled in a date range
+ */
+const getScheduledDaysInRange = async (habitId, startDate, endDate) => {
+    try {
+        const statuses = await prisma.habitDailyStatus.findMany({
+            where: {
+                habit_id: habitId,
+                date: {
+                    gte: startDate,
+                    lte: endDate
+                },
+                is_scheduled: true
+            }
+        });
+
+        return statuses.length;
+    } catch (error) {
+        console.error('Error getting scheduled days in range:', error);
+        return 0;
+    }
+};
+
+/**
+ * Helper function to get a user-friendly display string for the habit frequency
+ */
+const getFrequencyDisplay = (habit) => {
+    switch (habit.frequency_type) {
+        case 'DAILY':
+            return "Daily";
+        case 'WEEKDAYS':
+            return "Weekdays";
+        case 'WEEKENDS':
+            return "Weekends";
+        case 'SPECIFIC_DAYS':
+            return "Specific Days";
+        case 'INTERVAL':
+            return `Every ${habit.frequency_interval} day${habit.frequency_interval !== 1 ? 's' : ''}`;
+        case 'X_TIMES_WEEK':
+            return `${habit.frequency_value}× per week`;
+        case 'X_TIMES_MONTH':
+            return `${habit.frequency_value}× per month`;
+        default:
+            return "Daily";
+    }
+};
+
+/**
+ * Helper function to get a formatted time display string for a habit
+ * In a real app, this would use habit's actual time settings
+ */
+const getHabitTimeDisplay = (habit) => {
+    // This is a placeholder - in a real app, you would use the habit's scheduled time
+    // For now, we'll return a default value
+    return "Anytime";
+};
+
+/**
+ * Helper function to create a daily status record for a habit
+ */
+const createHabitDailyStatus = async (habitId, userId, date, isScheduled) => {
+    try {
+        await prisma.habitDailyStatus.create({
+            data: {
+                habit_id: habitId,
+                user_id: userId,
+                date: date,
+                is_scheduled: isScheduled,
+                is_completed: false,
+                is_skipped: false
+            }
+        });
+    } catch (error) {
+        console.error('Error creating habit daily status:', error);
+    }
+};
 
 /**
  * Add a new habit to the database with enhanced reminder support
@@ -432,7 +596,8 @@ const getUserHabits = async (req, res) => {
                 where: whereConditions,
                 include: {
                     domain: true,
-                    streak: true
+                    streak: true,
+                    reminders: true
                 },
                 orderBy,
                 skip,
@@ -509,7 +674,6 @@ const getHabitsByDate = async (req, res) => {
         const userId = parseInt(req.user);
         const { date } = req.params; // Format: YYYY-MM-DD
 
-        console.log(date);
         if (!date || !date.match(/^\d{4}-\d{2}-\d{2}$/)) {
             return res.status(400).json({
                 success: false,
@@ -524,12 +688,10 @@ const getHabitsByDate = async (req, res) => {
         const nextDate = new Date(targetDate);
         nextDate.setDate(nextDate.getDate() + 1);
 
-// Get day of week (0-6, Sunday is 0)
+        // Get day of week (0-6, Sunday is 0)
         const dayOfWeek = targetDate.getDay();
 
-        console.log("Target date for query:", targetDate.toISOString());
-
-// Get all active habits for the user
+        // Get all active habits for the user
         const habits = await prisma.habit.findMany({
             where: {
                 user_id: userId,
@@ -546,14 +708,13 @@ const getHabitsByDate = async (req, res) => {
             },
             include: {
                 domain: true,
-                streak: true
+                streak: {
+                    where: {
+                        user_id: userId
+                    }
+                }
             }
         });
-
-
-        console.log(habits);
-// Log the number of habits found
-        console.log(`Found ${habits.length} habits for ${targetDate.toISOString()}`);
 
         // Get daily statuses for the target date
         const dailyStatuses = await prisma.habitDailyStatus.findMany({
@@ -569,49 +730,56 @@ const getHabitsByDate = async (req, res) => {
             statusMap[status.habit_id] = status;
         });
 
-        // Filter and enhance habits based on frequency type and schedule
-        const habitsWithStatus = habits.map(habit => {
+        // Process each habit to determine if it should be scheduled for this date
+        const processedHabits = [];
+
+        for (const habit of habits) {
             // Check if we already have a status for this habit and date
             const existingStatus = statusMap[habit.habit_id];
 
             if (existingStatus) {
-                return {
-                    ...habit,
-                    isScheduled: existingStatus.is_scheduled,
-                    isCompleted: existingStatus.is_completed,
-                    isSkipped: existingStatus.is_skipped,
-                    statusId: existingStatus.status_id,
-                    completionTime: existingStatus.completion_time,
-                    skipReason: existingStatus.skip_reason
-                };
+                // We have an existing status, use it
+                if (existingStatus.is_scheduled) {
+                    processedHabits.push({
+                        ...habit, // Keep all original habit properties
+                        scheduledToday: existingStatus.is_scheduled,
+                        completedToday: existingStatus.is_completed,
+                        skippedToday: existingStatus.is_skipped,
+                        todayStatus: existingStatus
+                    });
+                }
+            } else {
+                // No existing status, determine if it should be scheduled
+                const isScheduled = isHabitScheduledForDate(habit, targetDate);
+
+                // If it should be scheduled, create a status record
+                if (isScheduled) {
+                    await createHabitDailyStatus(habit.habit_id, userId, targetDate, true);
+
+                    // Create a new status object to return
+                    const newStatus = {
+                        habit_id: habit.habit_id,
+                        user_id: userId,
+                        date: targetDate,
+                        is_scheduled: true,
+                        is_completed: false,
+                        is_skipped: false
+                    };
+
+                    processedHabits.push({
+                        ...habit, // Keep all original habit properties
+                        scheduledToday: true,
+                        completedToday: false,
+                        skippedToday: false,
+                        todayStatus: newStatus
+                    });
+                }
             }
-
-            // Otherwise, determine if this habit should be scheduled for this date
-            const isScheduled = isHabitScheduledForDate(habit, targetDate);
-
-            // If it should be scheduled but we don't have a status yet, create one
-            if (isScheduled) {
-                // Creating it asynchronously - don't await as we don't want to block
-                createHabitDailyStatus(habit.habit_id, userId, targetDate, true);
-            }
-
-            return {
-                ...habit,
-                isScheduled,
-                isCompleted: false,
-                isSkipped: false,
-                statusId: null,
-                completionTime: null,
-                skipReason: null
-            };
-        });
-
-        // Filter out habits that are not scheduled for this date
-        const applicableHabits = habitsWithStatus.filter(habit => habit.isScheduled);
+        }
 
         // Calculate completion rate
-        const totalHabits = applicableHabits.length;
-        const completedHabits = applicableHabits.filter(h => h.isCompleted).length;
+        const totalHabits = processedHabits.length;
+        const completedHabits = processedHabits.filter(h => h.completedToday).length;
 
         // Get user's daily goal
         const user = await prisma.user.findUnique({
@@ -622,7 +790,7 @@ const getHabitsByDate = async (req, res) => {
         return res.status(200).json({
             success: true,
             date: targetDate.toISOString().split('T')[0],
-            data: applicableHabits,
+            data: processedHabits,
             stats: {
                 total: totalHabits,
                 completed: completedHabits,
@@ -1341,127 +1509,6 @@ const addReminder = async (req, res) => {
         });
     }
 };
-
-// Helper functions
-
-/**
- * Determines if a habit is scheduled for a specific date
- */
-function isHabitScheduledForDate(habit, date) {
-    // For daily habits
-    if (habit.frequency_type === 'DAILY') {
-        return true;
-    }
-
-    // Get day of week (0-6, Sunday is 0)
-    const dayOfWeek = date.getDay();
-
-    // For weekdays (Monday-Friday)
-    if (habit.frequency_type === 'WEEKDAYS') {
-        return dayOfWeek >= 1 && dayOfWeek <= 5;
-    }
-
-    // For weekends (Saturday-Sunday)
-    if (habit.frequency_type === 'WEEKENDS') {
-        return dayOfWeek === 0 || dayOfWeek === 6;
-    }
-
-    // For specific days of week
-    if (habit.frequency_type === 'SPECIFIC_DAYS' &&
-        Array.isArray(habit.specific_days) &&
-        habit.specific_days.includes(dayOfWeek)) {
-        return true;
-    }
-
-    // For interval-based habits (every X days)
-    if (habit.frequency_type === 'INTERVAL') {
-        const startDate = new Date(habit.start_date);
-        const diffTime = Math.abs(date - startDate);
-        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-        return diffDays % habit.frequency_interval === 0;
-    }
-
-    // For X times per week habits
-    if (habit.frequency_type === 'X_TIMES_WEEK') {
-        // Get the start of the week for this date (previous Sunday)
-        const weekStart = new Date(date);
-        weekStart.setDate(weekStart.getDate() - dayOfWeek);
-        weekStart.setHours(0, 0, 0, 0);
-
-        // Get the end of the week
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekStart.getDate() + 7);
-
-        // Count completions this week
-        const completionsThisWeek = prisma.habitDailyStatus.count({
-            where: {
-                habit_id: habit.habit_id,
-                is_completed: true,
-                date: {
-                    gte: weekStart,
-                    lt: weekEnd
-                }
-            }
-        });
-
-        // If completions are less than the frequency value, schedule it
-        return completionsThisWeek < habit.frequency_value;
-    }
-
-    // X times per month, similar logic to X times per week
-    if (habit.frequency_type === 'X_TIMES_MONTH') {
-        const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
-        const monthEnd = new Date(date.getFullYear(), date.getMonth() + 1, 0);
-
-        const completionsThisMonth = prisma.habitDailyStatus.count({
-            where: {
-                habit_id: habit.habit_id,
-                is_completed: true,
-                date: {
-                    gte: monthStart,
-                    lte: monthEnd
-                }
-            }
-        });
-
-        return completionsThisMonth < habit.frequency_value;
-    }
-
-    return false;
-}
-
-/**
- * Creates a habit daily status record if it doesn't exist
- */
-async function createHabitDailyStatus(habitId, userId, date, isScheduled) {
-    try {
-        // Check if status already exists
-        const existingStatus = await prisma.habitDailyStatus.findUnique({
-            where: {
-                habit_id_date: {
-                    habit_id: habitId,
-                    date
-                }
-            }
-        });
-
-        if (!existingStatus) {
-            await prisma.habitDailyStatus.create({
-                data: {
-                    habit_id: habitId,
-                    user_id: userId,
-                    date,
-                    is_scheduled: isScheduled,
-                    is_completed: false,
-                    is_skipped: false
-                }
-            });
-        }
-    } catch (error) {
-        console.error('Error creating habit daily status:', error);
-    }
-}
 
 /**
  * Updates a habit's streak based on completion
