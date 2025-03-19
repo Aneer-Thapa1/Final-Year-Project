@@ -87,7 +87,7 @@ const TabBarButton = ({
                     text-xs font-montserrat-medium
                     ${isFocused
                     ? isDark ? 'text-primary-400' : 'text-primary-500'
-                    : isDark ? 'text-gray-400' : 'text-gray-500'
+                    : isDark ? 'text-white' : 'text-gray-500'
                 }
                 `}>
                     {label}

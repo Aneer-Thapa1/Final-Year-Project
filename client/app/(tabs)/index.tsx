@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, RefreshControl, ScrollView, useColorScheme, View, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -8,24 +8,22 @@ import {
     ChevronRight,
     Zap,
     Calendar,
-    TrendingUp,
     Award,
     CheckCircle2,
-    Clock,
-    AlertCircle,
-    Plus
+    Settings
 } from 'lucide-react-native';
 import { router } from 'expo-router';
 import { format } from 'date-fns';
 
 // Components
-import TodayHabits from '../../components/TodayHabits';
+import HabitCard from '../../components/HabitCard';
 import ErrorMessage from '../../components/ErrorMessage';
+import CompletionFormModal from '../../components/CompletionFormModal';
 
 // Services
 import { getUserHabits, getHabitsByDate, logHabitCompletion, skipHabit } from '../../services/habitService';
 
-const Home = () => {
+const Index = () => {
     const colorScheme = useColorScheme();
     const isDark = colorScheme === 'dark';
     const isFocused = useIsFocused();
@@ -43,6 +41,10 @@ const Home = () => {
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [error, setError] = useState(null);
     const [errorVisible, setErrorVisible] = useState(false);
+
+    // Modal state
+    const [completionModalVisible, setCompletionModalVisible] = useState(false);
+    const [selectedHabit, setSelectedHabit] = useState(null);
 
     // Get active domains from habits
     const activeDomains = [...new Set(habits.map(habit => habit.domain?.name || 'General'))];
@@ -114,7 +116,6 @@ const Home = () => {
             } catch (err) {
                 console.error('Failed to fetch today\'s habits:', err);
                 // If today's specific API fails, fall back to filtering all habits
-                // This won't be as accurate for scheduling but better than nothing
                 const todayFormatted = format(today, 'yyyy-MM-dd');
                 const todayStart = new Date(todayFormatted);
                 const todayEnd = new Date(todayFormatted);
@@ -145,35 +146,39 @@ const Home = () => {
         await loadData();
     };
 
-    const handleComplete = async (habitId, completionData) => {
+    const openCompletionModal = (habit) => {
+        setSelectedHabit(habit);
+        setCompletionModalVisible(true);
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    };
+
+    const closeCompletionModal = () => {
+        setCompletionModalVisible(false);
+        setSelectedHabit(null);
+    };
+
+    const handleSubmitCompletion = async (completionData) => {
+        if (!selectedHabit) return;
+
         try {
             // Map the CompletionData from the modal to what the API expects
             const apiCompletionData = {
                 completed: true,
-                completed_at: completionData.completed_at || new Date().toISOString(),
-                completion_notes: completionData.notes,
-                mood: completionData.mood_rating,
-                evidence_image: completionData.evidence_image,
+                completed_at: completionData?.completed_at || new Date().toISOString(),
+                completion_notes: completionData?.notes,
+                mood: completionData?.mood_rating,
+                energy_level: completionData?.energy_level,
+                difficulty_rating: completionData?.difficulty_rating,
+                evidence_image: completionData?.evidence_url,
+                location_name: completionData?.location_name,
                 skipped: false
             };
 
-            // Add measurement data if applicable
-            if (completionData.duration) {
-                apiCompletionData.duration_completed = parseInt(completionData.duration);
-            }
-
-            if (completionData.count) {
-                apiCompletionData.count_completed = parseInt(completionData.count);
-            }
-
-            if (completionData.value) {
-                apiCompletionData.numeric_completed = parseFloat(completionData.value);
-            }
-
-            await logHabitCompletion(habitId, apiCompletionData);
+            await logHabitCompletion(selectedHabit.habit_id, apiCompletionData);
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-            // Refresh data to update UI
+            // Close modal and refresh data
+            closeCompletionModal();
             loadData();
         } catch (err) {
             console.error('Error completing habit:', err);
@@ -181,11 +186,12 @@ const Home = () => {
         }
     };
 
-    const handleSkip = async (habitId, reason) => {
+    const handleSkip = async (habitId, reason = 'Skipped by user') => {
         try {
             const skipData = {
                 date: formattedDate,
-                reason: reason || 'Skipped by user'
+                reason: reason,
+                skipped: true
             };
 
             await skipHabit(habitId, skipData);
@@ -199,8 +205,8 @@ const Home = () => {
         }
     };
 
-    // Navigation function for adding a new habit
-    const navigateToAddHabit = () => {
+    // Navigation function for managing habits
+    const navigateToManageHabits = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
         router.push('/habits');
     };
@@ -209,7 +215,7 @@ const Home = () => {
         return (
             <View className={`flex-1 justify-center items-center ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
                 <ActivityIndicator size="large" color="#6366F1" />
-                <Text className={`mt-4 font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                <Text className={`mt-2 font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                     Loading your habits...
                 </Text>
             </View>
@@ -218,10 +224,10 @@ const Home = () => {
 
     return (
         <GestureHandlerRootView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-            <SafeAreaView edges={['left', 'right']} className="flex-1">
+            <SafeAreaView edges={['top', 'left', 'right']} className="flex-1">
                 <ScrollView
                     className="flex-1"
-                    contentContainerStyle={{ paddingVertical: 4 }}
+                    contentContainerStyle={{ paddingTop: 0 }}
                     showsVerticalScrollIndicator={false}
                     refreshControl={
                         <RefreshControl
@@ -243,8 +249,8 @@ const Home = () => {
                         </View>
                     )}
 
-                    {/* Header Section with Date and Add Button */}
-                    <View className="px-4 mt-1 mb-4 flex-row justify-between items-center">
+                    {/* Header Section with Date and Manage Habits Button */}
+                    <View className="px-4 pt-1 mb-3 flex-row justify-between items-center">
                         <View>
                             <Text className={`text-lg font-montserrat-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                                 {format(today, 'EEEE, MMM d')}
@@ -255,18 +261,17 @@ const Home = () => {
                         </View>
 
                         <TouchableOpacity
-                            onPress={navigateToAddHabit}
-                            className="bg-primary-500 px-4 py-2 rounded-lg items-center justify-center"
+                            onPress={navigateToManageHabits}
+                            className="bg-primary-500 px-3 py-2 rounded-lg flex-row items-center"
                             style={{ elevation: 2 }}
                         >
-                            <Text className="text-white font-montserrat-medium text-sm">
-                                Manage Habits
-                            </Text>
+                            <Settings size={18} color="white" />
+                            <Text className="ml-2 text-white font-montserrat-medium">Manage Habits</Text>
                         </TouchableOpacity>
                     </View>
 
                     {/* Progress Summary Card */}
-                    <View className="px-4 mb-4">
+                    <View className="px-4 mb-3">
                         <View className={`rounded-xl shadow-sm p-4 ${isDark ? 'bg-gray-800' : 'bg-white'}`}
                               style={{ elevation: 2 }}>
                             <View className="flex-row justify-between items-center mb-3">
@@ -287,7 +292,7 @@ const Home = () => {
                             </View>
 
                             {/* Progress Bar */}
-                            <View className="h-2 bg-gray-200 rounded-full overflow-hidden mb-3">
+                            <View className="h-3 bg-gray-200 rounded-full overflow-hidden mb-3">
                                 <View
                                     className={`h-full ${
                                         completionStats.completionRate >= 80 ? 'bg-green-500' :
@@ -324,22 +329,53 @@ const Home = () => {
                     </View>
 
                     {/* Today's Habits Section */}
-                    <View className="px-4 mb-6">
+                    <View className="px-4 mb-4">
+                        <View className="flex-row justify-between items-center mb-3">
+                            <Text className={`text-lg font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                Today's Habits
+                            </Text>
+                            <TouchableOpacity
+                                className="flex-row items-center"
+                                onPress={() => router.push('/all-habits')}
+                            >
+                                <Text className="text-primary-500 font-montserrat-medium text-sm mr-1">
+                                    View All
+                                </Text>
+                                <ChevronRight size={16} color="#6366F1" />
+                            </TouchableOpacity>
+                        </View>
 
-
-                        <TodayHabits
-                            habits={todayHabits}
-                            onComplete={handleComplete}
-                            onSkip={handleSkip}
-                            isDark={isDark}
-                            isLoading={isLoading}
-                            error={error}
-                            hideEmpty={true}
-                        />
-
-
-                    </View> 
-
+                        {todayHabits.length === 0 ? (
+                            <View className={`py-8 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-white'} items-center justify-center mb-2`}>
+                                <Calendar size={32} color={isDark ? "#9CA3AF" : "#6B7280"} />
+                                <Text className={`mt-2 text-base font-montserrat-medium text-center ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                    No habits scheduled for today
+                                </Text>
+                                <TouchableOpacity
+                                    onPress={navigateToManageHabits}
+                                    className="mt-3 bg-primary-500 px-4 py-2 rounded-lg flex-row items-center"
+                                >
+                                    <Settings size={16} color="white" />
+                                    <Text className="ml-2 text-white font-montserrat-medium">Manage Habits</Text>
+                                </TouchableOpacity>
+                            </View>
+                        ) : (
+                            todayHabits.map(habit => (
+                                <TouchableOpacity
+                                    key={habit.habit_id}
+                                    onPress={() => !habit.completedToday && !habit.isCompleted && openCompletionModal(habit)}
+                                    activeOpacity={habit.completedToday || habit.isCompleted ? 1 : 0.7}
+                                >
+                                    <HabitCard
+                                        habit={habit}
+                                        isDark={isDark}
+                                        onComplete={() => openCompletionModal(habit)}
+                                        isCompleted={habit.completedToday || habit.isCompleted}
+                                    />
+                                </TouchableOpacity>
+                            ))
+                        )}
+                    </View>
 
                     {/* Domain-Based Habits Section */}
                     {activeDomains.length > 0 && (
@@ -362,7 +398,7 @@ const Home = () => {
                             <ScrollView
                                 horizontal
                                 showsHorizontalScrollIndicator={false}
-                                contentContainerStyle={{ paddingBottom: 8 }}
+                                contentContainerStyle={{ paddingBottom: 8, paddingRight: 16 }}
                                 className="mb-2"
                             >
                                 {activeDomains.map((domain, index) => {
@@ -428,8 +464,19 @@ const Home = () => {
                     )}
 
                     {/* Add more bottom padding for better scrolling experience */}
-                    <View className="h-40" />
+                    <View className="h-32" />
                 </ScrollView>
+
+                {/* Completion Modal */}
+                {completionModalVisible && selectedHabit && (
+                    <CompletionFormModal
+                        visible={completionModalVisible}
+                        onClose={closeCompletionModal}
+                        onSubmit={handleSubmitCompletion}
+                        habitName={selectedHabit.title}
+                        isDark={isDark}
+                    />
+                )}
             </SafeAreaView>
         </GestureHandlerRootView>
     );
@@ -438,7 +485,7 @@ const Home = () => {
 // Helper function to get a consistent color for each domain
 const getColorForDomain = (domain, index) => {
     const colors = [
-        '#6366F1', // indigo
+        '#6366F1', // indigo (primary)
         '#10B981', // emerald
         '#F59E0B', // amber
         '#8B5CF6', // purple
@@ -455,4 +502,4 @@ const getColorForDomain = (domain, index) => {
     return colors[Math.abs(hashCode) % colors.length] || colors[index % colors.length];
 };
 
-export default Home;
+export default Index;

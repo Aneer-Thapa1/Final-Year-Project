@@ -1,4 +1,3 @@
-// components/home/CompletionFormModal.tsx
 import React, { useState } from 'react';
 import {
     Modal,
@@ -12,23 +11,26 @@ import {
 } from 'react-native';
 import { X, Upload, MapPin, Check } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 
-interface CompletionFormModalProps {
-    visible: boolean;
-    onClose: () => void;
-    onSubmit: (data: CompletionData) => void;
-    habitName: string;
-    isDark: boolean;
-}
-
+// Completion Data Interface
 export interface CompletionData {
-    completed_at: string;
+    completed_at?: string;
     mood_rating?: number;
     energy_level?: number;
     difficulty_rating?: number;
     notes?: string;
     evidence_url?: string;
     location_name?: string;
+}
+
+// Props Interface
+interface CompletionFormModalProps {
+    visible: boolean;
+    onClose: () => void;
+    onSubmit: (data: CompletionData) => void;
+    habitName: string;
+    isDark: boolean;
 }
 
 const CompletionFormModal: React.FC<CompletionFormModalProps> = ({
@@ -38,38 +40,65 @@ const CompletionFormModal: React.FC<CompletionFormModalProps> = ({
                                                                      habitName,
                                                                      isDark
                                                                  }) => {
+    // State for completion data
     const [completionData, setCompletionData] = useState<CompletionData>({
         completed_at: new Date().toISOString(),
         mood_rating: 3,
         energy_level: 3,
         difficulty_rating: 3,
         notes: '',
+        evidence_url: '',
         location_name: ''
     });
 
-    const handleMoodChange = (rating: number) => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setCompletionData(prev => ({ ...prev, mood_rating: rating }));
-    };
-
-    const handleEnergyChange = (rating: number) => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setCompletionData(prev => ({ ...prev, energy_level: rating }));
-    };
-
-    const handleDifficultyChange = (rating: number) => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setCompletionData(prev => ({ ...prev, difficulty_rating: rating }));
-    };
-
-    const handleSubmit = () => {
-        onSubmit(completionData);
-    };
-
+    // Mood, Energy, and Difficulty Emojis/Labels
     const MoodEmojis = ['😞', '😐', '🙂', '😊', '😄'];
-    const EnergyEmojis = ['🔋', '🔋', '🔋', '🔋', '🔋'];
+    const EnergyEmojis = ['🔋', '⚡', '🔋', '⚡', '🔋'];
     const DifficultyLabels = ['Very Easy', 'Easy', 'Average', 'Hard', 'Very Hard'];
 
+    // Handle rating changes with haptic feedback
+    const handleRatingChange = (
+        key: 'mood_rating' | 'energy_level' | 'difficulty_rating',
+        rating: number
+    ) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        setCompletionData(prev => ({ ...prev, [key]: rating }));
+    };
+
+    // Pick image for evidence
+    const pickEvidenceImage = async () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+        try {
+            // Request permission
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+            if (status !== 'granted') {
+                alert('Sorry, we need camera roll permissions to make this work!');
+                return;
+            }
+
+            // Launch image picker
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                quality: 0.8,
+            });
+
+            if (!result.canceled) {
+                // Assuming the first asset (as we allow single image selection)
+                setCompletionData(prev => ({
+                    ...prev,
+                    evidence_url: result.assets[0].uri
+                }));
+            }
+        } catch (error) {
+            console.error('Image picker error:', error);
+            alert('Failed to pick image');
+        }
+    };
+
+    // Rating Selector Component
     const RatingSelector = ({
                                 title,
                                 value,
@@ -111,6 +140,12 @@ const CompletionFormModal: React.FC<CompletionFormModalProps> = ({
         </View>
     );
 
+    // Handle form submission
+    const handleSubmit = () => {
+        // Perform any final validations if needed
+        onSubmit(completionData);
+    };
+
     return (
         <Modal
             visible={visible}
@@ -125,8 +160,9 @@ const CompletionFormModal: React.FC<CompletionFormModalProps> = ({
                 <View className="flex-1 justify-end">
                     <View
                         className={`rounded-t-3xl p-5 ${isDark ? 'bg-gray-800' : 'bg-white'}`}
-                        style={{ maxHeight: '80%' }}
+                        style={{ maxHeight: '90%' }}
                     >
+                        {/* Modal Header */}
                         <View className="flex-row justify-between items-center mb-4">
                             <Text className={`text-xl font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                 Complete Habit
@@ -136,33 +172,41 @@ const CompletionFormModal: React.FC<CompletionFormModalProps> = ({
                             </TouchableOpacity>
                         </View>
 
+                        {/* Habit Name */}
                         <Text className={`mb-4 font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                             You're completing: <Text className="font-montserrat-bold">{habitName}</Text>
                         </Text>
 
-                        <ScrollView showsVerticalScrollIndicator={false}>
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
+                            keyboardShouldPersistTaps="handled"
+                        >
+                            {/* Mood Rating */}
                             <RatingSelector
                                 title="How are you feeling?"
                                 value={completionData.mood_rating}
-                                onChange={handleMoodChange}
+                                onChange={(rating) => handleRatingChange('mood_rating', rating)}
                                 options={MoodEmojis}
                             />
 
+                            {/* Energy Level */}
                             <RatingSelector
                                 title="Energy level"
                                 value={completionData.energy_level}
-                                onChange={handleEnergyChange}
+                                onChange={(rating) => handleRatingChange('energy_level', rating)}
                                 options={EnergyEmojis}
                             />
 
+                            {/* Difficulty Rating */}
                             <RatingSelector
                                 title="How difficult was it?"
                                 value={completionData.difficulty_rating}
-                                onChange={handleDifficultyChange}
+                                onChange={(rating) => handleRatingChange('difficulty_rating', rating)}
                                 options={DifficultyLabels}
                                 type="text"
                             />
 
+                            {/* Notes */}
                             <Text className={`mb-2 font-montserrat-medium ${isDark ? 'text-white' : 'text-gray-800'}`}>
                                 Notes (Optional)
                             </Text>
@@ -179,8 +223,11 @@ const CompletionFormModal: React.FC<CompletionFormModalProps> = ({
                                 textAlignVertical="top"
                             />
 
+                            {/* Evidence and Location */}
                             <View className="flex-row mb-4">
+                                {/* Add Evidence */}
                                 <TouchableOpacity
+                                    onPress={pickEvidenceImage}
                                     className={`flex-1 mr-2 flex-row items-center justify-center p-3 rounded-xl ${
                                         isDark ? 'bg-gray-700' : 'bg-gray-100'
                                     }`}
@@ -188,10 +235,11 @@ const CompletionFormModal: React.FC<CompletionFormModalProps> = ({
                                 >
                                     <Upload size={20} color={isDark ? '#E5E7EB' : '#4B5563'} />
                                     <Text className={`ml-2 font-montserrat-medium ${isDark ? 'text-white' : 'text-gray-700'}`}>
-                                        Add Evidence
+                                        {completionData.evidence_url ? 'Image Added' : 'Add Evidence'}
                                     </Text>
                                 </TouchableOpacity>
 
+                                {/* Add Location */}
                                 <TouchableOpacity
                                     className={`flex-1 ml-2 flex-row items-center justify-center p-3 rounded-xl ${
                                         isDark ? 'bg-gray-700' : 'bg-gray-100'
@@ -206,6 +254,7 @@ const CompletionFormModal: React.FC<CompletionFormModalProps> = ({
                             </View>
                         </ScrollView>
 
+                        {/* Submit Button */}
                         <TouchableOpacity
                             className="bg-primary-500 py-4 rounded-xl flex-row items-center justify-center mt-4"
                             onPress={handleSubmit}
