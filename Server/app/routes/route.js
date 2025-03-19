@@ -7,6 +7,7 @@ const domainRoute = require('./domainRoute');
 const friendshipRoute = require('./friendshipRoute');
 const chatRoute = require('./chatRoute');
 const leaderboardRoute = require('./leaderboardRoute');
+const recommendationRoute = require('./recommendationRoute');
 
 const router = express.Router();
 
@@ -34,5 +35,8 @@ router.use('/friends', friendshipRoute)
 
 // routes related to leaderboard (/api/leaderboard)
 router.use('/leaderboard', leaderboardRoute)
+
+// routes related to leaderboard (/api/leaderboard)
+router.use('/leaderboard', recommendationRoute)
 
 module.exports = router;
