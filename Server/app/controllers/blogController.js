@@ -13,7 +13,6 @@ const addBlog = async (req, res) => {
     if (!title || !content || !category_id) {
         return res.status(400).json({ error: 'Please enter all required details: title, content, and category.' });
     }
-console.log(req.file)
 
     try {
         // Get the image file path if an image was uploaded
