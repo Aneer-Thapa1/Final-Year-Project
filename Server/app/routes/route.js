@@ -37,6 +37,6 @@ router.use('/friends', friendshipRoute)
 router.use('/leaderboard', leaderboardRoute)
 
 // routes related to leaderboard (/api/leaderboard)
-router.use('/leaderboard', recommendationRoute)
+router.use('/recommendation', recommendationRoute)
 
 module.exports = router;
