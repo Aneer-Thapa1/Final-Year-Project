@@ -32,6 +32,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isOwn, isDark })
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
+
+
+
     // Check how long ago the message was sent
     const getMessageStatus = () => {
         const now = new Date();

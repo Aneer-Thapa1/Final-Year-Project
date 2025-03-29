@@ -85,7 +85,7 @@ router.get('/potential-recipients', validateToken, chatController.getPotentialCh
 // Update typing status
 router.post('/rooms/:roomId/typing', validateToken, chatController.updateTypingStatus);
 
-// Socket Setup
+// Socket Setupc
 // Setup user's socket connections
 router.get('/socket/setup', validateToken, chatController.setupUserSocket);
 

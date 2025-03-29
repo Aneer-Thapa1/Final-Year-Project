@@ -26,7 +26,6 @@ router.use('/chatbot', chatbotRoute)
 // routes related to blog (/api/blog)
 router.use('/chat', chatRoute)
 
-
 // routes related to domain (/api/domain)
 router.use('/domain', domainRoute)
 

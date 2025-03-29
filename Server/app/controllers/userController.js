@@ -12,8 +12,6 @@ const prisma = new PrismaClient();
 const register = async (req, res) => {
     const {user_name, user_email, gender, password} = req.body;
 
-    console.log(user_name, user_email, gender, password)
-
 
     // Input validation
     if (!user_name?.trim() || !user_email?.trim() || !gender || !password) {
@@ -98,7 +96,7 @@ const login = async (req, res) => {
 
         // Compare the provided password with the stored hashed password
         const isPasswordValid = await bcrypt.compare(password, user.password);
-        console.log(isPasswordValid); // Print whether the password is correct (for debugging)
+
 
         // If the password is incorrect, return an error
         if (!isPasswordValid) {

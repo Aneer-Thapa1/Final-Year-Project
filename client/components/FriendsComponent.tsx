@@ -30,7 +30,6 @@ import {
 interface FriendsComponentProps {
     isDark?: boolean;
 }
-
 const FriendsComponent: React.FC<FriendsComponentProps> = ({ isDark }) => {
     // If isDark is not passed as prop, use system setting
     const systemColorScheme = useColorScheme();
