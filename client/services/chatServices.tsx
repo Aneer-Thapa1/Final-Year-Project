@@ -1,5 +1,6 @@
 import { fetchData, postData, updateData, deleteData } from './api';
 import React from "react";
+
 // Enum Imports
 export enum ChatRoomType {
     DM = 'DM',
@@ -29,7 +30,7 @@ export interface Message {
     room_id: number;
     sender_id: number;
     content: string;
-    message_type: MessageType;
+    message_type: MessageType | string;
     createdAt: string;
     media_url?: string;
     sender?: User;
@@ -45,7 +46,7 @@ export interface ChatParticipant {
 
 export interface ChatRoom {
     room_id: number;
-    type: ChatRoomType;
+    type: ChatRoomType | string;
     name?: string;
     description?: string;
     avatar?: string;
@@ -54,6 +55,9 @@ export interface ChatRoom {
     unreadCount?: number;
     created_by_id?: number;
     is_private?: boolean;
+    displayName?: string;
+    createdAt?: string;
+    updatedAt?: string;
 }
 
 export interface ApiResponse<T> {
@@ -61,6 +65,13 @@ export interface ApiResponse<T> {
     data?: T;
     message?: string;
     error?: string;
+}
+
+export interface ReadStatusResponse {
+    unreadCount: number;
+    user_id: number;
+    room_id: number;
+    timestamp: string;
 }
 
 // Chat Room Management
@@ -97,7 +108,7 @@ export const createDirectChat = async (recipientId: number) => {
 export const getUserChatRooms = async (params?: {
     page?: number;
     limit?: number;
-    type?: ChatRoomType;
+    type?: ChatRoomType | string;
     search?: string;
 }) => {
     try {
@@ -113,30 +124,22 @@ export const getUserChatRooms = async (params?: {
 
         const url = `/api/chat/rooms${queryParams.toString() ? `?${queryParams.toString()}` : ''}`;
 
-        const response = await fetchData<ApiResponse<{
-            chatRooms: ChatRoom[];
-            total: number;
-            page: number;
-            totalPages: number;
-        }>>(url);
-
-        if (response && response.success && response.data) {
-            return response;
-        } else {
-            console.warn('Unexpected API response format in getUserChatRooms:', response);
-            return {
-                success: true,
-                data: {
-                    chatRooms: [],
-                    total: 0,
-                    page: 1,
-                    totalPages: 0
-                }
-            };
-        }
+        const response = await fetchData<ApiResponse<ChatRoom[]>>(url);
+        return response;
     } catch (error: any) {
         console.error('Error in getUserChatRooms:', error);
         throw error.response?.data?.error || 'Failed to fetch chat rooms';
+    }
+};
+
+// Mark messages as read in a chat room
+export const markMessagesAsRead = async (roomId: number) => {
+    try {
+        const response = await postData<ApiResponse<ReadStatusResponse>>(`/api/chat/rooms/${roomId}/read`, {});
+        return response;
+    } catch (error: any) {
+        console.error('Error in markMessagesAsRead:', error);
+        throw error.response?.data?.error || 'Failed to mark messages as read';
     }
 };
 
@@ -225,7 +228,7 @@ export const getChatMessages = async (roomId: number, params?: {
 
 export const sendMessage = async (roomId: number, messageData: {
     content: string;
-    message_type?: MessageType;
+    message_type?: MessageType | string;
     reply_to_id?: number;
     media_url?: string;
 }) => {
@@ -252,6 +255,16 @@ export const deleteMessage = async (messageId: number) => {
     } catch (error: any) {
         console.error('Error in deleteMessage:', error);
         throw error.response?.data?.error || 'Failed to delete message';
+    }
+};
+
+// Typing status management
+export const updateTypingStatus = async (roomId: number, isTyping: boolean) => {
+    try {
+        return await postData<ApiResponse<void>>(`/api/chat/rooms/${roomId}/typing`, { isTyping });
+    } catch (error: any) {
+        console.error('Error in updateTypingStatus:', error);
+        throw error.response?.data?.error || 'Failed to update typing status';
     }
 };
 
@@ -297,30 +310,53 @@ export const getPotentialChatRecipients = async (search?: string) => {
     }
 };
 
-// Custom hook for chat rooms (similar to useCategories in blog service)
+// Custom hook for chat rooms with refetch capability
 export const useChatRooms = () => {
     const [chatRooms, setChatRooms] = React.useState<ChatRoom[]>([]);
     const [loading, setLoading] = React.useState<boolean>(true);
     const [error, setError] = React.useState<string | null>(null);
 
-    React.useEffect(() => {
-        const fetchChatRooms = async () => {
-            try {
-                setLoading(true);
-                const response = await getUserChatRooms();
-                if (response.success && response.data) {
-                    setChatRooms(response.data.chatRooms);
-                }
-            } catch (err: any) {
-                setError(err.message || 'Failed to fetch chat rooms');
-                console.error('Error fetching chat rooms:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
+    const fetchChatRooms = React.useCallback(async () => {
+        try {
+            setLoading(true);
+            setError(null);
 
-        fetchChatRooms();
+            const response = await getUserChatRooms();
+
+            if (response && response.success && response.data) {
+                setChatRooms(response.data || []);
+            } else {
+                setChatRooms([]);
+                setError('Invalid response format from server');
+            }
+        } catch (err: any) {
+            setError(err.message || 'Failed to fetch chat rooms');
+            console.error('Error fetching chat rooms:', err);
+            setChatRooms([]);
+        } finally {
+            setLoading(false);
+        }
     }, []);
 
-    return { chatRooms, loading, error };
+    React.useEffect(() => {
+        fetchChatRooms();
+    }, [fetchChatRooms]);
+
+    return {
+        chatRooms,
+        loading,
+        error,
+        refetch: fetchChatRooms
+    };
+};
+
+// Helper function to determine if a user is recently active
+export const isRecentlyActive = (lastActive?: string): boolean => {
+    if (!lastActive) return false;
+
+    const lastActiveTime = new Date(lastActive).getTime();
+    const now = new Date().getTime();
+    const fifteenMinutes = 15 * 60 * 1000;
+
+    return now - lastActiveTime < fifteenMinutes;
 };

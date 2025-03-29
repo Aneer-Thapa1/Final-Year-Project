@@ -14,12 +14,13 @@ import {
     Dimensions,
     StyleSheet
 } from 'react-native';
-import { Send, ArrowLeft, Sparkles, Brain, AlertCircle, Mic } from 'lucide-react-native';
+import { Send, ArrowLeft, Sparkles, Brain, AlertCircle, Mic, Trash2 } from 'lucide-react-native';
 import { router } from "expo-router";
 import { MotiView } from 'moti';
 import { useColorScheme } from 'nativewind';
 import chatbotService, { ChatMessage } from '../../services/chatbotService';
 import NetInfo from '@react-native-community/netinfo';
+import * as Haptics from 'expo-haptics';
 
 // Suggestion categories with detailed habit information
 const HABIT_CATEGORIES = [
@@ -78,6 +79,7 @@ const MindfulChatbot = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isNetworkAvailable, setIsNetworkAvailable] = useState(true);
     const [retryCount, setRetryCount] = useState(0);
+    const [showClearConfirmation, setShowClearConfirmation] = useState(false);
     const flatListRef = useRef<FlatList>(null);
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const inputRef = useRef<TextInput>(null);
@@ -133,8 +135,10 @@ const MindfulChatbot = () => {
 
     // Placeholder for future voice functionality
     const handleVoicePress = () => {
+        // Provide haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
         // This is a placeholder for future voice functionality
-        // Will be implemented in a future update
         Alert.alert(
             "Coming Soon",
             "Voice input will be available in a future update.",
@@ -144,6 +148,9 @@ const MindfulChatbot = () => {
 
     // Handle category selection
     const handleCategorySelect = (category: any) => {
+        // Provide haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
         setSelectedCategory(category);
 
         const newMessage: ChatMessage = {
@@ -156,10 +163,16 @@ const MindfulChatbot = () => {
         };
 
         setMessages(prev => [...prev, newMessage]);
+
+        // Scroll to bottom
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
     };
 
     // Handle habit selection
     const handleHabitSelection = async (habit: any) => {
+        // Provide haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
         if (!isNetworkAvailable) {
             showNetworkError();
             return;
@@ -174,6 +187,9 @@ const MindfulChatbot = () => {
         };
 
         setMessages(prev => [...prev, userMessage]);
+
+        // Scroll to bottom immediately after adding user message
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
 
         // Get response from AI
         await getBotResponse(habit.text);
@@ -228,6 +244,9 @@ const MindfulChatbot = () => {
     const handleSendMessage = async () => {
         if (!inputText.trim()) return;
 
+        // Provide haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
         if (!isNetworkAvailable) {
             showNetworkError();
             return;
@@ -248,16 +267,43 @@ const MindfulChatbot = () => {
         const messageText = inputText;
         setInputText('');
 
+        // Scroll to bottom immediately after adding user message
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+
         // Get response from AI
         await getBotResponse(messageText);
     };
 
     // Network error handler
     const showNetworkError = () => {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+
         Alert.alert(
             "Connection Error",
             "Please check your internet connection and try again.",
             [{ text: "OK" }]
+        );
+    };
+
+    // Show clear chat confirmation
+    const confirmClearChat = () => {
+        // Provide haptic feedback
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        Alert.alert(
+            "Clear Conversation",
+            "Are you sure you want to clear this conversation?",
+            [
+                {
+                    text: "Cancel",
+                    style: "cancel"
+                },
+                {
+                    text: "Clear",
+                    style: "destructive",
+                    onPress: handleClearChat
+                }
+            ]
         );
     };
 
@@ -269,6 +315,9 @@ const MindfulChatbot = () => {
             const initialMessages = getInitialMessages();
             setMessages(initialMessages);
             await chatbotService.saveChatHistory(initialMessages);
+
+            // Provide success haptic feedback
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         } catch (error) {
             console.error('Error clearing chat:', error);
             Alert.alert(
@@ -276,6 +325,9 @@ const MindfulChatbot = () => {
                 "Failed to clear chat history. Please try again.",
                 [{ text: "OK" }]
             );
+
+            // Provide error haptic feedback
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         } finally {
             setIsLoading(false);
         }
@@ -296,10 +348,10 @@ const MindfulChatbot = () => {
             from={{ opacity: 0, translateY: 20 }}
             animate={{ opacity: 1, translateY: 0 }}
             transition={{ delay: index * 50, duration: 300 }}
-            className={`max-w-[85%] my-1 ${item.role === 'bot' ? 'self-start' : 'self-end'}`}
+            className={`max-w-[85%] my-2 ${item.role === 'bot' ? 'self-start' : 'self-end'}`}
         >
             {item.role === 'bot' && (
-                <View className="flex-row items-end mb-1">
+                <View className="flex-row items-end mb-1 ml-2">
                     <View className={`w-8 h-8 rounded-full mr-2 items-center justify-center ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
                         <Brain size={18} color={isDark ? '#C4B5FD' : '#7C3AED'} />
                     </View>
@@ -341,8 +393,12 @@ const MindfulChatbot = () => {
                     {formatTime(item.timestamp)}
                 </Text>
 
+                {/* Suggestions Section with improved spacing */}
                 {item.showSuggestions && (
-                    <View className="mt-4 space-y-2">
+                    <View className="mt-5 space-y-3">
+                        <Text className={`font-montserrat-semibold mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                            Suggested Categories:
+                        </Text>
                         {HABIT_CATEGORIES.map(category => (
                             <TouchableOpacity
                                 key={category.id}
@@ -369,13 +425,17 @@ const MindfulChatbot = () => {
                     </View>
                 )}
 
+                {/* Habits Section with improved spacing */}
                 {item.showHabits && item.category && (
-                    <View className="mt-4 space-y-2">
+                    <View className="mt-5 space-y-3">
+                        <Text className={`font-montserrat-semibold mb-1 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                            Suggested Habits:
+                        </Text>
                         {item.category.habits.map((habit: any) => (
                             <TouchableOpacity
                                 key={habit.id}
                                 className={`
-                                    p-3 rounded-xl
+                                    p-4 rounded-xl
                                     ${isDark ? 'bg-secondary-900/20' : 'bg-secondary-50'}
                                 `}
                                 onPress={() => handleHabitSelection(habit)}
@@ -418,18 +478,17 @@ const MindfulChatbot = () => {
             style={{ height: SCREEN_HEIGHT }}
         >
             <Animated.View style={{ opacity: fadeAnim }}>
-                {/* Updated header with better alignment */}
-                <View className={`px-4 py-4 flex-row items-center ${isDark ? 'bg-theme-card-dark' : 'bg-white'} shadow-sm`}>
+                {/* Header with improved clear button */}
+                <View className={`px-4 py-4 flex-row items-center justify-between ${isDark ? 'bg-theme-card-dark' : 'bg-white'} shadow-sm`}>
                     <TouchableOpacity
                         onPress={() => router.back()}
-                        className="p-2"
+                        className="p-2 mr-2"
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
                         <ArrowLeft size={24} color={isDark ? '#E2E8F0' : '#374151'} />
                     </TouchableOpacity>
 
-                    {/* Left-aligned title instead of center */}
-                    <View className="flex-row items-center">
+                    <View className="flex-row items-center flex-1">
                         <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
                             <Brain size={24} color={isDark ? '#C4B5FD' : '#7C3AED'} />
                         </View>
@@ -443,47 +502,52 @@ const MindfulChatbot = () => {
                         </View>
                     </View>
 
-                    {/* Push clear button to the right */}
-                    <View style={styles.flexSpacer} />
-
+                    {/* Enhanced clear button */}
                     <TouchableOpacity
-                        onPress={handleClearChat}
-                        className={`p-2 rounded-full ${isDark ? 'bg-gray-800' : 'bg-gray-100'}`}
+                        onPress={confirmClearChat}
+                        className={`p-2 rounded-full ${isDark ? 'bg-gray-800/80' : 'bg-gray-100'} flex-row items-center`}
                         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                        <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>Clear</Text>
+                        <Trash2 size={16} color={isDark ? '#E2E8F0' : '#64748B'} />
+                        <Text className={`text-xs font-montserrat ml-1 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                            Clear
+                        </Text>
                     </TouchableOpacity>
                 </View>
 
+                {/* Network status indicator */}
                 {!isNetworkAvailable && (
-                    <View className={`px-4 py-2 bg-red-500 flex-row items-center justify-center`}>
-                        <AlertCircle size={16} color="white" />
+                    <View className={`px-4 py-3 bg-red-500 flex-row items-center justify-center`}>
+                        <AlertCircle size={18} color="white" />
                         <Text className="text-white font-montserrat-medium ml-2">No internet connection</Text>
                     </View>
                 )}
             </Animated.View>
 
+            {/* Messages list with improved spacing */}
             <FlatList
                 ref={flatListRef}
                 data={messages}
                 renderItem={renderMessage}
                 keyExtractor={item => item.id}
                 className="flex-1 px-4"
-                contentContainerStyle={{ paddingTop: 16, paddingBottom: 8 }}
+                contentContainerStyle={{ paddingTop: 16, paddingBottom: 16 }}
                 onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
                 onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
                 showsVerticalScrollIndicator={false}
                 initialNumToRender={10}
                 maxToRenderPerBatch={10}
                 windowSize={10}
+                ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
             />
 
+            {/* Typing indicator with improved styling */}
             {isTyping && (
-                <View className="px-4 pb-2">
+                <View className="px-4 pb-3">
                     <MotiView
                         from={{ opacity: 0, translateY: 10 }}
                         animate={{ opacity: 1, translateY: 0 }}
-                        className={`self-start rounded-2xl p-3 ${isDark ? 'bg-theme-card-dark' : 'bg-white'}`}
+                        className={`self-start rounded-2xl p-3 max-w-[60%] ${isDark ? 'bg-theme-card-dark' : 'bg-white'}`}
                     >
                         <View className="flex-row items-center">
                             <ActivityIndicator size="small" color={isDark ? '#C4B5FD' : '#7C3AED'} />
@@ -495,17 +559,17 @@ const MindfulChatbot = () => {
                 </View>
             )}
 
-            {/* Fixed input area with reduced bottom margin */}
+            {/* Enhanced input area */}
             <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
                 keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
                 style={styles.keyboardAvoid}
             >
-                <View className={`flex-row items-center px-4 py-2 ${isDark ? 'bg-theme-card-dark' : 'bg-white'} border-t ${isDark ? 'border-gray-800' : 'border-gray-100'}`}>
+                <View className={`flex-row items-center px-4 py-3 ${isDark ? 'bg-theme-card-dark' : 'bg-white'} border-t ${isDark ? 'border-gray-800' : 'border-gray-100'}`}>
                     <TextInput
                         ref={inputRef}
                         className={`
-                            flex-1 rounded-xl px-4 py-2 text-base font-montserrat min-h-[40px] max-h-[100px]
+                            flex-1 rounded-xl px-4 py-3 text-base font-montserrat min-h-[45px] max-h-[100px]
                             ${isDark ? 'bg-theme-surface-dark text-white' : 'bg-gray-50 text-gray-900'}
                         `}
                         placeholder="Type your message..."
@@ -518,6 +582,7 @@ const MindfulChatbot = () => {
                         onSubmitEditing={inputText.trim() ? handleSendMessage : null}
                     />
 
+                    {/* Voice button */}
                     <TouchableOpacity
                         className={`
                             p-3 rounded-xl shadow-sm mx-2
@@ -530,6 +595,7 @@ const MindfulChatbot = () => {
                         <Mic size={20} color={isDark ? '#94A3B8' : '#64748B'} />
                     </TouchableOpacity>
 
+                    {/* Send button */}
                     <TouchableOpacity
                         className={`
                             p-3 rounded-xl shadow-sm
@@ -556,14 +622,14 @@ const MindfulChatbot = () => {
     );
 };
 
-// Additional styles
+// Additional styles with improved bottom spacing
 const styles = StyleSheet.create({
     flexSpacer: {
         flex: 1
     },
     keyboardAvoid: {
         marginBottom: 0,
-        paddingBottom: Platform.OS === 'ios' ? 2 : 0,
+        paddingBottom: Platform.OS === 'ios' ? 0 : 0,
     }
 });
 

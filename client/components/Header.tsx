@@ -2,11 +2,10 @@ import {Animated, Image, Text, TouchableOpacity, useColorScheme, View, Platform}
 import React, {useEffect, useRef} from 'react'
 import {router} from "expo-router"
 import {LinearGradient} from 'expo-linear-gradient'
-import {Bell, Brain} from 'lucide-react-native'
+import {Bell, MessageCircle} from 'lucide-react-native'
 import images from "../constants/images"
 import {useSelector} from 'react-redux'
 import {SafeAreaView} from 'react-native-safe-area-context'
-import Svg, { Path, Circle } from 'react-native-svg'
 
 const Header = React.memo(() => {
     const colorScheme = useColorScheme()
@@ -17,7 +16,7 @@ const Header = React.memo(() => {
     const userDetails = useSelector((state) => state.user)
     const quoteOpacity = useRef(new Animated.Value(0)).current
     const quoteSlide = useRef(new Animated.Value(10)).current
-    const robotPulse = useRef(new Animated.Value(0)).current
+    const chatPulse = useRef(new Animated.Value(0)).current
 
     useEffect(() => {
         // Initial animations
@@ -43,15 +42,15 @@ const Header = React.memo(() => {
             ])
         ]).start()
 
-        // Robot pulse animation
+        // Chat pulse animation
         Animated.loop(
             Animated.sequence([
-                Animated.timing(robotPulse, {
+                Animated.timing(chatPulse, {
                     toValue: 1,
                     duration: 1500,
                     useNativeDriver: true,
                 }),
-                Animated.timing(robotPulse, {
+                Animated.timing(chatPulse, {
                     toValue: 0,
                     duration: 1500,
                     useNativeDriver: true,
@@ -94,7 +93,7 @@ const Header = React.memo(() => {
         ? images.maleProfile
         : images.blogImage
 
-    const pulseOpacity = robotPulse.interpolate({
+    const pulseOpacity = chatPulse.interpolate({
         inputRange: [0, 1],
         outputRange: [0.6, 1]
     })
@@ -142,11 +141,11 @@ const Header = React.memo(() => {
                                 </TouchableOpacity>
 
                                 <TouchableOpacity
-                                    onPress={() => router.push('/chatbot')}
-                                    className={`p-2 ml-2 rounded-xl ${isDark ? 'bg-secondary-900/10' : 'bg-secondary-300/10'} ${Platform.OS === 'android' ? 'shadow' : ''}`}
+                                    onPress={() => router.push('/chat')}
+                                    className={`p-2 ml-2 rounded-xl ${Platform.OS === 'android' ? 'shadow' : ''}`}
                                 >
-                                    <View className={`w-10 h-10 rounded-full items-center justify-center mr-3 ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
-                                        <Brain size={18} color={isDark ? '#C4B5FD' : '#7C3AED'} />
+                                    <View className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>
+                                        <MessageCircle size={18} color={isDark ? '#C4B5FD' : '#7C3AED'} />
                                     </View>
                                 </TouchableOpacity>
                             </View>

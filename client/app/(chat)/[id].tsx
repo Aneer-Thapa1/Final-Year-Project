@@ -1,450 +1,510 @@
-// app/(chat)/[id].tsx
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
-    FlatList,
+    ScrollView,
     TextInput,
     TouchableOpacity,
+    Image,
     KeyboardAvoidingView,
     Platform,
     ActivityIndicator,
-    Keyboard,
-    Animated,
+    FlatList,
+    Alert  // Added missing import
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useDispatch, useSelector } from 'react-redux';
-import { AppDispatch, RootState } from '../../store/store';
-import { fetchChatMessages, sendMessage, setActiveRoom, markMessagesAsRead } from '../../store/slices/chatSlice';
-import { MotiView } from 'moti';
-import { Send, ArrowLeft, MoreVertical, Image as ImageIcon, Mic, PlusCircle, Camera, Smile } from 'lucide-react-native';
-import { debounce } from 'lodash';
+import { useLocalSearchParams, router } from 'expo-router';
 import { useColorScheme } from 'nativewind';
-import MessageBubble from '../../components/MessageBubble';
+import {
+    ArrowLeft,
+    Send,
+    Info,
+    MoreVertical,
+    Phone,
+    Video
+} from 'lucide-react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { MotiView } from 'moti';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
-import socketService from '../../store/slices/socketService';
 
-export default function ChatRoomScreen() {
-    const params = useLocalSearchParams();
-    const roomId = parseInt(params.id as string);
-    const roomName = params.name as string;
-    const isDirect = params.isDirect === 'true';
-    const router = useRouter();
-    const dispatch = useDispatch<AppDispatch>();
-    const { messages, typingUsers, loading, sending } = useSelector((state: RootState) => state.chat);
-    const { user } = useSelector((state: RootState) => state.user);
+// Import services
+import {
+    getChatRoomDetails,
+    getChatMessages,
+    sendMessage,
+    markMessagesAsRead,
+    updateTypingStatus
+} from '../../services/chatServices';
 
-    // Get current user ID - this is crucial for message alignment
-    const currentUserId = user?.user?.user_id;
+// Import store/socket related functionality if needed
+import { useSelector } from 'react-redux';
 
-    // Debug log to verify currentUserId
-    useEffect(() => {
-        console.log('Current user ID:', currentUserId);
-    }, [currentUserId]);
-
-    const [message, setMessage] = useState('');
-    const [isKeyboardVisible, setKeyboardVisible] = useState(false);
-    const [showAttachmentOptions, setShowAttachmentOptions] = useState(false);
-    const [socketConnected, setSocketConnected] = useState(false);
-    const flatListRef = useRef<FlatList>(null);
-    const insets = useSafeAreaInsets();
+export default function ChatDetailScreen() {
     const { colorScheme } = useColorScheme();
     const isDark = colorScheme === 'dark';
-    const bottomSheetAnim = useRef(new Animated.Value(0)).current;
+    const insets = useSafeAreaInsets();
 
-    const roomMessages = messages[roomId] || [];
-    const roomTypingUsers = typingUsers[roomId] || [];
+    // Get room ID and other params from the URL
+    const params = useLocalSearchParams();
+    const roomId = parseInt(params.id || "0");
+    const roomName = params.name || 'Chat';
+    const isDirect = params.isDirect === 'true';
 
-    // Initialize and connect socket
+    // State management
+    const [messages, setMessages] = useState([]);
+    const [inputText, setInputText] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [roomDetails, setRoomDetails] = useState(null);
+    const [error, setError] = useState(null);
+    const [isTyping, setIsTyping] = useState(false);
+    const [typingUsers, setTypingUsers] = useState([]);
+    const [page, setPage] = useState(1);
+    const [hasMore, setHasMore] = useState(true);
+    const [loadingMore, setLoadingMore] = useState(false);
+
+    // Store the current user ID in component state as a backup
+    const [currentUserId, setCurrentUserId] = useState(null);
+
+    // References
+    const scrollViewRef = useRef(null);
+    const typingTimeoutRef = useRef(null);
+    const flatListRef = useRef(null);
+
+    // Get socket connection status and user from Redux store
+    const socketConnected = useSelector(state => state.chat?.socketConnected) || false;
+    const currentUser = useSelector(state => state.user?.user);
+
+    // Load initial data and set current user ID
     useEffect(() => {
-        const initSocket = async () => {
-            const socket = await socketService.initializeSocket();
-            setSocketConnected(!!socket?.connected);
+        // If currentUser is available from Redux, store the ID in component state
+        if (currentUser && currentUser.user.user_id) {
+            setCurrentUserId(currentUser.user.user_id);
+        } else {
+            // Fallback user ID if not available from Redux
+            setCurrentUserId(1); // Default user ID or fetch from another source
+        }
 
-            if (socket?.connected) {
-                // Join the chat room via socket
-                socketService.joinRoom(roomId);
-                console.log('Joining room:', roomId);
-            }
-        };
+        fetchRoomDetails();
+        fetchMessages();
 
-        initSocket();
+        // Mark messages as read when the chat is opened
+        markAsRead();
 
-        // Check socket status periodically
-        const socketCheckInterval = setInterval(() => {
-            const socket = socketService.getSocket();
-            setSocketConnected(!!socket?.connected);
-        }, 5000);
-
-        // Clean up on unmount
         return () => {
-            clearInterval(socketCheckInterval);
-            socketService.leaveRoom(roomId);
+            clearTypingTimeout();
         };
-    }, [roomId]);
+    }, [roomId, currentUser]);
 
-    // Animation for attachment options
-    const toggleAttachmentOptions = () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setShowAttachmentOptions(!showAttachmentOptions);
-        Animated.timing(bottomSheetAnim, {
-            toValue: showAttachmentOptions ? 0 : 1,
-            duration: 200,
-            useNativeDriver: true
-        }).start();
+    // Mark messages as read
+    const markAsRead = async () => {
+        try {
+            await markMessagesAsRead(roomId);
+        } catch (error) {
+            console.error('Error marking messages as read:', error);
+        }
     };
 
-    const attachmentOptionsTranslateY = bottomSheetAnim.interpolate({
-        inputRange: [0, 1],
-        outputRange: [100, 0]
-    });
+    // Fetch room details
+    const fetchRoomDetails = async () => {
+        try {
+            const response = await getChatRoomDetails(roomId);
+            if (response && response.success && response.data) {
+                setRoomDetails(response.data);
+            }
+        } catch (error) {
+            console.error('Error fetching room details:', error);
+            setError('Failed to load chat details');
+        }
+    };
 
-    // Monitor keyboard visibility
-    useEffect(() => {
-        const keyboardDidShowListener = Keyboard.addListener(
-            'keyboardDidShow',
-            () => {
-                setKeyboardVisible(true);
-                setShowAttachmentOptions(false);
-                if (roomMessages.length > 0) {
-                    setTimeout(() => {
-                        flatListRef.current?.scrollToEnd({ animated: true });
-                    }, 100);
+    // Fetch messages
+    const fetchMessages = async (nextPage = 1) => {
+        try {
+            setLoading(nextPage === 1);
+            if (nextPage > 1) setLoadingMore(true);
+
+            const response = await getChatMessages(roomId, { page: nextPage, limit: 20 });
+
+            if (response && response.success && response.data) {
+                if (nextPage === 1) {
+                    setMessages(response.data);
+                } else {
+                    setMessages(prev => [...prev, ...response.data]);
+                }
+
+                setHasMore(response.data.hasMore);
+                setPage(nextPage);
+            }
+        } catch (error) {
+            console.error('Error fetching messages:', error);
+            setError('Failed to load messages');
+        } finally {
+            setLoading(false);
+            setLoadingMore(false);
+        }
+    };
+
+    // Load more messages when scrolling up
+    const handleLoadMore = () => {
+        if (hasMore && !loadingMore) {
+            fetchMessages(page + 1);
+        }
+    };
+
+    // Send a message
+    const handleSendMessage = async () => {
+        if (!inputText.trim()) return;
+
+        try {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+            // Clear input and typing status immediately for better UX
+            const messageText = inputText;
+            setInputText('');
+            clearTypingTimeout();
+
+            // Send typing stopped notification
+            try {
+                await updateTypingStatus(roomId, false);
+            } catch (typingError) {
+                console.error('Error updating typing status:', typingError);
+            }
+
+            // Send the actual message
+            const response = await sendMessage(roomId, { content: messageText });
+
+            if (response && response.success && response.data) {
+                // Add the new message to the list
+                // Note: You might not need this if you're using sockets and receiving the message that way
+                setMessages(prev => [response.data, ...prev]);
+
+                // Scroll to bottom
+                if (flatListRef.current) {
+                    flatListRef.current.scrollToOffset({ offset: 0, animated: true });
                 }
             }
+        } catch (error) {
+            console.error('Error sending message:', error);
+            Alert.alert('Error', 'Failed to send message');
+            // Restore the input text in case of error
+            setInputText(messageText);
+        }
+    };
+
+    // Handle typing status
+    const handleInputChange = (text) => {
+        setInputText(text);
+
+        // Send typing status
+        if (!isTyping) {
+            setIsTyping(true);
+            updateTypingStatus(roomId, true).catch(console.error);
+        }
+
+        // Clear previous timeout
+        clearTypingTimeout();
+
+        // Set new timeout
+        typingTimeoutRef.current = setTimeout(() => {
+            setIsTyping(false);
+            updateTypingStatus(roomId, false).catch(console.error);
+        }, 3000);
+    };
+
+    const clearTypingTimeout = () => {
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = null;
+        }
+    };
+
+    // Get other user details for direct messages
+    const getOtherUser = () => {
+        if (!roomDetails || !isDirect) return null;
+
+        const otherParticipant = roomDetails.participants?.find(
+            p => p.user_id !== currentUserId
         );
-        const keyboardDidHideListener = Keyboard.addListener(
-            'keyboardDidHide',
-            () => {
-                setKeyboardVisible(false);
-            }
-        );
 
-        return () => {
-            keyboardDidHideListener.remove();
-            keyboardDidShowListener.remove();
-        };
-    }, [roomMessages.length]);
-
-    useEffect(() => {
-        // Set active room, fetch messages, and mark as read when screen loads
-        dispatch(setActiveRoom(roomId));
-        dispatch(fetchChatMessages(roomId));
-        dispatch(markMessagesAsRead(roomId));
-
-        // Clean up when screen unloads
-        return () => {
-            dispatch(setActiveRoom(null));
-        };
-    }, [dispatch, roomId]);
-
-    // Scroll to bottom when new messages arrive
-    useEffect(() => {
-        if (roomMessages.length > 0 && flatListRef.current) {
-            setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: false });
-            }, 100);
-        }
-    }, [roomMessages]);
-
-    // Handle typing indicator with debounce
-    const debouncedStopTyping = useCallback(
-        debounce(() => {
-            socketService.emitStopTyping(roomId);
-        }, 2000),
-        [roomId]
-    );
-
-    const handleMessageChange = (text: string) => {
-        setMessage(text);
-        if (text.trim()) {
-            socketService.emitTyping(roomId);
-            debouncedStopTyping();
-        }
+        return otherParticipant?.user;
     };
 
-    const handleSendMessage = () => {
-        if (!message.trim()) return;
+    const otherUser = getOtherUser();
 
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        dispatch(sendMessage({
-            roomId,
-            content: message.trim(),
-        }));
+    // Helper function to check if user was active in the last 15 minutes
+    const isRecentlyActive = (timestamp) => {
+        if (!timestamp) return false;
 
-        setMessage('');
-        debouncedStopTyping.cancel();
-        socketService.emitStopTyping(roomId);
+        const lastActive = new Date(timestamp);
+        const now = new Date();
+        const diffMs = now.getTime() - lastActive.getTime();
+        const diffMins = Math.floor(diffMs / (1000 * 60));
 
-        // Make sure we scroll to the bottom
-        setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
+        return diffMins < 15;
     };
 
-    const handleScrollToEnd = () => {
-        if (roomMessages.length > 0) {
-            flatListRef.current?.scrollToEnd({ animated: true });
-        }
-    };
+    const isOtherUserOnline = otherUser && (otherUser.isOnline || isRecentlyActive(otherUser.lastActive));
 
-    const handleBackPress = () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push('/profile');
-    };
+    // Render functions
+    const renderMessage = ({ item }) => {
+        // Use the local state currentUserId which is more reliable
+        const isMyMessage = item.sender?.user_id === currentUserId;
 
-    // Render typing indicators
-    const renderTypingIndicator = () => {
-        if (roomTypingUsers.length === 0) return null;
-
-        const names = roomTypingUsers.map(user => user.userName);
-        let typingText = '';
-
-        if (names.length === 1) {
-            typingText = `${names[0]} is typing...`;
-        } else if (names.length === 2) {
-            typingText = `${names[0]} and ${names[1]} are typing...`;
-        } else {
-            typingText = `${names.length} people are typing...`;
+        // Safety check - if sender is missing, default to false
+        if (!item.sender) {
+            console.warn('Message is missing sender information', item);
+            return null;
         }
 
         return (
-            <View className="px-4 py-1">
-                <Text className={`text-xs italic ${isDark ? 'text-gray-400' : 'text-gray-500'} font-montserrat`}>
-                    {typingText}
-                </Text>
-            </View>
-        );
-    };
-
-    // Custom timestamp display for the chat
-    const renderDateSeparator = (date: string) => {
-        return (
-            <View className="items-center my-3">
-                <View className={`px-3 py-1 rounded-full ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
-                    <Text className={`text-xs font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                        {date}
+            <MotiView
+                from={{ opacity: 0, translateY: 10 }}
+                animate={{ opacity: 1, translateY: 0 }}
+                transition={{ type: 'timing', duration: 300 }}
+                className={`mx-4 my-1 max-w-[80%] ${isMyMessage ? 'self-end' : 'self-start'}`}
+            >
+                <View className={`rounded-2xl p-3 ${
+                    isMyMessage
+                        ? isDark ? 'bg-primary-600' : 'bg-primary-500'
+                        : isDark ? 'bg-gray-700' : 'bg-gray-200'
+                }`}>
+                    <Text className={`${
+                        isMyMessage
+                            ? 'text-white'
+                            : isDark ? 'text-white' : 'text-gray-800'
+                    } font-montserrat`}>
+                        {item.content}
                     </Text>
                 </View>
-            </View>
+
+                <View className={`flex-row items-center mt-1 ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
+                    <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} font-montserrat`}>
+                        {formatMessageTime(item.createdAt)}
+                    </Text>
+                </View>
+            </MotiView>
         );
     };
 
-    // Process messages to add date separators
-    const processedMessages = useMemo(() => {
-        const result = [];
-        let currentDate = '';
+    // Format message time
+    const formatMessageTime = (timestamp) => {
+        if (!timestamp) return '';
 
-        roomMessages.forEach((msg) => {
-            // Extract date from message timestamp
-            const messageDate = new Date(msg.createdAt).toLocaleDateString();
+        const messageTime = new Date(timestamp);
+        const now = new Date();
 
-            // Add date separator if this is a new date
-            if (messageDate !== currentDate) {
-                result.push({
-                    type: 'date',
-                    content: messageDate,
-                    id: `date-${messageDate}`
-                });
-                currentDate = messageDate;
-            }
-
-            // Add the actual message
-            result.push({
-                type: 'message',
-                content: msg,
-                id: msg.message_id.toString()
-            });
-        });
-
-        return result;
-    }, [roomMessages]);
-
-    // Function to check if a message is from the current user
-    const isOwnMessage = (senderId) => {
-        if (!currentUserId)
-        {
-            console.log(currentUserId)
-            return false;
+        // Today, show time only
+        if (messageTime.toDateString() === now.toDateString()) {
+            return messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
 
-        // Convert both to strings for comparison to handle both number and string types
-        return String(senderId) === String(currentUserId);
+        // Yesterday
+        const yesterday = new Date(now);
+        yesterday.setDate(now.getDate() - 1);
+        if (messageTime.toDateString() === yesterday.toDateString()) {
+            return `Yesterday ${messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        }
+
+        // Within a week, show day name
+        const weekAgo = new Date(now);
+        weekAgo.setDate(now.getDate() - 7);
+        if (messageTime > weekAgo) {
+            return `${messageTime.toLocaleDateString([], { weekday: 'short' })} ${messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        }
+
+        // Otherwise show date
+        return `${messageTime.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
     };
 
     return (
-        <View className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-100'}`}>
+        <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
             {/* Header */}
-            <View className={`px-4 py-4 flex-row items-center justify-between ${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} shadow-sm`}
-                  style={{ paddingTop: insets.top > 0 ? insets.top : 16 }}>
+            <View className={`px-4 py-2 flex-row items-center justify-between ${isDark ? 'bg-gray-800' : 'bg-white'} border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
                 <View className="flex-row items-center">
                     <TouchableOpacity
-                        onPress={handleBackPress}
-                        className={`mr-3 p-2 rounded-full ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}
+                        onPress={() => router.back()}
+                        className="p-2 mr-2"
                     >
-                        <ArrowLeft size={20} color={isDark ? "#E2E8F0" : "#1F2937"} />
+                        <ArrowLeft size={24} color={isDark ? "#E5E7EB" : "#374151"} />
                     </TouchableOpacity>
 
-                    <View>
-                        <Text className={`text-lg font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            {roomName}
-                        </Text>
-                        {isDirect && (
-                            <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                {socketConnected ? 'Connected' : 'Reconnecting...'}
-                            </Text>
+                    <View className="flex-row items-center">
+                        {/* Avatar or Group Icon */}
+                        {roomDetails?.avatar ? (
+                            <Image
+                                source={{ uri: roomDetails.avatar }}
+                                className="h-10 w-10 rounded-full"
+                            />
+                        ) : isDirect && otherUser?.avatar ? (
+                            <Image
+                                source={{ uri: otherUser.avatar }}
+                                className="h-10 w-10 rounded-full"
+                            />
+                        ) : (
+                            <View className={`h-10 w-10 rounded-full items-center justify-center ${
+                                isDirect
+                                    ? 'bg-primary-500'
+                                    : 'bg-amber-500'
+                            }`}>
+                                <Text className="text-white text-lg font-montserrat-bold">
+                                    {roomName ? roomName[0].toUpperCase() : isDirect ? 'C' : 'G'}
+                                </Text>
+                            </View>
                         )}
+
+                        <View className="ml-3">
+                            <Text className={`font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                {roomName || (isDirect ? otherUser?.user_name : 'Group Chat')}
+                            </Text>
+
+                            {/* Online Status Indicator for Direct Messages */}
+                            {isDirect && (
+                                <View className="flex-row items-center">
+                                    <View className={`h-2 w-2 rounded-full mr-1.5 ${
+                                        socketConnected ? 'bg-green-500' : 'bg-gray-400'
+                                    }`} />
+                                    <Text className={`text-xs font-montserrat ${
+                                        socketConnected
+                                            ? isDark ? 'text-green-400' : 'text-green-600'
+                                            : isDark ? 'text-gray-400' : 'text-gray-500'
+                                    }`}>
+                                        {socketConnected ? 'Online' : 'Offline'}
+                                    </Text>
+                                </View>
+                            )}
+                        </View>
                     </View>
                 </View>
 
-                <TouchableOpacity
-                    className={`p-2 rounded-full ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}
-                >
-                    <MoreVertical size={20} color={isDark ? "#E2E8F0" : "#1F2937"} />
-                </TouchableOpacity>
+                <View className="flex-row">
+                    {isDirect && (
+                        <>
+                            <TouchableOpacity className="p-2">
+                                <Phone size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
+                            </TouchableOpacity>
+
+                            <TouchableOpacity className="p-2">
+                                <Video size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
+                            </TouchableOpacity>
+                        </>
+                    )}
+
+                    <TouchableOpacity
+                        className="p-2"
+                        onPress={() => {
+                            // Navigate to chat info/settings
+                            router.push({
+                                pathname: isDirect
+                                    ? `/(chat)/profile/${otherUser?.user_id}`
+                                    : `/(chat)/group/${roomId}`,
+                                params: {
+                                    name: roomName || ''
+                                }
+                            });
+                        }}
+                    >
+                        <Info size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
+                    </TouchableOpacity>
+                </View>
             </View>
 
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-                className="flex-1"
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 5 : 0}
-            >
-                {/* Messages List */}
-                {loading && roomMessages.length === 0 ? (
-                    <View className="flex-1 justify-center items-center">
-                        <ActivityIndicator size="large" color="#6366F1" />
-                        <Text className={`font-montserrat mt-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
-                            Loading messages...
-                        </Text>
-                    </View>
-                ) : (
-                    <MotiView className="flex-1" from={{ opacity: 0 }} animate={{ opacity: 1 }}>
-                        <FlatList
-                            ref={flatListRef}
-                            data={processedMessages}
-                            keyExtractor={item => item.id}
-                            renderItem={({ item }) => {
-                                if (item.type === 'date') {
-                                    return renderDateSeparator(item.content);
-                                } else {
-                                    const msg = item.content;
-
-                                    // Check if the message is from the current user
-                                    const own = isOwnMessage(msg.sender_id);
-
-                                    return (
-                                        <MessageBubble
-                                            message={msg}
-                                            isOwn={own}
-                                            isDark={isDark}
-                                        />
-                                    );
-                                }
-                            }}
-                            onContentSizeChange={handleScrollToEnd}
-                            onLayout={handleScrollToEnd}
-                            contentContainerStyle={{ paddingVertical: 16, paddingHorizontal: 12 }}
-                            ListEmptyComponent={
-                                <View className="flex-1 justify-center items-center p-6">
-                                    <Text className={`text-lg font-montserrat-semibold mb-2 ${isDark ? 'text-white' : 'text-gray-800'}`}>
-                                        No messages yet
-                                    </Text>
-                                    <Text className={`text-sm text-center font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
-                                        Send a message to start the conversation
-                                    </Text>
-                                </View>
-                            }
-                        />
-                    </MotiView>
-                )}
-
-                {renderTypingIndicator()}
-
-                {/* Message Input */}
-                <View
-                    className={`${isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'} border-t`}
-                >
-                    <View className="flex-row items-center px-3 py-2">
-                        <TouchableOpacity
-                            className={`p-2 mr-1 rounded-full ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}
-                            onPress={toggleAttachmentOptions}
-                        >
-                            <PlusCircle size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
-                        </TouchableOpacity>
-
-                        <View className={`flex-1 flex-row items-center rounded-full px-3 py-1.5 mx-1 ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                            <TextInput
-                                className={`flex-1 font-montserrat py-1 ${isDark ? 'text-white' : 'text-gray-900'}`}
-                                value={message}
-                                onChangeText={handleMessageChange}
-                                placeholder="Message"
-                                placeholderTextColor={isDark ? "#9CA3AF" : "#6B7280"}
-                                multiline
-                                maxLength={1000}
-                                style={{ maxHeight: 100 }} // Limit height growth
-                            />
-
-                            <TouchableOpacity className="ml-1 mr-2">
-                                <Smile size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
-                            </TouchableOpacity>
-                        </View>
-
-                        {message.trim() ? (
-                            <TouchableOpacity
-                                className={`p-3 ml-1 rounded-full ${sending ? 'bg-primary-400' : 'bg-primary-500'}`}
-                                onPress={handleSendMessage}
-                                disabled={sending}
-                            >
-                                {sending ? (
-                                    <ActivityIndicator size="small" color="#FFF" />
-                                ) : (
-                                    <Send size={18} color="#FFF" />
-                                )}
-                            </TouchableOpacity>
-                        ) : (
-                            <TouchableOpacity className={`p-3 ml-1 rounded-full ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
-                                <Mic size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
-                            </TouchableOpacity>
-                        )}
-                    </View>
-
-                    {/* Attachment Options */}
-                    <Animated.View
-                        style={{
-                            transform: [{ translateY: attachmentOptionsTranslateY }],
-                            display: showAttachmentOptions ? 'flex' : 'none'
-                        }}
-                        className={`py-4 px-6 ${isDark ? 'bg-gray-800' : 'bg-white'} border-t ${isDark ? 'border-gray-700' : 'border-gray-200'}`}
-                    >
-                        <View className="flex-row justify-around">
-                            <TouchableOpacity className="items-center">
-                                <View className={`w-12 h-12 rounded-full ${isDark ? 'bg-blue-500/20' : 'bg-blue-100'} items-center justify-center mb-1`}>
-                                    <ImageIcon size={22} color="#3B82F6" />
-                                </View>
-                                <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Photo</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity className="items-center">
-                                <View className={`w-12 h-12 rounded-full ${isDark ? 'bg-purple-500/20' : 'bg-purple-100'} items-center justify-center mb-1`}>
-                                    <Camera size={22} color="#8B5CF6" />
-                                </View>
-                                <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Camera</Text>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity className="items-center">
-                                <View className={`w-12 h-12 rounded-full ${isDark ? 'bg-amber-500/20' : 'bg-amber-100'} items-center justify-center mb-1`}>
-                                    <Mic size={22} color="#F59E0B" />
-                                </View>
-                                <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>Audio</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </Animated.View>
-
-                    {/* Bottom padding for iPhone */}
-                    <View style={{ height: insets.bottom }} />
+            {/* Typing indicator */}
+            {typingUsers.length > 0 && (
+                <View className={`px-4 py-2 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
+                    <Text className={`italic text-xs ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
+                        {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+                    </Text>
                 </View>
+            )}
+
+            {/* Message List */}
+            {loading ? (
+                <View className="flex-1 justify-center items-center">
+                    <ActivityIndicator size="large" color={isDark ? "#93C5FD" : "#3B82F6"} />
+                    <Text className={`mt-3 ${isDark ? 'text-gray-300' : 'text-gray-600'} font-montserrat`}>
+                        Loading messages...
+                    </Text>
+                </View>
+            ) : error ? (
+                <View className="flex-1 justify-center items-center px-4">
+                    <Text className={`text-center mb-4 ${isDark ? 'text-white' : 'text-gray-900'} font-montserrat-medium`}>
+                        {error}
+                    </Text>
+                    <TouchableOpacity
+                        className="bg-primary-500 px-6 py-3 rounded-xl"
+                        onPress={() => fetchMessages()}
+                    >
+                        <Text className="text-white font-montserrat-medium">Retry</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : (
+                <FlatList
+                    ref={flatListRef}
+                    data={messages}
+                    renderItem={renderMessage}
+                    keyExtractor={(item) => item.message_id?.toString() || Math.random().toString()}
+                    contentContainerStyle={{ paddingVertical: 10 }}
+                    inverted // Display newest messages at the bottom
+                    onEndReached={handleLoadMore}
+                    onEndReachedThreshold={0.3}
+                    ListFooterComponent={loadingMore && (
+                        <View className="py-4 items-center">
+                            <ActivityIndicator size="small" color={isDark ? "#93C5FD" : "#3B82F6"} />
+                            <Text className={`mt-2 ${isDark ? 'text-gray-300' : 'text-gray-600'} text-xs font-montserrat`}>
+                                Loading more...
+                            </Text>
+                        </View>
+                    )}
+                />
+            )}
+
+            {/* Input Area */}
+            <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 70}
+            >
+                <MotiView
+                    from={{ translateY: 50, opacity: 0 }}
+                    animate={{ translateY: 0, opacity: 1 }}
+                    transition={{ type: 'timing', duration: 350 }}
+                    className={`p-2 border-t flex-row items-center ${
+                        isDark
+                            ? 'bg-gray-800 border-gray-700'
+                            : 'bg-white border-gray-200'
+                    }`}
+                >
+                    <View className={`flex-1 flex-row items-center px-3 py-2 rounded-full mr-2 ${
+                        isDark ? 'bg-gray-700' : 'bg-gray-100'
+                    }`}>
+                        <TextInput
+                            className={`flex-1 ${
+                                isDark ? 'text-white' : 'text-gray-900'
+                            } font-montserrat`}
+                            placeholder="Type a message..."
+                            placeholderTextColor={isDark ? "#9CA3AF" : "#6B7280"}
+                            value={inputText}
+                            onChangeText={handleInputChange}
+                            multiline
+                            maxLength={1000}
+                        />
+                    </View>
+
+                    <TouchableOpacity
+                        className={`w-10 h-10 rounded-full items-center justify-center ${
+                            !inputText.trim()
+                                ? isDark ? 'bg-gray-700' : 'bg-gray-200'
+                                : 'bg-primary-500'
+                        }`}
+                        onPress={handleSendMessage}
+                        disabled={!inputText.trim()}
+                    >
+                        <Send
+                            size={20}
+                            color={!inputText.trim() ? (isDark ? "#9CA3AF" : "#6B7280") : "#FFFFFF"}
+                        />
+                    </TouchableOpacity>
+                </MotiView>
             </KeyboardAvoidingView>
-        </View>
+        </SafeAreaView>
     );
 }

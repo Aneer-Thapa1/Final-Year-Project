@@ -3,8 +3,7 @@ const prisma = new PrismaClient();
 const { getIO } = require('../config/socketConfig');
 const fs = require('fs');
 
-/**
- * Create a new chat room (DM or Group)
+/** Create a new chat room (DM or Group)
  * @route POST /api/chat/rooms
  */
 const createChatRoom = async (req, res) => {
@@ -220,13 +219,13 @@ const createDirectChat = async (req, res) => {
  */
 const getUserChatRooms = async (req, res) => {
     try {
-        const userId = req.user.user_id;
+        const userId = req.user;
 
         const chatRooms = await prisma.chatRoom.findMany({
             where: {
                 participants: {
                     some: {
-                        user_id: userId
+                        user_id: parseInt(userId)
                     }
                 }
             },
@@ -244,7 +243,7 @@ const getUserChatRooms = async (req, res) => {
                     }
                 },
                 messages: {
-                    take: 1,
+                    take: 20, // Fetch more messages to properly analyze read status
                     orderBy: {
                         createdAt: 'desc'
                     },
@@ -255,6 +254,14 @@ const getUserChatRooms = async (req, res) => {
                                 user_name: true,
                                 avatar: true
                             }
+                        },
+                        readReceipts: {
+                            where: {
+                                user_id: parseInt(userId)
+                            },
+                            select: {
+                                read_at: true
+                            }
                         }
                     }
                 }
@@ -264,37 +271,83 @@ const getUserChatRooms = async (req, res) => {
             }
         });
 
-        // Count unread messages for each room
+        // Enhance chat rooms with read/unread information
         const enhancedChatRooms = await Promise.all(chatRooms.map(async (room) => {
-            const participant = room.participants.find(p => p.user_id === userId);
+            const participant = room.participants.find(p => p.user_id === parseInt(userId));
+            const lastReadTimestamp = participant?.lastRead || new Date(0);
 
-            // Count unread messages based on lastRead timestamp
-            const unreadCount = await prisma.message.count({
-                where: {
-                    room_id: room.room_id,
-                    createdAt: {
-                        gt: participant?.lastRead || new Date(0)
-                    },
-                    sender_id: {
-                        not: userId
+            // Get the most recent message
+            const lastMessage = room.messages[0] || null;
+
+            // Calculate read status
+            let unreadCount = 0;
+            let isLastMessageRead = false;
+
+            if (lastMessage) {
+                // If current user is the sender, message is considered read
+                if (lastMessage.sender_id === userId) {
+                    isLastMessageRead = true;
+                } else {
+                    // For direct messages, check lastRead timestamp
+                    if (room.type === 'DM') {
+                        isLastMessageRead = lastReadTimestamp >= new Date(lastMessage.createdAt);
+                    } else {
+                        // For group messages, check read receipts
+                        isLastMessageRead = lastMessage.readReceipts.length > 0;
                     }
                 }
-            });
+
+                // Count unread messages
+                if (room.type === 'DM') {
+                    // For DMs, count messages after lastRead time
+                    unreadCount = await prisma.message.count({
+                        where: {
+                            room_id: room.room_id,
+                            createdAt: {
+                                gt: lastReadTimestamp
+                            },
+                            sender_id: {
+                                not: parseInt(userId) // Exclude messages sent by current user
+                            }
+                        }
+                    });
+                } else {
+                    // For group chats, count messages without read receipts from this user
+                    unreadCount = await prisma.message.count({
+                        where: {
+                            room_id: room.room_id,
+                            sender_id: {
+                                not: parseInt(userId) // Exclude messages sent by current user
+                            },
+                            readReceipts: {
+                                none: {
+                                    user_id: parseInt(userId)
+                                }
+                            }
+                        }
+                    });
+                }
+            }
 
             // For DM rooms, get the other participant's name for display
             let displayName = room.name;
+            let otherParticipant = null;
+
             if (room.type === 'DM') {
-                const otherParticipant = room.participants.find(p => p.user_id !== userId);
-                if (otherParticipant?.user) {
-                    displayName = otherParticipant.user.user_name;
+                otherParticipant = room.participants.find(p => p.user_id !== userId)?.user;
+                if (otherParticipant) {
+                    displayName = otherParticipant.user_name;
                 }
             }
 
             return {
                 ...room,
                 displayName,
-                lastMessage: room.messages[0] || null,
+                lastMessage: lastMessage,
                 unreadCount,
+                isLastMessageRead,
+                lastReadAt: lastReadTimestamp,
+                otherParticipant: otherParticipant,
                 messages: undefined // Remove messages array since we've extracted lastMessage
             };
         }));
@@ -303,6 +356,7 @@ const getUserChatRooms = async (req, res) => {
             success: true,
             data: enhancedChatRooms
         });
+
     } catch (error) {
         console.error('Error fetching chat rooms:', error);
         res.status(500).json({
@@ -690,14 +744,16 @@ const deleteMessage = async (req, res) => {
 const markMessagesAsRead = async (req, res) => {
     try {
         const { roomId } = req.params;
-        const userId = parseInt(req.user);
+
+        const userId = parseInt(req.user)
+
         const currentTime = new Date();
 
         // Update participant's last read timestamp
         await prisma.chatParticipant.update({
             where: {
                 user_id_room_id: {
-                    user_id: userId,
+                    user_id: parseInt(userId),
                     room_id: parseInt(roomId)
                 }
             },
@@ -705,6 +761,8 @@ const markMessagesAsRead = async (req, res) => {
                 lastRead: currentTime
             }
         });
+
+
 
         // For group chats, create read receipts for unread messages
         const room = await prisma.chatRoom.findUnique({
@@ -900,13 +958,13 @@ const updateTypingStatus = async (req, res) => {
     try {
         const { roomId } = req.params;
         const { isTyping } = req.body;
-        const userId = req.user.user_id;
+        const userId = req.user;
 
         // Check if user is participant of the room
         const isParticipant = await prisma.chatParticipant.findUnique({
             where: {
                 user_id_room_id: {
-                    user_id: userId,
+                    user_id: parseInt(userId),
                     room_id: parseInt(roomId)
                 }
             }
@@ -921,7 +979,7 @@ const updateTypingStatus = async (req, res) => {
 
         // Get user info for the notification
         const user = await prisma.user.findUnique({
-            where: { user_id: userId },
+            where: { user_id: parseInt(userId) },
             select: { user_name: true }
         });
 
@@ -1582,7 +1640,7 @@ const setupUserSocket = async (req, res) => {
 const getChatRoomDetails = async (req, res) => {
     try {
         const { roomId } = req.params;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         // Check if user is participant of the room
         const isParticipant = await prisma.chatParticipant.findUnique({
@@ -1685,7 +1743,7 @@ const createGroupChat = async (req, res) => {
             avatar,
             is_private = false
         } = req.body;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         // Validate input
         if (!name) {
@@ -1695,10 +1753,16 @@ const createGroupChat = async (req, res) => {
             });
         }
 
+        const user = await prisma.user.findFirst({
+            where: {
+                user_id: parseInt(userId)
+            }
+        });
+console.log(user);
         // Ensure current user is included in participants
         const participantSet = new Set([
             ...participants,
-            userId // Always add the creator
+            parseInt(userId) // Always add the creator
         ]);
 
         // Create the group chat
@@ -1737,7 +1801,7 @@ const createGroupChat = async (req, res) => {
             data: {
                 room_id: chatRoom.room_id,
                 sender_id: userId,
-                content: `${req.user.user_name} created this group`,
+                content: `${user.user_name} created this group`,
                 message_type: 'SYSTEM'
             }
         });
@@ -2253,60 +2317,53 @@ const unblockUser = async (req, res) => {
 
 const getPotentialChatRecipients = async (req, res) => {
     try {
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
         const { search = '' } = req.query;
 
-        // Find friends who are not in an existing direct chat
+        // Find friends through accepted friend requests
         const potentialRecipients = await prisma.user.findMany({
             where: {
                 NOT: {
                     user_id: userId
                 },
-                // Find friends
-                friendships: {
-                    some: {
-                        OR: [
-                            {
+                // Find friends through accepted friend requests
+                OR: [
+                    {
+                        // Users who received and accepted requests from the current user
+                        receivedFriendRequests: {
+                            some: {
                                 sender_id: userId,
                                 status: 'ACCEPTED'
-                            },
-                            {
+                            }
+                        }
+                    },
+                    {
+                        // Users who sent and got accepted requests to the current user
+                        sentFriendRequests: {
+                            some: {
                                 receiver_id: userId,
                                 status: 'ACCEPTED'
                             }
-                        ]
-                    }
-                },
-                // Optional search filter
-                user_name: search ? {
-                    contains: search,
-                    mode: 'insensitive'
-                } : undefined,
-                // Exclude users in existing direct chats
-                NOT: {
-                    chatParticipants: {
-                        some: {
-                            room: {
-                                type: 'DM',
-                                participants: {
-                                    some: {
-                                        user_id: userId
-                                    }
-                                }
-                            }
                         }
                     }
-                }
+                ],
+                // Optional search filter for user name
+                ...(search ? {
+                    user_name: {
+                        contains: search,
+                        mode: 'insensitive'
+                    }
+                } : {})
             },
             select: {
                 user_id: true,
                 user_name: true,
                 avatar: true,
                 lastActive: true
-            },
-            take: 10 // Limit results
+            }
         });
 
+        // Return the friends data
         res.json({
             success: true,
             data: potentialRecipients
