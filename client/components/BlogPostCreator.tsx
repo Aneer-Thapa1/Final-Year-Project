@@ -8,21 +8,32 @@ import {
     ScrollView,
     KeyboardAvoidingView,
     Platform,
-    Keyboard,
-    Dimensions,
+    Modal,
+    StatusBar,
+    SafeAreaView,
     Alert,
     ActivityIndicator
 } from 'react-native';
-import { MotiView, AnimatePresence } from 'moti';
-import { Camera, Image as ImageIcon, X, ChevronDown, Tag, Users, Send, ArrowRight } from 'lucide-react-native';
+import { Camera, Image as ImageIcon, X, ChevronDown, Tag, Users, Send, Clock } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { useColorScheme } from 'nativewind';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Import the getCategories function
 import { getCategories } from '../services/blogService';
 
-const BlogPostCreator = ({ isDark, onPost, isLoading = false }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+const BlogPostCreator = ({
+                                  visible,
+                                  onClose,
+                                  onPost,
+                                  loading = false
+                              }) => {
+    const { colorScheme } = useColorScheme();
+    const isDark = colorScheme === 'dark';
+    const insets = useSafeAreaInsets();
+
+    // Blog post form state
     const [title, setTitle] = useState('');
     const [content, setContent] = useState('');
     const [selectedImages, setSelectedImages] = useState([]);
@@ -34,127 +45,150 @@ const BlogPostCreator = ({ isDark, onPost, isLoading = false }) => {
     const [categories, setCategories] = useState([]);
     const [loadingCategories, setLoadingCategories] = useState(false);
 
-    const contentInputRef = useRef(null);
+    // Refs
+    const titleInputRef = useRef(null);
     const scrollViewRef = useRef(null);
 
-    // Calculate input height based on content
-    const [contentHeight, setContentHeight] = useState(100);
-    const windowHeight = Dimensions.get('window').height;
-    const maxHeight = windowHeight * 0.5; // Max 50% of screen height
+    // Theme colors based on your Tailwind config
+    const colors = {
+        // Primary - Sage Green
+        primary: isDark ? '#4ADE80' : '#22C55E',
+        primaryLight: isDark ? '#86EFAC' : '#4ADE80',
+        primaryDark: isDark ? '#16A34A' : '#15803D',
+        primaryBg: isDark ? 'rgba(74, 222, 128, 0.1)' : 'rgba(34, 197, 94, 0.05)',
+
+        // Secondary - Deep Purple
+        secondary: isDark ? '#A78BFA' : '#8B5CF6',
+        secondaryLight: isDark ? '#C4B5FD' : '#A78BFA',
+        secondaryDark: isDark ? '#7C3AED' : '#6D28D9',
+
+        // Background
+        background: isDark ? '#0F172A' : '#FFFFFF',
+        card: isDark ? '#1E293B' : '#F8FAFC',
+        surface: isDark ? '#334155' : '#FFFFFF',
+        input: isDark ? '#475569' : '#F1F5F9',
+
+        // Text
+        textPrimary: isDark ? '#F8FAFC' : '#0F172A',
+        textSecondary: isDark ? '#E2E8F0' : '#334155',
+        textMuted: isDark ? '#94A3B8' : '#64748B',
+
+        // Border
+        border: isDark ? '#475569' : '#E2E8F0',
+
+        // Success color for online status
+        success: isDark ? '#4ADE80' : '#22C55E'
+    };
 
     // Fetch categories when component mounts
     useEffect(() => {
-        const fetchCategories = async () => {
-            try {
-                setLoadingCategories(true);
-                const response = await getCategories();
+        if (visible) {
+            fetchCategories();
 
-                if (response && response.success && response.data) {
-                    setCategories(response.data);
-                } else {
-                    // Fallback to static categories if API fails
-                    setCategories([
-                        { category_id: 1, category_name: 'Meditation', icon: '🧘', color: '#8B5CF6' },
-                        { category_id: 2, category_name: 'Exercise', icon: '🏃', color: '#F43F5E' },
-                        { category_id: 3, category_name: 'Reading', icon: '📚', color: '#F59E0B' },
-                        { category_id: 4, category_name: 'Coding', icon: '💻', color: '#3B82F6' },
-                    ]);
+            // Focus on title input after a brief delay
+            setTimeout(() => {
+                if (titleInputRef.current) {
+                    titleInputRef.current.focus();
                 }
-            } catch (error) {
-                console.error('Error fetching categories:', error);
-                // Fallback to static categories
+            }, 300);
+        }
+    }, [visible]);
+
+    // Reset form when modal opens
+    useEffect(() => {
+        if (visible) {
+            setTitle('');
+            setContent('');
+            setSelectedImages([]);
+            setSelectedCategory(null);
+            setIsPublic(true);
+        }
+    }, [visible]);
+
+    const fetchCategories = async () => {
+        try {
+            setLoadingCategories(true);
+            const response = await getCategories();
+
+            if (response && response.success && response.data) {
+                setCategories(response.data);
+            } else {
+                // Fallback to static categories if API fails
                 setCategories([
                     { category_id: 1, category_name: 'Meditation', icon: '🧘', color: '#8B5CF6' },
                     { category_id: 2, category_name: 'Exercise', icon: '🏃', color: '#F43F5E' },
                     { category_id: 3, category_name: 'Reading', icon: '📚', color: '#F59E0B' },
                     { category_id: 4, category_name: 'Coding', icon: '💻', color: '#3B82F6' },
                 ]);
-            } finally {
-                setLoadingCategories(false);
             }
-        };
-
-        fetchCategories();
-    }, []);
-
-    const toggleExpand = () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-        if (!isExpanded) {
-            setIsExpanded(true);
-            setTimeout(() => {
-                contentInputRef.current?.focus();
-            }, 300);
-        } else {
-            Keyboard.dismiss();
-            setIsExpanded(false);
+        } catch (error) {
+            console.error('Error fetching categories:', error);
+            // Fallback to static categories
+            setCategories([
+                { category_id: 1, category_name: 'Meditation', icon: '🧘', color: '#8B5CF6' },
+                { category_id: 2, category_name: 'Exercise', icon: '🏃', color: '#F43F5E' },
+                { category_id: 3, category_name: 'Reading', icon: '📚', color: '#F59E0B' },
+                { category_id: 4, category_name: 'Coding', icon: '💻', color: '#3B82F6' },
+            ]);
+        } finally {
+            setLoadingCategories(false);
         }
     };
 
     const pickImage = async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-        // Request permission first
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-        if (status !== 'granted') {
-            Alert.alert(
-                "Permission Required",
-                "Please allow access to your photo library to select images.",
-                [{ text: "OK" }]
-            );
-            return;
-        }
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
         try {
-            // Use the picker with fixed parameters
+            const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+            if (!permissionResult.granted) {
+                Alert.alert("Permission Required", "You need to allow access to your photos to add images to your post.");
+                return;
+            }
+
             const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ImagePicker.MediaTypeOptions.Images,
                 allowsMultipleSelection: true,
                 selectionLimit: 4,
                 quality: 0.8,
-                aspect: [4, 3],
                 allowsEditing: false,
             });
 
-            if (!result.canceled && result.assets) {
+            if (!result.canceled && result.assets && result.assets.length > 0) {
                 setSelectedImages([
                     ...selectedImages,
-                    ...result.assets.map((asset) => asset.uri),
-                ]);
+                    ...result.assets.map((asset) => asset.uri)
+                ].slice(0, 4)); // Limit to 4 images
             }
         } catch (error) {
-            console.error("Image picker error:", error);
-            Alert.alert("Error", "Failed to select image. Please try again.");
+            console.error('Error picking image:', error);
+            Alert.alert("Error", "Could not select images. Please try again.");
         }
     };
 
     const takePhoto = async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-        const { status } = await ImagePicker.requestCameraPermissionsAsync();
-        if (status !== "granted") {
-            Alert.alert(
-                "Permission Required",
-                "Please allow camera access to take photos.",
-                [{ text: "OK" }]
-            );
-            return;
-        }
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
 
         try {
+            const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
+
+            if (!permissionResult.granted) {
+                Alert.alert("Permission Required", "You need to allow camera access to take photos.");
+                return;
+            }
+
             const result = await ImagePicker.launchCameraAsync({
                 quality: 0.8,
                 allowsEditing: true,
                 aspect: [4, 3],
             });
 
-            if (!result.canceled && result.assets) {
-                setSelectedImages([...selectedImages, result.assets[0].uri]);
+            if (!result.canceled && result.assets && result.assets.length > 0) {
+                setSelectedImages([...selectedImages, result.assets[0].uri].slice(0, 4)); // Limit to 4 images
             }
         } catch (error) {
-            console.error("Camera error:", error);
-            Alert.alert("Error", "Failed to take photo. Please try again.");
+            console.error('Error with camera:', error);
+            Alert.alert("Error", "Could not take photo. Please try again.");
         }
     };
 
@@ -174,369 +208,639 @@ const BlogPostCreator = ({ isDark, onPost, isLoading = false }) => {
         setIsCategorySelectorVisible(false);
     };
 
-    // Toggle public/private status
     const togglePublicStatus = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         setIsPublic(!isPublic);
     };
 
     const handlePost = () => {
+        // Validate inputs
         if (!selectedCategory) {
-            Alert.alert('Missing Information', 'Please select a category for your post.');
+            Alert.alert("Required Field", "Please select a category for your post.");
             return;
         }
 
-        if (title.trim() || content.trim() || selectedImages.length > 0) {
-            // Create the blog post object with updated field names
-            const postData = {
-                title: title.trim() ? title : 'My Progress Update',
-                content: content.trim(),
-                image: selectedImages.length > 0 ? selectedImages[0] : null, // Take first image only
-                category_id: selectedCategory.category_id,
-                is_public: isPublic
-            };
+        if (!title.trim() && !content.trim() && selectedImages.length === 0) {
+            Alert.alert("Empty Post", "Please add some content to your post.");
+            return;
+        }
 
-            onPost(postData);
+        // Create post data
+        const postData = {
+            title: title.trim() ? title : 'My Progress Update',
+            content: content.trim(),
+            images: selectedImages,
+            category_id: selectedCategory.category_id,
+            is_public: isPublic
+        };
 
-            // Reset form
-            setTitle('');
-            setContent('');
-            setSelectedImages([]);
-            setSelectedCategory(null);
-            setIsExpanded(false);
+        // Call the provided callback
+        onPost(postData);
 
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    };
+
+    // Clean close (no confirmation if no changes)
+    const handleClose = () => {
+        if (title || content || selectedImages.length > 0 || selectedCategory) {
+            Alert.alert(
+                "Discard Changes?",
+                "You have unsaved changes. Are you sure you want to discard them?",
+                [
+                    { text: "Continue Editing", style: "cancel" },
+                    { text: "Discard", style: "destructive", onPress: onClose }
+                ]
+            );
+        } else {
+            onClose();
         }
     };
 
     const isPostButtonEnabled = (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory;
 
     return (
-        <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            keyboardVerticalOffset={100}
+        <Modal
+            visible={visible}
+            animationType="slide"
+            transparent={false}
+            onRequestClose={handleClose}
         >
-            <MotiView
-                from={{
-                    height: 80,
-                    opacity: 0.8
-                }}
-                animate={{
-                    height: isExpanded ? 'auto' : 80,
-                    opacity: 1
-                }}
-                transition={{
-                    type: 'timing',
-                    duration: 300
-                }}
-                className={`rounded-3xl mb-4 ${isDark ? 'bg-[#252F3C]' : 'bg-white'} shadow-sm overflow-hidden`}
-                style={{
-                    shadowColor: isDark ? '#000' : '#333',
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: 0.1,
-                    shadowRadius: 3,
-                    elevation: 3
-                }}
-            >
-                <View className="px-4 py-3">
-                    {/* Header with expand/collapse control */}
-                    <TouchableOpacity
-                        onPress={toggleExpand}
-                        className="flex-row items-center justify-between mb-2"
-                        activeOpacity={0.7}
+            <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
+            <View style={{ flex: 1, backgroundColor: colors.background }}>
+                <SafeAreaView style={{ flex: 1 }}>
+                    {/* Header */}
+                    <View
+                        style={{
+                            paddingVertical: 16,
+                            paddingHorizontal: 16,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: colors.card,
+                            borderBottomWidth: 1,
+                            borderBottomColor: colors.border,
+                            shadowColor: "#000",
+                            shadowOffset: {
+                                width: 0,
+                                height: 1,
+                            },
+                            shadowOpacity: 0.1,
+                            shadowRadius: 1.41,
+                            elevation: 2,
+                        }}
                     >
-                        <Text className={`text-lg font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                            {isExpanded ? 'Create Blog Post' : 'Share your progress...'}
-                        </Text>
-                        <View
-                            className={`p-2 rounded-full ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}
+                        <TouchableOpacity
+                            onPress={handleClose}
+                            style={{
+                                padding: 8,
+                                borderRadius: 8,
+                                backgroundColor: isDark ? colors.surface : '#f3f4f6',
+                            }}
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                         >
-                            <ChevronDown size={16} color={isDark ? '#E5E7EB' : '#4B5563'} style={{
-                                transform: [{ rotate: isExpanded ? '180deg' : '0deg' }]
-                            }} />
-                        </View>
-                    </TouchableOpacity>
+                            <X size={22} color={colors.textSecondary} />
+                        </TouchableOpacity>
 
-                    {/* Main content area (visible when expanded) */}
-                    {isExpanded && (
+                        <Text
+                            style={{
+                                fontSize: 18,
+                                fontWeight: 'bold',
+                                fontFamily: 'montserrat-bold',
+                                color: colors.textPrimary,
+                            }}
+                        >
+                            Create Blog Post
+                        </Text>
+
+                        <TouchableOpacity
+                            onPress={handlePost}
+                            disabled={loading || !isPostButtonEnabled}
+                            style={{
+                                padding: 8,
+                                borderRadius: 8,
+                                backgroundColor: isPostButtonEnabled ? colors.primary : isDark ? colors.surface : '#f3f4f6',
+                                opacity: loading ? 0.5 : 1,
+                            }}
+                        >
+                            {loading ? (
+                                <ActivityIndicator size="small" color="white" />
+                            ) : (
+                                <Text
+                                    style={{
+                                        fontWeight: '600',
+                                        fontFamily: 'montserrat-semibold',
+                                        color: isPostButtonEnabled ? '#ffffff' : colors.textMuted,
+                                    }}
+                                >
+                                    Post
+                                </Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+
+                    <KeyboardAvoidingView
+                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                        style={{ flex: 1 }}
+                        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+                    >
                         <ScrollView
                             ref={scrollViewRef}
+                            style={{ flex: 1 }}
+                            contentContainerStyle={{ padding: 16 }}
                             showsVerticalScrollIndicator={false}
-                            nestedScrollEnabled={true}
-                            keyboardShouldPersistTaps="handled"
                         >
-                            {/* Title input */}
-                            <View className="mb-4">
+                            {/* Blog Title */}
+                            <View style={{ marginBottom: 16 }}>
+                                <Text
+                                    style={{
+                                        marginBottom: 8,
+                                        fontFamily: 'montserrat-medium',
+                                        fontSize: 15,
+                                        color: colors.textPrimary,
+                                    }}
+                                >
+                                    Post Title (Optional)
+                                </Text>
                                 <TextInput
+                                    ref={titleInputRef}
+                                    style={{
+                                        padding: 12,
+                                        borderRadius: 12,
+                                        backgroundColor: colors.surface,
+                                        borderWidth: 1,
+                                        borderColor: colors.border,
+                                        fontFamily: 'montserrat',
+                                        fontSize: 15,
+                                        color: colors.textPrimary,
+                                    }}
+                                    placeholder="Enter post title"
+                                    placeholderTextColor={colors.textMuted}
                                     value={title}
                                     onChangeText={setTitle}
-                                    placeholder="Post Title (optional)"
-                                    placeholderTextColor={isDark ? '#94A3B8' : '#6B7280'}
-                                    className={`px-4 py-3 rounded-2xl text-base font-montserrat-semibold ${
-                                        isDark
-                                            ? 'bg-gray-800 text-white'
-                                            : 'bg-gray-100 text-gray-900'
-                                    }`}
+                                    maxLength={100}
                                 />
                             </View>
 
-                            {/* Content input with auto-expanding height */}
-                            <View className="mb-4">
+                            {/* Blog Content */}
+                            <View style={{ marginBottom: 24 }}>
+                                <Text
+                                    style={{
+                                        marginBottom: 8,
+                                        fontFamily: 'montserrat-medium',
+                                        fontSize: 15,
+                                        color: colors.textPrimary,
+                                    }}
+                                >
+                                    Content
+                                </Text>
                                 <TextInput
-                                    ref={contentInputRef}
+                                    style={{
+                                        padding: 12,
+                                        borderRadius: 12,
+                                        backgroundColor: colors.surface,
+                                        borderWidth: 1,
+                                        borderColor: colors.border,
+                                        fontFamily: 'montserrat',
+                                        fontSize: 15,
+                                        minHeight: 120,
+                                        textAlignVertical: 'top',
+                                        color: colors.textPrimary,
+                                    }}
+                                    placeholder="What's your progress today? Share details about your journey..."
+                                    placeholderTextColor={colors.textMuted}
                                     value={content}
                                     onChangeText={setContent}
-                                    placeholder="What's your progress today? Share details about your journey..."
-                                    placeholderTextColor={isDark ? '#94A3B8' : '#6B7280'}
-                                    className={`px-4 py-3 rounded-2xl text-base font-montserrat ${
-                                        isDark
-                                            ? 'bg-gray-800 text-white'
-                                            : 'bg-gray-100 text-gray-900'
-                                    }`}
                                     multiline
-                                    textAlignVertical="top"
-                                    onContentSizeChange={(e) => {
-                                        const height = e.nativeEvent.contentSize.height;
-                                        setContentHeight(Math.min(Math.max(100, height), maxHeight));
-                                    }}
-                                    style={{ height: contentHeight }}
+                                    numberOfLines={5}
+                                    maxLength={1000}
                                 />
                             </View>
 
-                            {/* Selected Images Preview - Moved up for better visibility */}
-                            {selectedImages.length > 0 && (
-                                <View className="mb-4">
-                                    <Text className={`text-sm font-montserrat-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                                        Selected Images ({selectedImages.length})
-                                    </Text>
-                                    <ScrollView
-                                        horizontal
-                                        showsHorizontalScrollIndicator={false}
-                                    >
-                                        <View className="flex-row space-x-3">
-                                            {selectedImages.map((uri, index) => (
-                                                <View key={index} className="relative">
-                                                    <Image
-                                                        source={{ uri }}
-                                                        className="w-24 h-24 rounded-xl"
-                                                        style={{ borderWidth: 1, borderColor: isDark ? '#374151' : '#E5E7EB' }}
-                                                    />
-                                                    <TouchableOpacity
-                                                        onPress={() => removeImage(index)}
-                                                        className="absolute -top-2 -right-2 bg-black/70 rounded-full p-1.5"
-                                                    >
-                                                        <X size={12} color="white" />
-                                                    </TouchableOpacity>
-                                                </View>
-                                            ))}
-
-                                            {selectedImages.length < 4 && (
-                                                <TouchableOpacity
-                                                    onPress={pickImage}
-                                                    className={`w-24 h-24 rounded-xl justify-center items-center border-2 border-dashed ${
-                                                        isDark ? 'border-gray-600' : 'border-gray-300'
-                                                    }`}
-                                                >
-                                                    <ImageIcon size={24} color={isDark ? '#9CA3AF' : '#6B7280'} />
-                                                    <Text className={`mt-2 text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                                        Add More
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            )}
-                                        </View>
-                                    </ScrollView>
-                                </View>
-                            )}
-
                             {/* Category Selector */}
-                            <View className="mb-4">
-                                <Text className={`text-sm font-montserrat-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                                    Category <Text className="text-red-500">*</Text>
-                                </Text>
+                            <View style={{ marginBottom: 20 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                                    <Text
+                                        style={{
+                                            fontFamily: 'montserrat-medium',
+                                            fontSize: 15,
+                                            color: colors.textPrimary,
+                                        }}
+                                    >
+                                        Category <Text style={{ color: '#EF4444' }}>*</Text>
+                                    </Text>
+
+                                    {selectedCategory && (
+                                        <Text
+                                            style={{
+                                                fontSize: 13,
+                                                fontFamily: 'montserrat-medium',
+                                                color: colors.primary,
+                                            }}
+                                        >
+                                            {selectedCategory.category_name}
+                                        </Text>
+                                    )}
+                                </View>
+
                                 <TouchableOpacity
                                     onPress={toggleCategorySelector}
-                                    className={`flex-row items-center justify-between px-4 py-3.5 rounded-2xl ${
-                                        isDark
-                                            ? 'bg-gray-800'
-                                            : 'bg-gray-100'
-                                    }`}
-                                    activeOpacity={0.7}
+                                    style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        padding: 12,
+                                        borderRadius: 12,
+                                        backgroundColor: colors.surface,
+                                        borderWidth: 1,
+                                        borderColor: colors.border,
+                                        marginBottom: 8,
+                                    }}
                                 >
-                                    <View className="flex-row items-center">
-                                        <Tag size={18} color={isDark ? '#94A3B8' : '#6B7280'} />
-                                        <Text className={`ml-2 font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Tag size={18} color={selectedCategory ? colors.primary : colors.textMuted} />
+                                        <Text
+                                            style={{
+                                                marginLeft: 8,
+                                                fontFamily: 'montserrat',
+                                                fontSize: 15,
+                                                color: selectedCategory ? colors.textPrimary : colors.textMuted,
+                                            }}
+                                        >
                                             {selectedCategory
                                                 ? `${selectedCategory.icon} ${selectedCategory.category_name}`
                                                 : 'Select a category'}
                                         </Text>
                                     </View>
-                                    <ChevronDown size={16} color={isDark ? '#E5E7EB' : '#4B5563'} style={{
-                                        transform: [{ rotate: isCategorySelectorVisible ? '180deg' : '0deg' }]
-                                    }} />
+                                    <ChevronDown
+                                        size={18}
+                                        color={colors.textMuted}
+                                        style={{
+                                            transform: [{ rotate: isCategorySelectorVisible ? '180deg' : '0deg' }]
+                                        }}
+                                    />
                                 </TouchableOpacity>
 
-                                {/* Categories list - Animated */}
-                                <AnimatePresence>
-                                    {isCategorySelectorVisible && (
-                                        <MotiView
-                                            from={{ opacity: 0, height: 0 }}
-                                            animate={{ opacity: 1, height: 'auto' }}
-                                            exit={{ opacity: 0, height: 0 }}
-                                            transition={{ type: 'timing', duration: 200 }}
-                                            className={`mt-2 p-3 rounded-2xl ${isDark ? 'bg-gray-800' : 'bg-gray-50'}`}
-                                            style={{
-                                                borderWidth: 1,
-                                                borderColor: isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.05)'
-                                            }}
-                                        >
-                                            {loadingCategories ? (
-                                                <View className="py-4 items-center">
-                                                    <ActivityIndicator size="small" color="#6366F1" />
-                                                    <Text className={`mt-2 font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                                        Loading categories...
-                                                    </Text>
-                                                </View>
-                                            ) : (
-                                                <ScrollView
-                                                    nestedScrollEnabled
-                                                    className="max-h-48"
-                                                    showsVerticalScrollIndicator={false}
-                                                >
-                                                    {categories.map(category => (
-                                                        <TouchableOpacity
-                                                            key={category.category_id}
-                                                            onPress={() => selectCategory(category)}
-                                                            className={`flex-row items-center justify-between py-2.5 px-3 mb-1 rounded-xl ${
-                                                                selectedCategory?.category_id === category.category_id
-                                                                    ? isDark ? 'bg-primary-500/20' : 'bg-primary-500/10'
-                                                                    : 'bg-transparent'
-                                                            }`}
-                                                            activeOpacity={0.7}
-                                                        >
-                                                            <View className="flex-row items-center">
-                                                                <Text className="mr-2 text-lg">{category.icon}</Text>
-                                                                <Text className={`font-montserrat-medium ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                                                    {category.category_name}
-                                                                </Text>
+                                {/* Categories Dropdown */}
+                                {isCategorySelectorVisible && (
+                                    <View
+                                        style={{
+                                            marginBottom: 16,
+                                            borderRadius: 12,
+                                            borderWidth: 1,
+                                            borderColor: colors.border,
+                                            backgroundColor: colors.surface,
+                                            maxHeight: 200,
+                                            overflow: 'hidden',
+                                        }}
+                                    >
+                                        {loadingCategories ? (
+                                            <View style={{ padding: 16, alignItems: 'center' }}>
+                                                <ActivityIndicator size="small" color={colors.primary} />
+                                                <Text style={{ marginTop: 8, color: colors.textMuted, fontFamily: 'montserrat' }}>
+                                                    Loading categories...
+                                                </Text>
+                                            </View>
+                                        ) : (
+                                            <ScrollView
+                                                nestedScrollEnabled
+                                                style={{ maxHeight: 200 }}
+                                                showsVerticalScrollIndicator={false}
+                                            >
+                                                {categories.map((category, index) => (
+                                                    <TouchableOpacity
+                                                        key={category.category_id}
+                                                        onPress={() => selectCategory(category)}
+                                                        style={{
+                                                            flexDirection: 'row',
+                                                            alignItems: 'center',
+                                                            justifyContent: 'space-between',
+                                                            padding: 12,
+                                                            borderBottomWidth: index < categories.length - 1 ? 1 : 0,
+                                                            borderBottomColor: colors.border,
+                                                            backgroundColor: selectedCategory?.category_id === category.category_id
+                                                                ? colors.primaryBg
+                                                                : 'transparent',
+                                                        }}
+                                                    >
+                                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                                            <Text style={{ fontSize: 18, marginRight: 8 }}>{category.icon}</Text>
+                                                            <Text
+                                                                style={{
+                                                                    fontFamily: 'montserrat-medium',
+                                                                    fontSize: 15,
+                                                                    color: colors.textPrimary,
+                                                                }}
+                                                            >
+                                                                {category.category_name}
+                                                            </Text>
+                                                        </View>
+                                                        {selectedCategory?.category_id === category.category_id && (
+                                                            <View style={{
+                                                                backgroundColor: colors.primary,
+                                                                borderRadius: 10,
+                                                                width: 20,
+                                                                height: 20,
+                                                                alignItems: 'center',
+                                                                justifyContent: 'center',
+                                                            }}>
+                                                                <Text style={{ color: 'white', fontSize: 12 }}>✓</Text>
                                                             </View>
-                                                            {selectedCategory?.category_id === category.category_id && (
-                                                                <View className="bg-primary-500 rounded-full p-1">
-                                                                    <Text className="text-white text-xs">✓</Text>
-                                                                </View>
-                                                            )}
-                                                        </TouchableOpacity>
-                                                    ))}
-                                                </ScrollView>
-                                            )}
-                                        </MotiView>
-                                    )}
-                                </AnimatePresence>
+                                                        )}
+                                                    </TouchableOpacity>
+                                                ))}
+                                            </ScrollView>
+                                        )}
+                                    </View>
+                                )}
                             </View>
 
-                            {/* Public/Private Toggle */}
-                            <View className="mb-4">
-                                <Text className={`text-sm font-montserrat-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                                    Visibility
-                                </Text>
-                                <TouchableOpacity
-                                    onPress={togglePublicStatus}
-                                    className={`flex-row items-center justify-between px-4 py-3.5 rounded-2xl ${
-                                        isDark ? 'bg-gray-800' : 'bg-gray-100'
-                                    }`}
-                                    activeOpacity={0.7}
+                            {/* Images Section */}
+                            <View style={{ marginBottom: 20 }}>
+                                <Text
+                                    style={{
+                                        marginBottom: 8,
+                                        fontFamily: 'montserrat-medium',
+                                        fontSize: 15,
+                                        color: colors.textPrimary,
+                                    }}
                                 >
-                                    <View className="flex-row items-center">
-                                        <Users size={18} color={isDark ? '#94A3B8' : '#6B7280'} />
-                                        <Text className={`ml-2 font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                            {isPublic ? 'Public post' : 'Private post'}
-                                        </Text>
-                                    </View>
+                                    Images (Optional)
+                                </Text>
 
-                                    <View className={`w-12 h-6 rounded-full flex-row items-center px-1 ${
-                                        isPublic
-                                            ? 'bg-primary-500 justify-end'
-                                            : isDark ? 'bg-gray-600 justify-start' : 'bg-gray-300 justify-start'
-                                    }`}>
-                                        <View className="w-4 h-4 bg-white rounded-full"></View>
-                                    </View>
-                                </TouchableOpacity>
-                            </View>
+                                {/* Selected Images */}
+                                {selectedImages.length > 0 && (
+                                    <ScrollView
+                                        horizontal
+                                        showsHorizontalScrollIndicator={false}
+                                        style={{ marginBottom: 16 }}
+                                        contentContainerStyle={{ paddingRight: 8 }}
+                                    >
+                                        {selectedImages.map((uri, index) => (
+                                            <View
+                                                key={index}
+                                                style={{
+                                                    marginRight: 12,
+                                                    borderRadius: 12,
+                                                    overflow: 'hidden',
+                                                    position: 'relative',
+                                                    borderWidth: 1,
+                                                    borderColor: colors.border,
+                                                }}
+                                            >
+                                                <Image
+                                                    source={{ uri }}
+                                                    style={{
+                                                        width: 100,
+                                                        height: 100,
+                                                        borderRadius: 8,
+                                                    }}
+                                                />
+                                                <TouchableOpacity
+                                                    onPress={() => removeImage(index)}
+                                                    style={{
+                                                        position: 'absolute',
+                                                        top: 4,
+                                                        right: 4,
+                                                        backgroundColor: 'rgba(0,0,0,0.6)',
+                                                        borderRadius: 12,
+                                                        width: 24,
+                                                        height: 24,
+                                                        alignItems: 'center',
+                                                        justifyContent: 'center',
+                                                    }}
+                                                >
+                                                    <X size={16} color="white" />
+                                                </TouchableOpacity>
+                                            </View>
+                                        ))}
 
-                            {/* Media Actions */}
-                            {selectedImages.length === 0 && (
-                                <View className="mb-4">
-                                    <Text className={`text-sm font-montserrat-medium mb-2 ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
-                                        Add Media (optional)
-                                    </Text>
-                                    <View className="flex-row space-x-3">
+                                        {/* Add more button */}
+                                        {selectedImages.length < 4 && (
+                                            <TouchableOpacity
+                                                onPress={pickImage}
+                                                style={{
+                                                    width: 100,
+                                                    height: 100,
+                                                    borderRadius: 12,
+                                                    borderWidth: 1,
+                                                    borderStyle: 'dashed',
+                                                    borderColor: colors.border,
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                }}
+                                            >
+                                                <ImageIcon size={24} color={colors.textMuted} />
+                                                <Text
+                                                    style={{
+                                                        marginTop: 8,
+                                                        fontSize: 12,
+                                                        fontFamily: 'montserrat',
+                                                        color: colors.textMuted,
+                                                    }}
+                                                >
+                                                    Add More
+                                                </Text>
+                                            </TouchableOpacity>
+                                        )}
+                                    </ScrollView>
+                                )}
+
+                                {/* Image action buttons */}
+                                {selectedImages.length === 0 && (
+                                    <View style={{ flexDirection: 'row', gap: 12 }}>
                                         <TouchableOpacity
                                             onPress={takePhoto}
-                                            className={`flex-1 flex-row items-center justify-center rounded-xl p-3 ${
-                                                isDark ? 'bg-gray-800' : 'bg-gray-100'
-                                            }`}
-                                            activeOpacity={0.7}
+                                            style={{
+                                                flex: 1,
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                padding: 12,
+                                                borderRadius: 12,
+                                                backgroundColor: colors.surface,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                            }}
                                         >
-                                            <Camera size={20} color="#6366F1" />
-                                            <Text className={`ml-2 font-montserrat-medium text-primary-500`}>
-                                                Take Photo
+                                            <Camera size={20} color={colors.primary} />
+                                            <Text
+                                                style={{
+                                                    marginLeft: 8,
+                                                    fontFamily: 'montserrat-medium',
+                                                    fontSize: 14,
+                                                    color: colors.primary,
+                                                }}
+                                            >
+                                                Camera
                                             </Text>
                                         </TouchableOpacity>
 
                                         <TouchableOpacity
                                             onPress={pickImage}
-                                            className={`flex-1 flex-row items-center justify-center rounded-xl p-3 ${
-                                                isDark ? 'bg-gray-800' : 'bg-gray-100'
-                                            }`}
-                                            activeOpacity={0.7}
+                                            style={{
+                                                flex: 1,
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                justifyContent: 'center',
+                                                padding: 12,
+                                                borderRadius: 12,
+                                                backgroundColor: colors.surface,
+                                                borderWidth: 1,
+                                                borderColor: colors.border,
+                                            }}
                                         >
-                                            <ImageIcon size={20} color="#6366F1" />
-                                            <Text className={`ml-2 font-montserrat-medium text-primary-500`}>
+                                            <ImageIcon size={20} color={colors.primary} />
+                                            <Text
+                                                style={{
+                                                    marginLeft: 8,
+                                                    fontFamily: 'montserrat-medium',
+                                                    fontSize: 14,
+                                                    color: colors.primary,
+                                                }}
+                                            >
                                                 Gallery
                                             </Text>
                                         </TouchableOpacity>
                                     </View>
-                                </View>
-                            )}
+                                )}
+                            </View>
 
-                            {/* Post Button */}
+                            {/* Visibility Toggle */}
+                            <View style={{ marginBottom: 24 }}>
+                                <Text
+                                    style={{
+                                        marginBottom: 8,
+                                        fontFamily: 'montserrat-medium',
+                                        fontSize: 15,
+                                        color: colors.textPrimary,
+                                    }}
+                                >
+                                    Visibility
+                                </Text>
+                                <TouchableOpacity
+                                    onPress={togglePublicStatus}
+                                    style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        padding: 12,
+                                        borderRadius: 12,
+                                        backgroundColor: colors.surface,
+                                        borderWidth: 1,
+                                        borderColor: colors.border,
+                                    }}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Users size={18} color={colors.textMuted} />
+                                        <Text
+                                            style={{
+                                                marginLeft: 8,
+                                                fontFamily: 'montserrat',
+                                                fontSize: 15,
+                                                color: colors.textPrimary,
+                                            }}
+                                        >
+                                            {isPublic ? 'Public post' : 'Private post'}
+                                        </Text>
+                                    </View>
+
+                                    <View
+                                        style={{
+                                            width: 50,
+                                            height: 28,
+                                            borderRadius: 14,
+                                            backgroundColor: isPublic ? colors.primary : isDark ? colors.surface : '#E5E7EB',
+                                            justifyContent: 'center',
+                                            padding: 2,
+                                        }}
+                                    >
+                                        <View
+                                            style={{
+                                                width: 24,
+                                                height: 24,
+                                                borderRadius: 12,
+                                                backgroundColor: 'white',
+                                                transform: [{ translateX: isPublic ? 22 : 0 }],
+                                            }}
+                                        />
+                                    </View>
+                                </TouchableOpacity>
+                            </View>
+                        </ScrollView>
+                    </KeyboardAvoidingView>
+
+                    {/* Bottom Action Buttons */}
+                    <View
+                        style={{
+                            padding: 16,
+                            borderTopWidth: 1,
+                            borderTopColor: colors.border,
+                            backgroundColor: colors.card,
+                            paddingBottom: Math.max(16, insets.bottom),
+                        }}
+                    >
+                        <View style={{ flexDirection: 'row' }}>
+                            <TouchableOpacity
+                                onPress={handleClose}
+                                style={{
+                                    flex: 1,
+                                    marginRight: 8,
+                                    paddingVertical: 12,
+                                    borderRadius: 12,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    backgroundColor: isDark ? colors.surface : '#F3F4F6',
+                                }}
+                            >
+                                <Text
+                                    style={{
+                                        fontFamily: 'montserrat-semibold',
+                                        fontSize: 15,
+                                        color: colors.textSecondary,
+                                    }}
+                                >
+                                    Cancel
+                                </Text>
+                            </TouchableOpacity>
+
                             <TouchableOpacity
                                 onPress={handlePost}
-                                disabled={isLoading || !isPostButtonEnabled}
-                                className={`px-4 py-3 rounded-xl mb-2 flex-row items-center justify-center ${
-                                    isLoading
-                                        ? isDark ? 'bg-gray-700' : 'bg-gray-200'
-                                        : isPostButtonEnabled
-                                            ? 'bg-primary-500'
-                                            : isDark ? 'bg-gray-700' : 'bg-gray-200'
-                                }`}
-                                activeOpacity={isPostButtonEnabled ? 0.7 : 1}
+                                disabled={loading || !isPostButtonEnabled}
+                                style={{
+                                    flex: 1,
+                                    marginLeft: 8,
+                                    paddingVertical: 12,
+                                    borderRadius: 12,
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    backgroundColor: isPostButtonEnabled
+                                        ? loading ? colors.primaryLight : colors.primary
+                                        : isDark ? '#374151' : '#E5E7EB',
+                                }}
                             >
-                                {isLoading ? (
-                                    <ActivityIndicator size="small" color={isDark ? "#9CA3AF" : "#6B7280"} />
+                                {loading ? (
+                                    <ActivityIndicator size="small" color="white" />
                                 ) : (
-                                    <>
+                                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                        <Send size={18} color={isPostButtonEnabled ? 'white' : colors.textMuted} />
                                         <Text
-                                            className={`font-montserrat-semibold mr-2 ${
-                                                isPostButtonEnabled
-                                                    ? 'text-white'
-                                                    : isDark ? 'text-gray-500' : 'text-gray-400'
-                                            }`}
+                                            style={{
+                                                marginLeft: 8,
+                                                color: isPostButtonEnabled ? 'white' : colors.textMuted,
+                                                fontFamily: 'montserrat-semibold',
+                                                fontSize: 15,
+                                            }}
                                         >
                                             Post Blog
                                         </Text>
-                                        <Send size={16} color={
-                                            isPostButtonEnabled
-                                                ? 'white'
-                                                : isDark ? '#6B7280' : '#9CA3AF'
-                                        } />
-                                    </>
+                                    </View>
                                 )}
                             </TouchableOpacity>
-                        </ScrollView>
-                    )}
-                </View>
-            </MotiView>
-        </KeyboardAvoidingView>
+                        </View>
+                    </View>
+                </SafeAreaView>
+            </View>
+        </Modal>
     );
 };
 

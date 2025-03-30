@@ -1,4 +1,4 @@
-import { fetchData, postData, updateData, deleteData } from './api';
+import { fetchData, postData, updateData, deleteData, uploadImage } from './api';
 
 // Blog interfaces
 export interface Blog {
@@ -54,21 +54,43 @@ export interface ApiResponse<T> {
 }
 
 // Function to add a new blog with category support
-export const addBlog = async (blogData: {
-    title: string;
-    content: string;
-    image?: string;
-    category_id: number;
-    is_featured?: boolean;
-}) => {
+export const addBlog = async (blogData) => {
     try {
-        // Validate category_id is present
-        if (!blogData.category_id) {
-            throw new Error('Category ID is required');
+        // Create a new FormData instance
+        const formData = new FormData();
+
+        // Add text fields to FormData
+        if (blogData.title) formData.append('title', blogData.title);
+        formData.append('content', blogData.content);
+        formData.append('category_id', blogData.category_id.toString());
+
+        if (blogData.is_featured !== undefined) {
+            formData.append('is_featured', blogData.is_featured.toString());
         }
 
-        return await postData('/api/blog/addBlog', blogData);
-    } catch (error: any) {
+        // Debug log
+        console.log('Blog data before image:', blogData);
+
+        // Add image if it exists
+        if (blogData.image) {
+            // Get the file extension
+            const uriParts = blogData.image.split('.');
+            const fileType = uriParts[uriParts.length - 1];
+
+            // Create file object with the correct format for React Native
+            const imageFile = {
+                uri: blogData.image,
+                name: `photo.${fileType}`,
+                type: `image/${fileType === 'jpg' ? 'jpeg' : fileType}`
+            };
+
+            console.log('Appending image:', imageFile);
+            formData.append('image', imageFile);
+        }
+
+        // Use the postFormData function to send multipart/form-data
+        return await postData('/api/blog/addBlog', formData);
+    } catch (error) {
         console.error('Error in addBlog:', error);
         throw error.response?.data?.error || error.message || 'Failed to add blog';
     }

@@ -1,510 +1,663 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     View,
     Text,
     ScrollView,
-    TextInput,
     TouchableOpacity,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
     ActivityIndicator,
-    FlatList,
-    Alert  // Added missing import
+    Alert,
+    useColorScheme
 } from 'react-native';
-import { useLocalSearchParams, router } from 'expo-router';
-import { useColorScheme } from 'nativewind';
 import {
     ArrowLeft,
-    Send,
-    Info,
+    Calendar,
+    CheckCircle,
+    Clock,
+    XCircle,
+    Flame,
+    Award,
+    BarChart2,
+    Star,
+    Edit2,
+    Trash2,
     MoreVertical,
-    Phone,
-    Video
+    Layers
 } from 'lucide-react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { MotiView } from 'moti';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as Haptics from 'expo-haptics';
+import { useFocusEffect } from '@react-navigation/native';
+import { useLocalSearchParams, router } from 'expo-router';
+import { format, isSameDay, parseISO, startOfToday } from 'date-fns';
 
 // Import services
 import {
-    getChatRoomDetails,
-    getChatMessages,
-    sendMessage,
-    markMessagesAsRead,
-    updateTypingStatus
-} from '../../services/chatServices';
+    getHabitDetails,
+    deleteHabit,
+    toggleFavorite,
+    trackHabit
+} from '../../services/habitService';
 
-// Import store/socket related functionality if needed
-import { useSelector } from 'react-redux';
+export default function HabitDetailsScreen() {
+    // Theme
+    const colorScheme = useColorScheme();
+    const isDarkMode = colorScheme === 'dark';
 
-export default function ChatDetailScreen() {
-    const { colorScheme } = useColorScheme();
-    const isDark = colorScheme === 'dark';
-    const insets = useSafeAreaInsets();
-
-    // Get room ID and other params from the URL
+    // Get habit ID from params
     const params = useLocalSearchParams();
-    const roomId = parseInt(params.id || "0");
-    const roomName = params.name || 'Chat';
-    const isDirect = params.isDirect === 'true';
+    const habitId = params.id ? parseInt(params.id) : null;
 
-    // State management
-    const [messages, setMessages] = useState([]);
-    const [inputText, setInputText] = useState('');
+    // State
+    const [habit, setHabit] = useState(null);
     const [loading, setLoading] = useState(true);
-    const [roomDetails, setRoomDetails] = useState(null);
     const [error, setError] = useState(null);
-    const [isTyping, setIsTyping] = useState(false);
-    const [typingUsers, setTypingUsers] = useState([]);
-    const [page, setPage] = useState(1);
-    const [hasMore, setHasMore] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
+    const [isMenuVisible, setIsMenuVisible] = useState(false);
+    const [todayChecked, setTodayChecked] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
 
-    // Store the current user ID in component state as a backup
-    const [currentUserId, setCurrentUserId] = useState(null);
-
-    // References
-    const scrollViewRef = useRef(null);
-    const typingTimeoutRef = useRef(null);
-    const flatListRef = useRef(null);
-
-    // Get socket connection status and user from Redux store
-    const socketConnected = useSelector(state => state.chat?.socketConnected) || false;
-    const currentUser = useSelector(state => state.user?.user);
-
-    // Load initial data and set current user ID
-    useEffect(() => {
-        // If currentUser is available from Redux, store the ID in component state
-        if (currentUser && currentUser.user.user_id) {
-            setCurrentUserId(currentUser.user.user_id);
-        } else {
-            // Fallback user ID if not available from Redux
-            setCurrentUserId(1); // Default user ID or fetch from another source
+    // Fetch habit details
+    const fetchHabitDetails = useCallback(async () => {
+        if (!habitId) {
+            setError('Habit ID is missing');
+            setLoading(false);
+            return;
         }
 
-        fetchRoomDetails();
-        fetchMessages();
-
-        // Mark messages as read when the chat is opened
-        markAsRead();
-
-        return () => {
-            clearTypingTimeout();
-        };
-    }, [roomId, currentUser]);
-
-    // Mark messages as read
-    const markAsRead = async () => {
         try {
-            await markMessagesAsRead(roomId);
-        } catch (error) {
-            console.error('Error marking messages as read:', error);
-        }
-    };
-
-    // Fetch room details
-    const fetchRoomDetails = async () => {
-        try {
-            const response = await getChatRoomDetails(roomId);
-            if (response && response.success && response.data) {
-                setRoomDetails(response.data);
-            }
-        } catch (error) {
-            console.error('Error fetching room details:', error);
-            setError('Failed to load chat details');
-        }
-    };
-
-    // Fetch messages
-    const fetchMessages = async (nextPage = 1) => {
-        try {
-            setLoading(nextPage === 1);
-            if (nextPage > 1) setLoadingMore(true);
-
-            const response = await getChatMessages(roomId, { page: nextPage, limit: 20 });
+            setLoading(true);
+            const response = await getHabitDetails(habitId);
 
             if (response && response.success && response.data) {
-                if (nextPage === 1) {
-                    setMessages(response.data);
-                } else {
-                    setMessages(prev => [...prev, ...response.data]);
+                const habitData = response.data;
+                setHabit(habitData);
+
+                // Check if habit is completed today from todayStatus
+                try {
+                    // Based on your API response, check todayStatus
+                    if (habitData.todayStatus && habitData.todayStatus.completed) {
+                        setTodayChecked(true);
+                    } else if (habitData.todayStatus && habitData.todayStatus.is_scheduled) {
+                        setTodayChecked(false);
+                    } else {
+                        // Check completions if todayStatus is not available
+                        if (habitData.recentLogs && Array.isArray(habitData.recentLogs)) {
+                            const today = startOfToday();
+                            let foundToday = false;
+
+                            for (let i = 0; habitData.recentLogs[i]; i++) {
+                                const log = habitData.recentLogs[i];
+                                if (log && log.date && isSameDay(parseISO(log.date), today)) {
+                                    if (log.completed) {
+                                        foundToday = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            setTodayChecked(foundToday);
+                        } else {
+                            setTodayChecked(false);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Error checking completion status:', err);
+                    setTodayChecked(false);
                 }
-
-                setHasMore(response.data.hasMore);
-                setPage(nextPage);
+            } else {
+                setError('Failed to fetch habit details');
             }
-        } catch (error) {
-            console.error('Error fetching messages:', error);
-            setError('Failed to load messages');
+        } catch (err) {
+            console.error('Error fetching habit details:', err);
+            setError('An error occurred while loading habit details');
         } finally {
             setLoading(false);
-            setLoadingMore(false);
+            setRefreshing(false);
         }
+    }, [habitId]);
+
+    // Use focus effect to refresh data when screen comes into focus
+    useFocusEffect(
+        useCallback(() => {
+            fetchHabitDetails();
+        }, [fetchHabitDetails])
+    );
+
+    // Handle refresh
+    const handleRefresh = () => {
+        setRefreshing(true);
+        fetchHabitDetails();
     };
 
-    // Load more messages when scrolling up
-    const handleLoadMore = () => {
-        if (hasMore && !loadingMore) {
-            fetchMessages(page + 1);
-        }
-    };
-
-    // Send a message
-    const handleSendMessage = async () => {
-        if (!inputText.trim()) return;
-
+    // Handle delete habit
+    const handleDeleteHabit = async () => {
         try {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-            // Clear input and typing status immediately for better UX
-            const messageText = inputText;
-            setInputText('');
-            clearTypingTimeout();
-
-            // Send typing stopped notification
-            try {
-                await updateTypingStatus(roomId, false);
-            } catch (typingError) {
-                console.error('Error updating typing status:', typingError);
+            if (!habitId) {
+                Alert.alert('Error', 'Cannot delete habit: ID is missing');
+                return;
             }
 
-            // Send the actual message
-            const response = await sendMessage(roomId, { content: messageText });
+            const response = await deleteHabit(habitId);
+
+            if (response && response.success) {
+                Alert.alert('Success', 'Habit deleted successfully');
+                router.push('/(tabs)/habits');
+            } else {
+                Alert.alert('Error', 'Failed to delete habit');
+            }
+        } catch (err) {
+            console.error('Error deleting habit:', err);
+            Alert.alert('Error', 'An error occurred while trying to delete the habit');
+        }
+    };
+
+    // Handle toggle favorite
+    const handleToggleFavorite = async () => {
+        try {
+            if (!habitId || !habit) {
+                Alert.alert('Error', 'Cannot update habit: Data is missing');
+                return;
+            }
+
+            const response = await toggleFavorite(habitId);
 
             if (response && response.success && response.data) {
-                // Add the new message to the list
-                // Note: You might not need this if you're using sockets and receiving the message that way
-                setMessages(prev => [response.data, ...prev]);
+                // Update habit in state with the updated favorite status
+                setHabit(prevHabit => ({
+                    ...prevHabit,
+                    is_favorite: !prevHabit.is_favorite
+                }));
+            } else {
+                Alert.alert('Error', 'Failed to update favorite status');
+            }
+        } catch (err) {
+            console.error('Error toggling favorite:', err);
+            Alert.alert('Error', 'An error occurred while updating favorite status');
+        }
+    };
 
-                // Scroll to bottom
-                if (flatListRef.current) {
-                    flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+    // Handle track habit
+    const handleTrackHabit = async () => {
+        try {
+            if (!habitId) {
+                Alert.alert('Error', 'Cannot track habit: ID is missing');
+                return;
+            }
+
+            // Optimistically update UI
+            setTodayChecked(!todayChecked);
+
+            const response = await trackHabit(habitId, {
+                completed: !todayChecked,
+                completion_date: new Date().toISOString()
+            });
+
+            if (response && response.success && response.data) {
+                // Update habit in state with the updated completion data
+                setHabit(prevHabit => {
+                    if (!prevHabit) return prevHabit;
+
+                    // Create a copy of the habit with updated data
+                    const updatedHabit = { ...prevHabit };
+
+                    // If API returns updated habit, use that data
+                    if (response.data.habit) {
+                        // Update streak if present
+                        if (response.data.habit.streak) {
+                            updatedHabit.streak = response.data.habit.streak;
+                        }
+
+                        // Update stats if present
+                        if (response.data.habit.stats) {
+                            updatedHabit.stats = response.data.habit.stats;
+                        }
+
+                        // Update todayStatus
+                        if (response.data.habit.todayStatus) {
+                            updatedHabit.todayStatus = response.data.habit.todayStatus;
+                        } else {
+                            // If no todayStatus, create one
+                            updatedHabit.todayStatus = {
+                                ...updatedHabit.todayStatus,
+                                completed: !todayChecked
+                            };
+                        }
+                    }
+
+                    // Update recentLogs
+                    if (!updatedHabit.recentLogs) {
+                        updatedHabit.recentLogs = [];
+                    }
+
+                    // If completing, add a new log
+                    if (!todayChecked) {
+                        const today = new Date().toISOString();
+                        const newLog = {
+                            log_id: String(Date.now()), // Temporary ID
+                            habit_id: habitId,
+                            user_id: updatedHabit.user_id || 0,
+                            completed: true,
+                            date: today
+                        };
+
+                        // Add to the beginning of logs
+                        updatedHabit.recentLogs = [newLog, ...updatedHabit.recentLogs];
+                    } else {
+                        // If uncompleting, remove today's log
+                        const today = startOfToday();
+                        updatedHabit.recentLogs = updatedHabit.recentLogs.filter(log => {
+                            if (!log || !log.date) return true;
+                            try {
+                                return !isSameDay(parseISO(log.date), today);
+                            } catch (e) {
+                                return true;
+                            }
+                        });
+                    }
+
+                    return updatedHabit;
+                });
+            } else {
+                // Revert optimistic update if request failed
+                setTodayChecked(!todayChecked);
+                Alert.alert('Error', 'Failed to track habit');
+            }
+        } catch (err) {
+            // Revert optimistic update if request failed
+            setTodayChecked(!todayChecked);
+            console.error('Error tracking habit:', err);
+            Alert.alert('Error', 'An error occurred while tracking the habit');
+        }
+    };
+
+    // Confirm delete habit
+    const confirmDeleteHabit = () => {
+        Alert.alert(
+            'Delete Habit',
+            'Are you sure you want to delete this habit? This action cannot be undone.',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Delete', style: 'destructive', onPress: handleDeleteHabit }
+            ]
+        );
+    };
+
+    // Get formatted frequency
+    const getFormattedFrequency = () => {
+        if (!habit || !habit.frequency_type) return 'N/A';
+
+        const type = habit.frequency_type;
+        const value = habit.frequency_value || 0;
+
+        switch (type) {
+            case 'DAILY':
+                return 'Every Day';
+            case 'WEEKDAYS':
+                return 'Weekdays';
+            case 'WEEKENDS':
+                return 'Weekends';
+            case 'X_TIMES_WEEK':
+                return `${value} Times per Week`;
+            case 'INTERVAL':
+                return `Every ${value} Days`;
+            default:
+                return type.replace('_', ' ');
+        }
+    };
+
+    // Get difficulty color
+    const getDifficultyColor = () => {
+        if (!habit || !habit.difficulty) return { color: '#9CA3AF', bg: 'rgba(156, 163, 175, 0.1)' };
+
+        switch (habit.difficulty) {
+            case 'VERY_EASY':
+                return { color: '#10B981', bg: 'rgba(16, 185, 129, 0.1)' };
+            case 'EASY':
+                return { color: '#34D399', bg: 'rgba(52, 211, 153, 0.1)' };
+            case 'MEDIUM':
+                return { color: '#F59E0B', bg: 'rgba(245, 158, 11, 0.1)' };
+            case 'HARD':
+                return { color: '#F43F5E', bg: 'rgba(244, 63, 94, 0.1)' };
+            case 'VERY_HARD':
+                return { color: '#EF4444', bg: 'rgba(239, 68, 68, 0.1)' };
+            default:
+                return { color: '#9CA3AF', bg: 'rgba(156, 163, 175, 0.1)' };
+        }
+    };
+
+    // Get streak and history stats
+    const getStats = () => {
+        if (!habit) return { currentStreak: 0, longestStreak: 0, completionRate: 0, totalCompletions: 0 };
+
+        // Get streak data - based on your API response, streak is an object, not an array
+        let currentStreak = 0;
+        let longestStreak = 0;
+
+        try {
+            // Get streak data from the streak object directly
+            if (habit.streak && typeof habit.streak === 'object') {
+                currentStreak = habit.streak.current_streak || 0;
+                longestStreak = habit.streak.longest_streak || 0;
+            }
+        } catch (err) {
+            console.error('Error processing streak data:', err);
+        }
+
+        // Calculate completion stats
+        let completionRate = 0;
+        let totalCompletions = 0;
+
+        try {
+            // Try to get stats from stats object
+            if (habit.stats && typeof habit.stats === 'object') {
+                completionRate = habit.stats.completionRate || 0;
+                totalCompletions = habit.stats.completedLogs || habit.stats.totalLogs || 0;
+            } else {
+                // Count recentLogs if available
+                if (habit.recentLogs && Array.isArray(habit.recentLogs)) {
+                    let count = 0;
+                    for (let i = 0; habit.recentLogs[i]; i++) {
+                        if (habit.recentLogs[i].completed) {
+                            count++;
+                        }
+                    }
+                    totalCompletions = count;
+                }
+
+                // Calculate completion rate
+                if (habit.start_date) {
+                    const startDate = new Date(habit.start_date);
+                    const today = new Date();
+                    const daysSinceStart = Math.max(1, Math.floor((today - startDate) / (1000 * 60 * 60 * 24)));
+                    completionRate = totalCompletions > 0 ? Math.round((totalCompletions / daysSinceStart) * 100) : 0;
                 }
             }
-        } catch (error) {
-            console.error('Error sending message:', error);
-            Alert.alert('Error', 'Failed to send message');
-            // Restore the input text in case of error
-            setInputText(messageText);
+        } catch (err) {
+            console.error('Error calculating completion stats:', err);
+        }
+
+        return { currentStreak, longestStreak, completionRate, totalCompletions };
+    };
+
+    // Format date helpers
+    const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
+        try {
+            return format(new Date(dateString), 'PPP');
+        } catch (e) {
+            return 'Invalid Date';
         }
     };
 
-    // Handle typing status
-    const handleInputChange = (text) => {
-        setInputText(text);
-
-        // Send typing status
-        if (!isTyping) {
-            setIsTyping(true);
-            updateTypingStatus(roomId, true).catch(console.error);
-        }
-
-        // Clear previous timeout
-        clearTypingTimeout();
-
-        // Set new timeout
-        typingTimeoutRef.current = setTimeout(() => {
-            setIsTyping(false);
-            updateTypingStatus(roomId, false).catch(console.error);
-        }, 3000);
-    };
-
-    const clearTypingTimeout = () => {
-        if (typingTimeoutRef.current) {
-            clearTimeout(typingTimeoutRef.current);
-            typingTimeoutRef.current = null;
-        }
-    };
-
-    // Get other user details for direct messages
-    const getOtherUser = () => {
-        if (!roomDetails || !isDirect) return null;
-
-        const otherParticipant = roomDetails.participants?.find(
-            p => p.user_id !== currentUserId
-        );
-
-        return otherParticipant?.user;
-    };
-
-    const otherUser = getOtherUser();
-
-    // Helper function to check if user was active in the last 15 minutes
-    const isRecentlyActive = (timestamp) => {
-        if (!timestamp) return false;
-
-        const lastActive = new Date(timestamp);
-        const now = new Date();
-        const diffMs = now.getTime() - lastActive.getTime();
-        const diffMins = Math.floor(diffMs / (1000 * 60));
-
-        return diffMins < 15;
-    };
-
-    const isOtherUserOnline = otherUser && (otherUser.isOnline || isRecentlyActive(otherUser.lastActive));
-
-    // Render functions
-    const renderMessage = ({ item }) => {
-        // Use the local state currentUserId which is more reliable
-        const isMyMessage = item.sender?.user_id === currentUserId;
-
-        // Safety check - if sender is missing, default to false
-        if (!item.sender) {
-            console.warn('Message is missing sender information', item);
-            return null;
-        }
+    // Menu component
+    const HabitOptionsMenu = () => {
+        if (!isMenuVisible) return null;
 
         return (
-            <MotiView
-                from={{ opacity: 0, translateY: 10 }}
-                animate={{ opacity: 1, translateY: 0 }}
-                transition={{ type: 'timing', duration: 300 }}
-                className={`mx-4 my-1 max-w-[80%] ${isMyMessage ? 'self-end' : 'self-start'}`}
+            <View
+                className={`absolute top-16 right-4 p-2 rounded-lg shadow-md z-10 ${
+                    isDarkMode ? 'bg-gray-800' : 'bg-white'
+                }`}
             >
-                <View className={`rounded-2xl p-3 ${
-                    isMyMessage
-                        ? isDark ? 'bg-primary-600' : 'bg-primary-500'
-                        : isDark ? 'bg-gray-700' : 'bg-gray-200'
-                }`}>
-                    <Text className={`${
-                        isMyMessage
-                            ? 'text-white'
-                            : isDark ? 'text-white' : 'text-gray-800'
-                    } font-montserrat`}>
-                        {item.content}
+                <TouchableOpacity
+                    className="flex-row items-center p-2"
+                    onPress={() => {
+                        setIsMenuVisible(false);
+                        handleToggleFavorite();
+                    }}
+                >
+                    <Star
+                        size={20}
+                        color={habit?.is_favorite ? "#FFD700" : isDarkMode ? "#E5E7EB" : "#374151"}
+                        fill={habit?.is_favorite ? "#FFD700" : "none"}
+                    />
+                    <Text className={`ml-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                        {habit?.is_favorite ? 'Remove Favorite' : 'Add to Favorites'}
                     </Text>
-                </View>
+                </TouchableOpacity>
 
-                <View className={`flex-row items-center mt-1 ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
-                    <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} font-montserrat`}>
-                        {formatMessageTime(item.createdAt)}
-                    </Text>
-                </View>
-            </MotiView>
+                <TouchableOpacity
+                    className="flex-row items-center p-2"
+                    onPress={() => {
+                        setIsMenuVisible(false);
+                        router.push({
+                            pathname: '(habits)/editHabit',
+                            params: { id: habitId }
+                        });
+                    }}
+                >
+                    <Edit2 size={20} color={isDarkMode ? "#E5E7EB" : "#374151"} />
+                    <Text className={`ml-2 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>Edit Habit</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                    className="flex-row items-center p-2"
+                    onPress={() => {
+                        setIsMenuVisible(false);
+                        confirmDeleteHabit();
+                    }}
+                >
+                    <Trash2 size={20} color="#EF4444" />
+                    <Text className="ml-2 text-red-500">Delete Habit</Text>
+                </TouchableOpacity>
+            </View>
         );
     };
 
-    // Format message time
-    const formatMessageTime = (timestamp) => {
-        if (!timestamp) return '';
+    // Stats item component
+    const StatItem = ({ icon, label, value, color = isDarkMode ? "#E5E7EB" : "#374151" }) => (
+        <View className="items-center">
+            <View className={`w-12 h-12 rounded-full items-center justify-center mb-1`} style={{ backgroundColor: `${color}20` }}>
+                {icon}
+            </View>
+            <Text className={`text-lg font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>{value}</Text>
+            <Text className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>{label}</Text>
+        </View>
+    );
 
-        const messageTime = new Date(timestamp);
-        const now = new Date();
+    // Loading component
+    if (loading) {
+        return (
+            <View className={`flex-1 justify-center items-center ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                <ActivityIndicator size="large" color={isDarkMode ? "#93C5FD" : "#3B82F6"} />
+                <Text className={`mt-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>Loading habit details...</Text>
+            </View>
+        );
+    }
 
-        // Today, show time only
-        if (messageTime.toDateString() === now.toDateString()) {
-            return messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        }
+    // Error component
+    if (error || !habit) {
+        return (
+            <View className={`flex-1 justify-center items-center px-4 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                <Text className={`text-lg font-bold mb-2 text-center ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                    {error || 'Habit not found'}
+                </Text>
+                <Text className={`text-center mb-6 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                    We couldn't load this habit's details. Please try again.
+                </Text>
+                <TouchableOpacity
+                    className="bg-primary-500 px-6 py-3 rounded-xl"
+                    onPress={fetchHabitDetails}
+                >
+                    <Text className="text-white font-bold">Retry</Text>
+                </TouchableOpacity>
 
-        // Yesterday
-        const yesterday = new Date(now);
-        yesterday.setDate(now.getDate() - 1);
-        if (messageTime.toDateString() === yesterday.toDateString()) {
-            return `Yesterday ${messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-        }
+                <TouchableOpacity
+                    className="mt-4"
+                    onPress={() => router.back()}
+                >
+                    <Text className={`${isDarkMode ? 'text-primary-400' : 'text-primary-600'}`}>Back to Habits</Text>
+                </TouchableOpacity>
+            </View>
+        );
+    }
 
-        // Within a week, show day name
-        const weekAgo = new Date(now);
-        weekAgo.setDate(now.getDate() - 7);
-        if (messageTime > weekAgo) {
-            return `${messageTime.toLocaleDateString([], { weekday: 'short' })} ${messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-        }
-
-        // Otherwise show date
-        return `${messageTime.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
-    };
+    // Destructure habit details for easier access
+    const { name, description, start_date, domain_name, domain_color } = habit;
+    const difficultyStyle = getDifficultyColor();
+    const stats = getStats();
 
     return (
-        <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+        <View className={`flex-1 ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`}>
             {/* Header */}
-            <View className={`px-4 py-2 flex-row items-center justify-between ${isDark ? 'bg-gray-800' : 'bg-white'} border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-                <View className="flex-row items-center">
-                    <TouchableOpacity
-                        onPress={() => router.back()}
-                        className="p-2 mr-2"
-                    >
-                        <ArrowLeft size={24} color={isDark ? "#E5E7EB" : "#374151"} />
-                    </TouchableOpacity>
+            <View className={`pt-12 px-4 flex-row items-center justify-between ${
+                isDarkMode ? 'bg-gray-800' : 'bg-white'
+            }`}>
+                <TouchableOpacity
+                    onPress={() => router.push('/(tabs)/habits')}
+                    className="p-2"
+                >
+                    <ArrowLeft size={24} color={isDarkMode ? "#E5E7EB" : "#374151"} />
+                </TouchableOpacity>
 
-                    <View className="flex-row items-center">
-                        {/* Avatar or Group Icon */}
-                        {roomDetails?.avatar ? (
-                            <Image
-                                source={{ uri: roomDetails.avatar }}
-                                className="h-10 w-10 rounded-full"
-                            />
-                        ) : isDirect && otherUser?.avatar ? (
-                            <Image
-                                source={{ uri: otherUser.avatar }}
-                                className="h-10 w-10 rounded-full"
-                            />
-                        ) : (
-                            <View className={`h-10 w-10 rounded-full items-center justify-center ${
-                                isDirect
-                                    ? 'bg-primary-500'
-                                    : 'bg-amber-500'
-                            }`}>
-                                <Text className="text-white text-lg font-montserrat-bold">
-                                    {roomName ? roomName[0].toUpperCase() : isDirect ? 'C' : 'G'}
-                                </Text>
+                <Text className={`text-xl font-bold ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                    Habit Details
+                </Text>
+
+                <TouchableOpacity
+                    onPress={() => setIsMenuVisible(!isMenuVisible)}
+                    className="p-2"
+                >
+                    <MoreVertical size={24} color={isDarkMode ? "#E5E7EB" : "#374151"} />
+                </TouchableOpacity>
+            </View>
+
+            {/* Options Menu */}
+            <HabitOptionsMenu />
+
+            <ScrollView
+                className="flex-1"
+                contentContainerStyle={{ paddingBottom: 40 }}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Habit Header Section */}
+                <View className={`p-4 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+                    <View className="flex-row items-center mb-2">
+                        {/* Domain Indicator */}
+                        {domain_name && (
+                            <View
+                                className="mr-2 p-2 rounded-full"
+                                style={{
+                                    backgroundColor: domain_color ? `${domain_color}20` : 'rgba(79, 70, 229, 0.1)'
+                                }}
+                            >
+                                <Layers size={16} color={domain_color || '#4F46E5'} />
                             </View>
                         )}
 
-                        <View className="ml-3">
-                            <Text className={`font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                {roomName || (isDirect ? otherUser?.user_name : 'Group Chat')}
-                            </Text>
+                        {/* Habit Name */}
+                        <Text className={`text-2xl font-bold flex-1 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                            {name || 'Unnamed Habit'}
+                        </Text>
 
-                            {/* Online Status Indicator for Direct Messages */}
-                            {isDirect && (
-                                <View className="flex-row items-center">
-                                    <View className={`h-2 w-2 rounded-full mr-1.5 ${
-                                        socketConnected ? 'bg-green-500' : 'bg-gray-400'
-                                    }`} />
-                                    <Text className={`text-xs font-montserrat ${
-                                        socketConnected
-                                            ? isDark ? 'text-green-400' : 'text-green-600'
-                                            : isDark ? 'text-gray-400' : 'text-gray-500'
-                                    }`}>
-                                        {socketConnected ? 'Online' : 'Offline'}
-                                    </Text>
-                                </View>
-                            )}
+                        {/* Favorite Icon */}
+                        {habit.is_favorite && (
+                            <Star size={20} color="#FFD700" fill="#FFD700" />
+                        )}
+                    </View>
+
+                    {/* Description */}
+                    {description && (
+                        <Text className={`mt-1 mb-3 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                            {description}
+                        </Text>
+                    )}
+
+                    {/* Frequency & Difficulty */}
+                    <View className="flex-row justify-between items-center mt-2">
+                        <View className="flex-row items-center">
+                            <Calendar size={16} color={isDarkMode ? "#D1D5DB" : "#6B7280"} />
+                            <Text className={`ml-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                                {getFormattedFrequency()}
+                            </Text>
                         </View>
+
+                        <View
+                            className="px-2 py-1 rounded-full"
+                            style={{ backgroundColor: difficultyStyle.bg }}
+                        >
+                            <Text className="text-xs" style={{ color: difficultyStyle.color }}>
+                                {habit.difficulty?.replace('_', ' ') || 'Medium'}
+                            </Text>
+                        </View>
+                    </View>
+
+                    {/* Start Date */}
+                    <View className="flex-row items-center mt-2">
+                        <Clock size={16} color={isDarkMode ? "#D1D5DB" : "#6B7280"} />
+                        <Text className={`ml-1 ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                            Started {formatDate(start_date)}
+                        </Text>
                     </View>
                 </View>
 
-                <View className="flex-row">
-                    {isDirect && (
-                        <>
-                            <TouchableOpacity className="p-2">
-                                <Phone size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
-                            </TouchableOpacity>
-
-                            <TouchableOpacity className="p-2">
-                                <Video size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
-                            </TouchableOpacity>
-                        </>
-                    )}
+                {/* Track Today Section */}
+                <View className={`mt-4 p-4 ${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg mx-4`}>
+                    <Text className={`text-lg font-bold mb-3 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                        Track Today
+                    </Text>
 
                     <TouchableOpacity
-                        className="p-2"
-                        onPress={() => {
-                            // Navigate to chat info/settings
-                            router.push({
-                                pathname: isDirect
-                                    ? `/(chat)/profile/${otherUser?.user_id}`
-                                    : `/(chat)/group/${roomId}`,
-                                params: {
-                                    name: roomName || ''
-                                }
-                            });
-                        }}
-                    >
-                        <Info size={22} color={isDark ? "#9CA3AF" : "#6B7280"} />
-                    </TouchableOpacity>
-                </View>
-            </View>
-
-            {/* Typing indicator */}
-            {typingUsers.length > 0 && (
-                <View className={`px-4 py-2 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
-                    <Text className={`italic text-xs ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
-                        {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-                    </Text>
-                </View>
-            )}
-
-            {/* Message List */}
-            {loading ? (
-                <View className="flex-1 justify-center items-center">
-                    <ActivityIndicator size="large" color={isDark ? "#93C5FD" : "#3B82F6"} />
-                    <Text className={`mt-3 ${isDark ? 'text-gray-300' : 'text-gray-600'} font-montserrat`}>
-                        Loading messages...
-                    </Text>
-                </View>
-            ) : error ? (
-                <View className="flex-1 justify-center items-center px-4">
-                    <Text className={`text-center mb-4 ${isDark ? 'text-white' : 'text-gray-900'} font-montserrat-medium`}>
-                        {error}
-                    </Text>
-                    <TouchableOpacity
-                        className="bg-primary-500 px-6 py-3 rounded-xl"
-                        onPress={() => fetchMessages()}
-                    >
-                        <Text className="text-white font-montserrat-medium">Retry</Text>
-                    </TouchableOpacity>
-                </View>
-            ) : (
-                <FlatList
-                    ref={flatListRef}
-                    data={messages}
-                    renderItem={renderMessage}
-                    keyExtractor={(item) => item.message_id?.toString() || Math.random().toString()}
-                    contentContainerStyle={{ paddingVertical: 10 }}
-                    inverted // Display newest messages at the bottom
-                    onEndReached={handleLoadMore}
-                    onEndReachedThreshold={0.3}
-                    ListFooterComponent={loadingMore && (
-                        <View className="py-4 items-center">
-                            <ActivityIndicator size="small" color={isDark ? "#93C5FD" : "#3B82F6"} />
-                            <Text className={`mt-2 ${isDark ? 'text-gray-300' : 'text-gray-600'} text-xs font-montserrat`}>
-                                Loading more...
-                            </Text>
-                        </View>
-                    )}
-                />
-            )}
-
-            {/* Input Area */}
-            <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 70}
-            >
-                <MotiView
-                    from={{ translateY: 50, opacity: 0 }}
-                    animate={{ translateY: 0, opacity: 1 }}
-                    transition={{ type: 'timing', duration: 350 }}
-                    className={`p-2 border-t flex-row items-center ${
-                        isDark
-                            ? 'bg-gray-800 border-gray-700'
-                            : 'bg-white border-gray-200'
-                    }`}
-                >
-                    <View className={`flex-1 flex-row items-center px-3 py-2 rounded-full mr-2 ${
-                        isDark ? 'bg-gray-700' : 'bg-gray-100'
-                    }`}>
-                        <TextInput
-                            className={`flex-1 ${
-                                isDark ? 'text-white' : 'text-gray-900'
-                            } font-montserrat`}
-                            placeholder="Type a message..."
-                            placeholderTextColor={isDark ? "#9CA3AF" : "#6B7280"}
-                            value={inputText}
-                            onChangeText={handleInputChange}
-                            multiline
-                            maxLength={1000}
-                        />
-                    </View>
-
-                    <TouchableOpacity
-                        className={`w-10 h-10 rounded-full items-center justify-center ${
-                            !inputText.trim()
-                                ? isDark ? 'bg-gray-700' : 'bg-gray-200'
-                                : 'bg-primary-500'
+                        className={`p-4 rounded-lg border flex-row justify-between items-center ${
+                            todayChecked
+                                ? isDarkMode ? 'bg-green-900/20 border-green-700' : 'bg-green-100 border-green-200'
+                                : isDarkMode ? 'bg-gray-700/30 border-gray-700' : 'bg-gray-100 border-gray-200'
                         }`}
-                        onPress={handleSendMessage}
-                        disabled={!inputText.trim()}
+                        onPress={handleTrackHabit}
                     >
-                        <Send
-                            size={20}
-                            color={!inputText.trim() ? (isDark ? "#9CA3AF" : "#6B7280") : "#FFFFFF"}
-                        />
+                        <View className="flex-row items-center">
+                            {todayChecked ? (
+                                <CheckCircle size={24} color={isDarkMode ? "#34D399" : "#10B981"} fill={isDarkMode ? "#34D399" : "#10B981"} />
+                            ) : (
+                                <XCircle size={24} color={isDarkMode ? "#9CA3AF" : "#6B7280"} />
+                            )}
+                            <Text className={`ml-2 text-base ${
+                                todayChecked
+                                    ? isDarkMode ? 'text-green-400' : 'text-green-700'
+                                    : isDarkMode ? 'text-gray-300' : 'text-gray-600'
+                            }`}>
+                                {todayChecked ? 'Completed Today' : 'Mark as Completed'}
+                            </Text>
+                        </View>
+
+                        <Text className={isDarkMode ? 'text-gray-400' : 'text-gray-500'}>
+                            {format(new Date(), 'PPP')}
+                        </Text>
                     </TouchableOpacity>
-                </MotiView>
-            </KeyboardAvoidingView>
-        </SafeAreaView>
+                </View>
+
+                {/* Stats Section */}
+                <View className={`mt-4 p-4 ${isDarkMode ? 'bg-gray-800' : 'bg-white'} rounded-lg mx-4`}>
+                    <Text className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-white' : 'text-gray-900'}`}>
+                        Stats
+                    </Text>
+
+                    <View className="flex-row justify-between">
+                        <StatItem
+                            icon={<Flame size={24} color="#F59E0B" />}
+                            label="Current Streak"
+                            value={`${stats.currentStreak} Days`}
+                            color="#F59E0B"
+                        />
+
+                        <StatItem
+                            icon={<Award size={24} color="#10B981" />}
+                            label="Best Streak"
+                            value={`${stats.longestStreak} Days`}
+                            color="#10B981"
+                        />
+
+                        <StatItem
+                            icon={<BarChart2 size={24} color="#3B82F6" />}
+                            label="Completion Rate"
+                            value={`${stats.completionRate}%`}
+                            color="#3B82F6"
+                        />
+                    </View>
+
+                    <View className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                        <Text className={`text-base ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                            Total Completions: {stats.totalCompletions}
+                        </Text>
+                    </View>
+                </View>
+            </ScrollView>
+        </View>
     );
 }

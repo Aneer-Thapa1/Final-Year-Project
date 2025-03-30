@@ -94,7 +94,7 @@ const Analytics = () => {
     );
 
     return (
-        <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+        <SafeAreaView edges={[ 'left', 'right']} className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
             <ScrollView className="flex-1">
                 {/* Header */}
                 <View className="px-4 pb-6">

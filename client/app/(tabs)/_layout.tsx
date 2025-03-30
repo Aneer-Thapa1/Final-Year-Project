@@ -19,7 +19,7 @@ const TabsLayout = () => {
                 <Tabs.Screen name='rank' options={{ title: 'Rank', headerShown: false }} />
             </Tabs>
         </View>
-    );
+    );  
 };
 
 export default TabsLayout;

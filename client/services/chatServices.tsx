@@ -1,4 +1,4 @@
-import { fetchData, postData, updateData, deleteData } from './api';
+import {fetchData, postData, updateData, deleteData, postImageData} from './api';
 import React from "react";
 
 // Enum Imports
@@ -83,12 +83,13 @@ export const createGroupChat = async (chatData: {
     is_private?: boolean;
 }) => {
     try {
+        console.log(chatData);
         // Validate required fields
         if (!chatData.name || !chatData.participants || chatData.participants.length < 2) {
             throw new Error('Group name and at least 2 participants are required');
         }
 
-        return await postData<ApiResponse<ChatRoom>>('/api/chat/rooms/group', chatData);
+        return await postImageData<ApiResponse<ChatRoom>>('/api/chat/rooms/group', chatData);
     } catch (error: any) {
         console.error('Error in createGroupChat:', error);
         throw error.response?.data?.error || error.message || 'Failed to create group chat';
@@ -226,19 +227,20 @@ export const getChatMessages = async (roomId: number, params?: {
     }
 };
 
-export const sendMessage = async (roomId: number, messageData: {
-    content: string;
-    message_type?: MessageType | string;
-    reply_to_id?: number;
-    media_url?: string;
-}) => {
+export const sendMessage = async (roomId, messageData) => {
     try {
+        // Ensure the message data has the required content property
+        if (!messageData.content || !messageData.content.trim()) {
+            throw new Error('Message content cannot be empty');
+        }
+
         return await postData<ApiResponse<Message>>(`/api/chat/rooms/${roomId}/messages`, messageData);
-    } catch (error: any) {
+    } catch (error) {
         console.error('Error in sendMessage:', error);
-        throw error.response?.data?.error || 'Failed to send message';
+        throw error.response?.data?.error || error.message || 'Failed to send message';
     }
 };
+
 
 export const editMessage = async (messageId: number, content: string) => {
     try {

@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { View, Text, TouchableOpacity, Animated, TextInput, Modal } from 'react-native';
 import Swipeable from 'react-native-gesture-handler/Swipeable';
-import { Clock, Flame, CheckCircle2, Calendar, BarChart2, Timer, Hash, Repeat, X } from 'lucide-react-native';
+import { Clock, Flame, CheckCircle2, Calendar, BarChart2, Timer, Hash, Repeat, X, AlertTriangle } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 
@@ -52,8 +52,9 @@ interface CompletionData {
 interface HabitCardProps {
     habit: Habit;
     isDark?: boolean;
-    onComplete: (completionData: CompletionData) => void;
+    onComplete: ((completionData: CompletionData) => void) | null;
     isCompleted?: boolean;
+    isPast?: boolean; // New prop to indicate if this is a past day's habit
 }
 
 // Difficulty Color Mapping
@@ -90,10 +91,10 @@ const HabitCard = ({
                        isDark = false,
                        onComplete,
                        isCompleted = false,
+                       isPast = false,
                    }: HabitCardProps) => {
     const swipeableRef = useRef<Swipeable>(null);
     const router = useRouter();
-
 
     // State for tracking type input modals
     const [showInputModal, setShowInputModal] = useState(false);
@@ -167,6 +168,9 @@ const HabitCard = ({
 
     // Handle completion based on tracking type
     const handleCompletion = () => {
+        // Don't allow completion for past habits
+        if (isPast || !onComplete) return;
+
         // Boolean habits can be completed directly with a swipe
         if (!habit.tracking_type || habit.tracking_type === 'BOOLEAN') {
             submitCompletion();
@@ -180,6 +184,9 @@ const HabitCard = ({
 
     // Submit completion data
     const submitCompletion = () => {
+        // Don't allow completion for past habits
+        if (isPast || !onComplete) return;
+
         const completionData: CompletionData = {
             habit_id: habitId,
             completed: true,
@@ -238,10 +245,11 @@ const HabitCard = ({
         );
     };
 
-    // Navigate to Habit Details
+    // Navigate to Habit Details with correct path format
     const navigateToHabitDetails = () => {
         if (habitId) {
-            router.push(`/habits/${habitId}`);
+            // Use the format (habit)/id instead of habit/id
+            router.push(`(habits)/${habitId}`);
         }
     };
 
@@ -280,13 +288,34 @@ const HabitCard = ({
         return 'Value';
     };
 
+    // Get status display for completion or past habit
+    const getStatusDisplay = () => {
+        if (isCompleted) {
+            return {
+                containerClass: 'bg-green-500/20',
+                icon: <CheckCircle2 size={18} color="#10B981" />,
+                text: 'Completed'
+            };
+        } else if (isPast && !isCompleted) {
+            return {
+                containerClass: 'bg-red-500/20',
+                icon: <AlertTriangle size={18} color="#EF4444" />,
+                text: 'Missed'
+            };
+        } else {
+            return null; // For regular, non-completed, non-past habits
+        }
+    };
+
+    const statusDisplay = getStatusDisplay();
+
     return (
         <>
             <Swipeable
                 ref={swipeableRef}
-                renderRightActions={renderRightActions}
+                renderRightActions={!isPast && !isCompleted && onComplete ? renderRightActions : null}
                 overshootRight={false}
-                enabled={!isCompleted}
+                enabled={!isPast && !isCompleted && !!onComplete}
             >
                 <TouchableOpacity
                     onPress={navigateToHabitDetails}
@@ -294,7 +323,7 @@ const HabitCard = ({
                     className={`
                         mb-4 rounded-2xl relative overflow-hidden
                         ${isDark ? 'bg-[#252F3C]' : 'bg-white'}
-                        ${isCompleted ? 'opacity-70' : ''}
+                        ${isCompleted || isPast ? 'opacity-80' : ''}
                         shadow-sm
                     `}
                     style={{
@@ -308,7 +337,7 @@ const HabitCard = ({
                     }}
                 >
                     {/* Progress Indicator (if applicable) */}
-                    {(!isCompleted && habit.progress !== undefined && habit.progress > 0 && habit.progress < 100) && (
+                    {(!isCompleted && !isPast && habit.progress !== undefined && habit.progress > 0 && habit.progress < 100) && (
                         <View
                             className="absolute top-0 left-0 h-1 bg-primary-500"
                             style={{ width: `${habit.progress}%`, zIndex: 10 }}
@@ -363,15 +392,15 @@ const HabitCard = ({
 
                             {/* Streak & Completion Status */}
                             <View className="flex-row items-center">
-                                {isCompleted ? (
-                                    <View className="ml-2 bg-green-500/20 p-1 rounded-full">
-                                        <CheckCircle2 size={18} color="#10B981" />
+                                {statusDisplay ? (
+                                    <View className={`ml-2 p-1 rounded-full ${statusDisplay.containerClass}`}>
+                                        {statusDisplay.icon}
                                     </View>
                                 ) : (
                                     <>
                                         <Flame size={18} color="#F97316" />
                                         <Text className="ml-1 font-montserrat-semibold text-accent-500">
-                                            {habit.streak?.current_streak || 0} days
+                                            {(habit.streak && habit.streak[0]?.current_streak) || 0} days
                                         </Text>
                                     </>
                                 )}

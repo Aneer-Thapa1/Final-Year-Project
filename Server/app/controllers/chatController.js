@@ -11,7 +11,9 @@ const createChatRoom = async (req, res) => {
         const { name, type, description, participants, is_private = false } = req.body;
         const userId = parseInt(req.user);
 
-        console.log(userId);
+        console.log(name);
+
+
 
         // Create the room first
         const chatRoom = await prisma.chatRoom.create({
@@ -847,6 +849,13 @@ const sendMessage = async (req, res) => {
         const { roomId } = req.params;
         const { content, message_type = 'TEXT', reply_to_id, media_url, media_type, media_size, media_width, media_height, media_duration } = req.body;
         const userId = parseInt(req.user);
+console.log("body", req.body);
+        if (!content || content.trim() === '') {
+            return res.status(400).json({
+                success: false,
+                message: 'Message content cannot be empty'
+            });
+        }
 
         // Check if user is participant of the room
         const isParticipant = await prisma.chatParticipant.findUnique({
@@ -1743,6 +1752,11 @@ const createGroupChat = async (req, res) => {
             avatar,
             is_private = false
         } = req.body;
+console.log(req.body)
+        console.log(name,  name,
+            description,
+            participants,
+            avatar,)
         const userId = parseInt(req.user);
 
         // Validate input
@@ -1758,7 +1772,6 @@ const createGroupChat = async (req, res) => {
                 user_id: parseInt(userId)
             }
         });
-console.log(user);
         // Ensure current user is included in participants
         const participantSet = new Set([
             ...participants,

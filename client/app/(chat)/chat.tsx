@@ -139,7 +139,7 @@ export default function ChatScreen() {
     const handleCreateGroup = async (groupData) => {
         try {
             setCreatingGroup(true);
-
+            console.log(groupData)
             const newGroup = await createGroupChat({
                 name: groupData.name,
                 description: groupData.description,
