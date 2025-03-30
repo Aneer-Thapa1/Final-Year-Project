@@ -8,6 +8,7 @@ const friendshipRoute = require('./friendshipRoute');
 const chatRoute = require('./chatRoute');
 const leaderboardRoute = require('./leaderboardRoute');
 const recommendationRoute = require('./recommendationRoute');
+const profileRoute = require('./profileRoute');
 
 const router = express.Router();
 
@@ -37,5 +38,8 @@ router.use('/leaderboard', leaderboardRoute)
 
 // routes related to leaderboard (/api/leaderboard)
 router.use('/recommendation', recommendationRoute)
+
+// routes related to leaderboard (/api/leaderboard)
+router.use('/profile', profileRoute)
 
 module.exports = router;

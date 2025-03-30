@@ -51,11 +51,16 @@ export interface LeaderboardResponse {
 }
 
 // Function to get points-based leaderboard
-export const getPointsLeaderboard = async (timeframe: 'weekly' | 'monthly' = 'weekly', limit: number = 10) => {
+export const getPointsLeaderboard = async (
+    timeframe: 'weekly' | 'monthly' | 'allTime' = 'weekly',
+    limit: number = 10,
+    friendsOnly: boolean = false
+) => {
     try {
         const params = new URLSearchParams();
         params.append('timeframe', timeframe);
         params.append('limit', limit.toString());
+        if (friendsOnly) params.append('friendsOnly', 'true');
 
         const response = await fetchData<LeaderboardResponse>(`/api/leaderboard/points?${params.toString()}`);
 
@@ -88,32 +93,14 @@ export const getRealTimeLeaderboard = async (limit: number = 10) => {
     }
 };
 
-// Function to get habit completion leaderboard
-export const getCompletionsLeaderboard = async (timeframe: 'weekly' | 'monthly' = 'weekly', domainId?: number, limit: number = 10) => {
+// Function to get streaks leaderboard
+export const getStreaksLeaderboard = async (limit: number = 10, friendsOnly: boolean = false) => {
     try {
         const params = new URLSearchParams();
-        params.append('timeframe', timeframe);
-        if (domainId) params.append('domain_id', domainId.toString());
         params.append('limit', limit.toString());
+        if (friendsOnly) params.append('friendsOnly', 'true');
 
-        const response = await fetchData<LeaderboardResponse>(`/api/leaderboard/completions?${params.toString()}`);
-
-        if (response && response.success && response.data) {
-            return response;
-        } else {
-            console.warn('Unexpected API response format in getCompletionsLeaderboard:', response);
-            return { success: true, data: [] };
-        }
-    } catch (error: any) {
-        console.error('Error in getCompletionsLeaderboard:', error);
-        throw error.response?.data?.error || error.message || 'Failed to fetch completion leaderboard data';
-    }
-};
-
-// Function to get streaks leaderboard
-export const getStreaksLeaderboard = async (limit: number = 10) => {
-    try {
-        const response = await fetchData<LeaderboardResponse>(`/api/leaderboard/streaks?limit=${limit}`);
+        const response = await fetchData<LeaderboardResponse>(`/api/leaderboard/streaks?${params.toString()}`);
 
         if (response && response.success && response.data) {
             return response;
@@ -128,7 +115,7 @@ export const getStreaksLeaderboard = async (limit: number = 10) => {
 };
 
 // Function to get domain activity leaderboard
-export const getDomainLeaderboard = async (timeframe: 'weekly' | 'monthly' = 'weekly', limit: number = 10) => {
+export const getDomainLeaderboard = async (timeframe: 'weekly' | 'monthly' | 'allTime' = 'weekly', limit: number = 10) => {
     try {
         const params = new URLSearchParams();
         params.append('timeframe', timeframe);
@@ -153,19 +140,24 @@ export const useLeaderboard = () => {
     const [leaderboardData, setLeaderboardData] = React.useState<LeaderboardUser[] | DomainLeaderboardItem[]>([]);
     const [currentUser, setCurrentUser] = React.useState<LeaderboardUser | null>(null);
     const [userTopDomain, setUserTopDomain] = React.useState<UserDomainData | null>(null);
-    const [timeframe, setTimeframe] = React.useState<'weekly' | 'monthly'>('weekly');
-    const [leaderboardType, setLeaderboardType] = React.useState<'points' | 'completions' | 'streaks' | 'domains' | 'realtime'>('points');
+    const [timeframe, setTimeframe] = React.useState<'weekly' | 'monthly' | 'allTime'>('weekly');
+    const [leaderboardType, setLeaderboardType] = React.useState<'points' | 'streaks' | 'domains' | 'realtime'>('points');
+    const [friendsOnly, setFriendsOnly] = React.useState<boolean>(false);
     const [loading, setLoading] = React.useState(false);
     const [error, setError] = React.useState<string | null>(null);
     const [lastUpdated, setLastUpdated] = React.useState<string | null>(null);
 
     const fetchLeaderboard = async (
-        type: 'points' | 'completions' | 'streaks' | 'domains' | 'realtime' = 'points',
-        newTimeframe?: 'weekly' | 'monthly',
-        domainId?: number
+        type: 'points' | 'streaks' | 'domains' | 'realtime' = 'points',
+        newTimeframe?: 'weekly' | 'monthly' | 'allTime',
+        newFriendsOnly?: boolean
     ) => {
         const timeframeToUse = newTimeframe || timeframe;
+        const friendsOnlyValue = newFriendsOnly !== undefined ? newFriendsOnly : friendsOnly;
+
         if (newTimeframe) setTimeframe(newTimeframe);
+        if (newFriendsOnly !== undefined) setFriendsOnly(newFriendsOnly);
+
         setLeaderboardType(type);
 
         try {
@@ -174,7 +166,7 @@ export const useLeaderboard = () => {
 
             switch (type) {
                 case 'points':
-                    response = await getPointsLeaderboard(timeframeToUse);
+                    response = await getPointsLeaderboard(timeframeToUse, 10, friendsOnlyValue);
                     if (response.success && Array.isArray(response.data)) {
                         setLeaderboardData(response.data as LeaderboardUser[]);
                         setCurrentUser(response.currentUser || null);
@@ -193,17 +185,8 @@ export const useLeaderboard = () => {
                     }
                     break;
 
-                case 'completions':
-                    response = await getCompletionsLeaderboard(timeframeToUse, domainId);
-                    if (response.success && Array.isArray(response.data)) {
-                        setLeaderboardData(response.data as LeaderboardUser[]);
-                        setCurrentUser(response.currentUser || null);
-                        setUserTopDomain(null);
-                    }
-                    break;
-
                 case 'streaks':
-                    response = await getStreaksLeaderboard();
+                    response = await getStreaksLeaderboard(10, friendsOnlyValue);
                     if (response.success && Array.isArray(response.data)) {
                         setLeaderboardData(response.data as LeaderboardUser[]);
                         setCurrentUser(response.currentUser || null);
@@ -256,10 +239,12 @@ export const useLeaderboard = () => {
         userTopDomain,
         timeframe,
         leaderboardType,
+        friendsOnly,
         loading,
         error,
         lastUpdated,
         fetchLeaderboard,
-        setTimeframe
+        setTimeframe,
+        setFriendsOnly
     };
 };

@@ -28,6 +28,12 @@ interface HabitLog {
     numeric_completed?: number;
 }
 
+interface Streak {
+    current_streak?: number;
+    longest_streak?: number;
+    start_date?: string;
+}
+
 interface HabitDetails {
     habit_id: number;
     name: string;
@@ -36,11 +42,7 @@ interface HabitDetails {
     time: string;
     difficulty: string;
     tracking_type: string;
-    streak: {
-        current_streak: number;
-        longest_streak: number;
-        start_date: string;
-    };
+    streak?: Streak | Streak[]; // Updated to handle both object and array
     logs: HabitLog[];
 }
 
@@ -76,6 +78,28 @@ export default function HabitDetailsScreen() {
         fetchHabitDetails();
     }, [id]);
 
+    // Helper function to safely get streak values
+    const getStreakValues = () => {
+        if (!habitDetails?.streak) {
+            return { current: 0, longest: 0 };
+        }
+
+        // If streak is an array, get the first element
+        if (Array.isArray(habitDetails.streak)) {
+            const firstStreak = habitDetails.streak[0] || {};
+            return {
+                current: firstStreak.current_streak || 0,
+                longest: firstStreak.longest_streak || 0
+            };
+        }
+
+        // If streak is an object
+        return {
+            current: habitDetails.streak.current_streak || 0,
+            longest: habitDetails.streak.longest_streak || 0
+        };
+    };
+
     if (isLoading) {
         return (
             <View className="flex-1 items-center justify-center bg-white dark:bg-gray-900">
@@ -97,6 +121,9 @@ export default function HabitDetailsScreen() {
             </View>
         );
     }
+
+    // Get streak values for display
+    const streakValues = getStreakValues();
 
     return (
         <ScrollView
@@ -164,8 +191,8 @@ export default function HabitDetailsScreen() {
                             className="mr-3"
                         />
                         <Text className="text-gray-700 dark:text-gray-200">
-                            Current Streak: {habitDetails.streak.current_streak} days
-                            {' '}(Longest: {habitDetails.streak.longest_streak} days)
+                            Current Streak: {streakValues.current} days
+                            {' '}(Longest: {streakValues.longest} days)
                         </Text>
                     </View>
 

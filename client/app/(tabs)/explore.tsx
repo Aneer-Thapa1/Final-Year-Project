@@ -17,9 +17,10 @@ import * as Haptics from "expo-haptics";
 import { useFocusEffect } from '@react-navigation/native';
 import { useSelector } from 'react-redux';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Send } from "lucide-react-native";
 
-// Components
-import BlogPostCreator from "../../components/BlogPostCreator";
+// Import the full modal BlogPostCreator
+import BlogPostCreatorModal from "../../components/BlogPostCreator";
 import Blog from "../../components/Blogs";
 
 import icons from "../../constants/images";
@@ -44,6 +45,9 @@ const Explore = ({ navigation }) => {
   const [hasMorePosts, setHasMorePosts] = useState(true);
   const [creatingPost, setCreatingPost] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+
+  // Blog creator modal state
+  const [blogModalVisible, setBlogModalVisible] = useState(false);
 
   // Refs
   const flatListRef = useRef(null);
@@ -259,12 +263,19 @@ const Explore = ({ navigation }) => {
     try {
       setCreatingPost(true);
 
+      console.log('Selected images:', postData.images);
+
       const blogData = {
-        title: postData.title || undefined,
+        title: postData.title || '',
         content: postData.content,
-        image: postData.images && postData.images.length > 0 ? postData.images[0] : undefined,
-        category_id: postData.category_id
+        category_id: postData.category_id,
       };
+
+      // Add the first image if available
+      if (postData.images && postData.images.length > 0) {
+        blogData.image = postData.images[0];
+        console.log('Using image:', blogData.image);
+      }
 
       const response = await blogService.addBlog(blogData);
 
@@ -274,6 +285,9 @@ const Explore = ({ navigation }) => {
 
         // Refresh to show the new post
         handleRefresh();
+
+        // Close the modal
+        setBlogModalVisible(false);
       } else {
         throw new Error(response.error || 'Failed to create post');
       }
@@ -435,15 +449,45 @@ const Explore = ({ navigation }) => {
     };
   }, [tabBarOpacity]);
 
+  // Open blog creator modal
+  const openBlogModal = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setBlogModalVisible(true);
+  };
+
+  // Close blog creator modal
+  const closeBlogModal = () => {
+    setBlogModalVisible(false);
+  };
+
   // Header component for FlatList
   const ListHeader = useMemo(() => (
       <View className="px-4 pb-2">
-        {/* Blog Creator */}
-        <BlogPostCreator
-            isDark={isDark}
-            onPost={handleCreatePost}
-            isLoading={creatingPost}
-        />
+        {/* Blog Creator Card */}
+        <MotiView
+            className={`rounded-3xl mb-4 ${isDark ? 'bg-[#252F3C]' : 'bg-white'} shadow-sm overflow-hidden`}
+            style={{
+              shadowColor: isDark ? '#000' : '#333',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 3,
+              elevation: 3
+            }}
+        >
+          <TouchableOpacity
+              onPress={openBlogModal}
+              className="px-4 py-4 flex-row items-center justify-between"
+              activeOpacity={0.7}
+          >
+            <Text className={`text-lg font-montserrat ${isDark ? 'text-white' : 'text-gray-900'}`}>
+              Share your progress...
+            </Text>
+
+            <View className={`p-2 rounded-full ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+              <Send size={16} color={isDark ? '#E5E7EB' : '#4B5563'} />
+            </View>
+          </TouchableOpacity>
+        </MotiView>
 
         {/* Section heading */}
         <View className="flex-row items-center justify-between mt-4 mb-2">
@@ -452,7 +496,7 @@ const Explore = ({ navigation }) => {
           </Text>
         </View>
       </View>
-  ), [isDark, creatingPost, handleCreatePost, themeStyles.text]);
+  ), [isDark, themeStyles.text]);
 
   // Empty state component when no posts are available
   const EmptyComponent = useMemo(() => (
@@ -468,6 +512,7 @@ const Explore = ({ navigation }) => {
               if (flatListRef.current) {
                 flatListRef.current.scrollToOffset({ offset: 0, animated: true });
               }
+              openBlogModal();
             }}
             className="bg-primary-500 py-2 px-4 rounded-lg self-center"
         >
@@ -575,6 +620,14 @@ const Explore = ({ navigation }) => {
             extraData={loadingMore}
         />
 
+        {/* Blog Post Creator Modal */}
+        <BlogPostCreatorModal
+            visible={blogModalVisible}
+            onClose={closeBlogModal}
+            onPost={handleCreatePost}
+            loading={creatingPost}
+        />
+
         {/* Initial Loading Overlay */}
         {initialLoading && (
             <View className="absolute inset-0 justify-center items-center bg-black/20">
@@ -586,8 +639,6 @@ const Explore = ({ navigation }) => {
               </View>
             </View>
         )}
-
-        {/* Note: The tab bar component will use the tabBarOpacity animated value from context */}
       </SafeAreaView>
   );
 };

@@ -1,11 +1,12 @@
-import { Image, Text, View, TouchableOpacity, Modal, ScrollView, useColorScheme, Pressable, ActivityIndicator, TextInput, Animated } from 'react-native'
-import React, { useState, useRef, useEffect } from 'react'
-import { Heart, MessageCircle, Share2, ArrowLeft, MoreHorizontal, Bookmark, Send, X } from 'lucide-react-native'
-import { MotiView, AnimatePresence } from 'moti'
-import * as Haptics from 'expo-haptics'
-import { SafeAreaView } from 'react-native-safe-area-context'
-import Comment from './Comment'
-import icons from '../constants/images'
+import { Image, Text, View, TouchableOpacity, Modal, ScrollView, Pressable, ActivityIndicator, TextInput, Animated } from 'react-native';
+import React, { useState, useRef, useEffect } from 'react';
+import { Heart, MessageCircle, Share2, ArrowLeft, MoreHorizontal, Bookmark, Send, X } from 'lucide-react-native';
+import { MotiView, AnimatePresence } from 'moti';
+import * as Haptics from 'expo-haptics';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Comment from './Comment';
+import icons from '../constants/images';
+import { API_BASE_URL } from '../services/api';
 
 const Blog = ({
                   blog,
@@ -15,6 +16,7 @@ const Blog = ({
                   onShare,
                   onBookmark,
                   onMenuPress,
+                  onReadMore,
                   authorProfile = icons.maleProfile
               }) => {
     // Animation values
@@ -30,19 +32,32 @@ const Blog = ({
     const [newComment, setNewComment] = useState('');
     const [loadingComments, setLoadingComments] = useState(false);
     const [showOptions, setShowOptions] = useState(false);
+    const [imageError, setImageError] = useState(false);
+
+    // Helper function to get full image URL
+    const getFullImageUrl = (imagePath) => {
+        if (!imagePath) return null;
+        if (imagePath.startsWith('http')) return imagePath;
+        return `${API_BASE_URL}${imagePath}`;
+    };
 
     // Format date for display
     const formatDate = (dateString) => {
-        const date = new Date(dateString);
-        const now = new Date();
-        const diffInSeconds = Math.floor((now - date) / 1000);
+        try {
+            const date = new Date(dateString);
+            const now = new Date();
+            const diffInSeconds = Math.floor((now - date) / 1000);
 
-        if (diffInSeconds < 60) return `${diffInSeconds} sec ago`;
-        if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} min ago`;
-        if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hr ago`;
-        if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 86400)} days ago`;
+            if (diffInSeconds < 60) return `${diffInSeconds} sec ago`;
+            if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)} min ago`;
+            if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)} hr ago`;
+            if (diffInSeconds < 2592000) return `${Math.floor(diffInSeconds / 86400)} days ago`;
 
-        return date.toLocaleDateString();
+            return date.toLocaleDateString();
+        } catch (error) {
+            console.error('Date formatting error:', error);
+            return 'Recently';
+        }
     };
 
     // Function to load comments
@@ -59,7 +74,7 @@ const Blog = ({
                         id: '1',
                         user: {
                             name: 'Kamesh Chaudary',
-                            avatar: 'https://your-avatar-url.com/1',
+                            avatar: 'https://randomuser.me/api/portraits/men/32.jpg',
                         },
                         text: 'Thank you for this amazing post!',
                         time: '2h ago',
@@ -69,7 +84,7 @@ const Blog = ({
                                 id: '1.1',
                                 user: {
                                     name: 'Anjil Neupane',
-                                    avatar: 'https://your-avatar-url.com/2',
+                                    avatar: 'https://randomuser.me/api/portraits/women/44.jpg',
                                 },
                                 text: 'Totally agree, it is amazing!',
                                 time: '1h ago',
@@ -81,7 +96,7 @@ const Blog = ({
                         id: '2',
                         user: {
                             name: 'Rohit Sharma',
-                            avatar: 'https://your-avatar-url.com/3',
+                            avatar: 'https://randomuser.me/api/portraits/men/36.jpg',
                         },
                         text: 'This is exactly what I needed to read today.',
                         time: '5h ago',
@@ -121,7 +136,7 @@ const Blog = ({
         setLikesCount(isLiked ? likesCount - 1 : likesCount + 1);
 
         // Call the parent handler
-        if (onLike) onLike(blog.blog_id, !isLiked);
+        if (onLike) onLike(blog.blog_id, isLiked);
     };
 
     // Handle bookmark with animation
@@ -147,7 +162,7 @@ const Blog = ({
         setIsSaved(!isSaved);
 
         // Call the parent handler
-        if (onBookmark) onBookmark(blog.blog_id, !isSaved);
+        if (onBookmark) onBookmark(blog.blog_id, isSaved);
     };
 
     // Handle share
@@ -174,7 +189,7 @@ const Blog = ({
             id: Date.now().toString(),
             user: {
                 name: 'Current User',
-                avatar: 'https://your-avatar-url.com/current-user',
+                avatar: 'https://randomuser.me/api/portraits/men/22.jpg',
             },
             text: newComment,
             time: 'Just now',
@@ -201,6 +216,20 @@ const Blog = ({
         if (!content) return '';
         if (content.length <= maxLength) return content;
         return content.substring(0, maxLength - 3) + '...';
+    };
+
+    // Handle Read More
+    const handleReadMore = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        if (onReadMore) {
+            onReadMore(blog);
+        }
+    };
+
+    // Handle image load error
+    const handleImageError = () => {
+        console.log('Image failed to load:', blog.image);
+        setImageError(true);
     };
 
     // Comments Modal component
@@ -383,6 +412,20 @@ const Blog = ({
                     </TouchableOpacity>
                 </View>
 
+                {/* Category Tag */}
+                {blog.category && (
+                    <View className="px-4 mb-2">
+                        <View
+                            className="self-start rounded-full px-3 py-1"
+                            style={{ backgroundColor: blog.category.color || '#6366F1' }}
+                        >
+                            <Text className="text-white text-xs font-medium">
+                                {blog.category.icon ? `${blog.category.icon} ` : ''}{blog.category.category_name || 'General'}
+                            </Text>
+                        </View>
+                    </View>
+                )}
+
                 {/* Blog Title - if available */}
                 {blog.title && (
                     <View className="px-4 pb-2">
@@ -404,12 +447,17 @@ const Blog = ({
                 </View>
 
                 {/* Blog Image - if available */}
-                {blog.image && (
-                    <Image
-                        source={{ uri: blog.image }}
-                        className="w-full h-64"
-                        resizeMode="cover"
-                    />
+                {blog.image && !imageError && (
+                    <View className="w-full h-64">
+                        <Image
+                            source={{
+                                uri: getFullImageUrl(blog.image)
+                            }}
+                            className="w-full h-full"
+                            resizeMode="cover"
+                            onError={handleImageError}
+                        />
+                    </View>
                 )}
 
                 {/* Action Buttons */}
@@ -476,7 +524,7 @@ const Blog = ({
                 {/* Show "Read More" for truncated content */}
                 {blog.content && blog.content.length > 150 && (
                     <TouchableOpacity
-                        onPress={() => {/* Navigate to full post */}}
+                        onPress={handleReadMore}
                         className={`mx-4 mb-4 py-2 rounded-xl ${
                             isDark ? 'bg-gray-700' : 'bg-gray-100'
                         }`}
@@ -491,7 +539,7 @@ const Blog = ({
             </MotiView>
 
             {/* Comments Modal */}
-            <CommentsModal />
+            {showComments && <CommentsModal />}
         </>
     );
 };

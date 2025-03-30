@@ -13,12 +13,10 @@ const addBlog = async (req, res) => {
     if (!title || !content || !category_id) {
         return res.status(400).json({ error: 'Please enter all required details: title, content, and category.' });
     }
-
+console.log(req.file);
     try {
         // Get the image file path if an image was uploaded
         const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
-
-console.log(imagePath)
 
         // Starting transaction query so that points_gained do not change in error
         const result = await prisma.$transaction(async (prisma) => {

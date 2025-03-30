@@ -13,7 +13,7 @@ import {
     Settings
 } from 'lucide-react-native';
 import { router } from 'expo-router';
-import { format } from 'date-fns';
+import { format, subDays, isSameDay } from 'date-fns';
 
 // Components
 import HabitCard from '../../components/HabitCard';
@@ -30,6 +30,8 @@ const Index = () => {
 
     const [habits, setHabits] = useState([]);
     const [todayHabits, setTodayHabits] = useState([]);
+    const [selectedDate, setSelectedDate] = useState(new Date());
+    const [habitsForDate, setHabitsForDate] = useState([]);
     const [completionStats, setCompletionStats] = useState({
         total: 0,
         completed: 0,
@@ -59,6 +61,13 @@ const Index = () => {
             loadData();
         }
     }, [isFocused]);
+
+    // Load habits for selected date
+    useEffect(() => {
+        if (!isLoading) {
+            loadHabitsForDate(selectedDate);
+        }
+    }, [selectedDate, todayHabits]);
 
     // Auto-hide error after 5 seconds
     useEffect(() => {
@@ -101,6 +110,7 @@ const Index = () => {
 
                 if (todayHabitsResponse && todayHabitsResponse.data) {
                     setTodayHabits(todayHabitsResponse.data);
+                    setHabitsForDate(todayHabitsResponse.data);
 
                     // Update completion stats
                     if (todayHabitsResponse.stats) {
@@ -127,6 +137,7 @@ const Index = () => {
                         return habit.scheduledToday || habit.completedToday;
                     });
                     setTodayHabits(filteredHabits);
+                    setHabitsForDate(filteredHabits);
                 }
             }
 
@@ -137,6 +148,28 @@ const Index = () => {
         } finally {
             setIsLoading(false);
             setIsRefreshing(false);
+        }
+    };
+
+    const loadHabitsForDate = async (date) => {
+        try {
+            // If date is today, use the todayHabits that were already fetched
+            if (isSameDay(date, new Date())) {
+                setHabitsForDate(todayHabits);
+            } else {
+                // Otherwise, fetch habits for the selected date
+                const formattedDate = format(date, 'yyyy-MM-dd');
+                const response = await getHabitsByDate(formattedDate);
+
+                if (response && response.data) {
+                    setHabitsForDate(response.data);
+                } else {
+                    setHabitsForDate([]);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to fetch habits for date:', err);
+            setHabitsForDate([]);
         }
     };
 
@@ -224,7 +257,7 @@ const Index = () => {
 
     return (
         <GestureHandlerRootView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-            <SafeAreaView edges={['top', 'left', 'right']} className="flex-1">
+            <SafeAreaView edges={['left', 'right']} className="flex-1">
                 <ScrollView
                     className="flex-1"
                     contentContainerStyle={{ paddingTop: 0 }}
@@ -250,7 +283,7 @@ const Index = () => {
                     )}
 
                     {/* Header Section with Date and Manage Habits Button */}
-                    <View className="px-4 pt-1 mb-3 flex-row justify-between items-center">
+                    <View className="px-4 mb-3 flex-row justify-between items-center">
                         <View>
                             <Text className={`text-lg font-montserrat-medium ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                                 {format(today, 'EEEE, MMM d')}
@@ -328,11 +361,11 @@ const Index = () => {
                         </View>
                     </View>
 
-                    {/* Today's Habits Section */}
+                    {/* Habits Section with Date Selector */}
                     <View className="px-4 mb-4">
                         <View className="flex-row justify-between items-center mb-3">
                             <Text className={`text-lg font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                Today's Habits
+                                {isSameDay(selectedDate, new Date()) ? "Today's Habits" : format(selectedDate, 'MMM d') + " Habits"}
                             </Text>
                             <TouchableOpacity
                                 className="flex-row items-center"
@@ -345,34 +378,147 @@ const Index = () => {
                             </TouchableOpacity>
                         </View>
 
-                        {todayHabits.length === 0 ? (
-                            <View className={`py-8 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-white'} items-center justify-center mb-2`}>
+                        {/* Enhanced Date Selector */}
+                        <ScrollView
+                            horizontal
+                            showsHorizontalScrollIndicator={false}
+                            contentContainerStyle={{ paddingRight: 16 }}
+                            className="mb-4"
+                        >
+                            {Array.from({ length: 7 }, (_, i) => subDays(new Date(), 6 - i)).map((date) => {
+                                const isToday = isSameDay(date, new Date());
+                                const isSelected = isSameDay(date, selectedDate);
+                                const isPast = date < new Date(new Date().setHours(0, 0, 0, 0));
+
+                                return (
+                                    <TouchableOpacity
+                                        key={date.toISOString()}
+                                        onPress={() => setSelectedDate(date)}
+                                        className={`mr-3 px-4 py-3 rounded-xl ${
+                                            isSelected
+                                                ? 'bg-primary-500'
+                                                : isDark ? 'bg-gray-800' : 'bg-white'
+                                        }`}
+                                        style={{
+                                            minWidth: 75,
+                                            alignItems: 'center',
+                                            elevation: isSelected ? 4 : 2,
+                                            shadowColor: "#000",
+                                            shadowOffset: { width: 0, height: 2 },
+                                            shadowOpacity: isSelected ? 0.25 : 0.1,
+                                            shadowRadius: isSelected ? 3 : 2,
+                                            borderWidth: isToday && !isSelected ? 1.5 : 0,
+                                            borderColor: '#6366F1'
+                                        }}
+                                    >
+                                        <Text
+                                            className={`text-xs font-montserrat-bold ${
+                                                isSelected
+                                                    ? 'text-white'
+                                                    : isDark ? 'text-gray-400' : 'text-gray-500'
+                                            }`}
+                                        >
+                                            {format(date, 'EEE')}
+                                        </Text>
+                                        <Text
+                                            className={`text-xl font-montserrat-bold mt-1 ${
+                                                isSelected
+                                                    ? 'text-white'
+                                                    : isDark ? 'text-white' : 'text-gray-900'
+                                            }`}
+                                        >
+                                            {format(date, 'd')}
+                                        </Text>
+                                        {isToday && (
+                                            <View className={`mt-1 px-2 py-0.5 rounded-full ${
+                                                isSelected ? 'bg-white' : 'bg-primary-100'
+                                            }`}>
+                                                <Text
+                                                    className={`text-xs font-montserrat-bold ${
+                                                        isSelected ? 'text-primary-500' : 'text-primary-700'
+                                                    }`}
+                                                >
+                                                    Today
+                                                </Text>
+                                            </View>
+                                        )}
+                                        {isPast && !isToday && (
+                                            <View className={`mt-1 w-1.5 h-1.5 rounded-full ${
+                                                isSelected ? 'bg-white' : 'bg-gray-400'
+                                            }`} />
+                                        )}
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </ScrollView>
+
+                        {/* Info text for past date */}
+                        {!isSameDay(selectedDate, new Date()) && (
+                            <View className="mb-3 px-1">
+                                <Text className={`text-xs italic ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                                    You're viewing past habits. Completion is only available for today's habits.
+                                </Text>
+                            </View>
+                        )}
+
+                        {/* Habits list - use habitsForDate instead of todayHabits */}
+                        {habitsForDate.length === 0 ? (
+                            <View className={`py-8 rounded-xl ${isDark ? 'bg-gray-800' : 'bg-white'} items-center justify-center mb-2`}
+                                  style={{
+                                      elevation: 2,
+                                      shadowColor: "#000",
+                                      shadowOffset: { width: 0, height: 1 },
+                                      shadowOpacity: 0.1,
+                                      shadowRadius: 2,
+                                  }}>
                                 <Calendar size={32} color={isDark ? "#9CA3AF" : "#6B7280"} />
                                 <Text className={`mt-2 text-base font-montserrat-medium text-center ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                    No habits scheduled for today
+                                    No habits scheduled for {isSameDay(selectedDate, new Date()) ? 'today' : 'this day'}
                                 </Text>
                                 <TouchableOpacity
                                     onPress={navigateToManageHabits}
                                     className="mt-3 bg-primary-500 px-4 py-2 rounded-lg flex-row items-center"
+                                    style={{
+                                        elevation: 3,
+                                        shadowColor: "#000",
+                                        shadowOffset: { width: 0, height: 2 },
+                                        shadowOpacity: 0.2,
+                                        shadowRadius: 2,
+                                    }}
                                 >
                                     <Settings size={16} color="white" />
                                     <Text className="ml-2 text-white font-montserrat-medium">Manage Habits</Text>
                                 </TouchableOpacity>
                             </View>
                         ) : (
-                            todayHabits.map(habit => (
-                                <TouchableOpacity
-                                    key={habit.habit_id}
-                                    onPress={() => !habit.completedToday && !habit.isCompleted && openCompletionModal(habit)}
-                                    activeOpacity={habit.completedToday || habit.isCompleted ? 1 : 0.7}
-                                >
-                                    <HabitCard
-                                        habit={habit}
-                                        isDark={isDark}
-                                        onComplete={() => openCompletionModal(habit)}
-                                        isCompleted={habit.completedToday || habit.isCompleted}
-                                    />
-                                </TouchableOpacity>
+                            habitsForDate.map(habit => (
+                                <View key={habit.habit_id}>
+                                    {/* For today's habits, allow completion */}
+                                    {isSameDay(selectedDate, new Date()) ? (
+                                        <TouchableOpacity
+                                            onPress={() => !habit.completedToday && !habit.isCompleted && openCompletionModal(habit)}
+                                            activeOpacity={habit.completedToday || habit.isCompleted ? 1 : 0.7}
+                                        >
+                                            <HabitCard
+                                                habit={habit}
+                                                isDark={isDark}
+                                                onComplete={() => openCompletionModal(habit)}
+                                                isCompleted={habit.completedToday || habit.isCompleted}
+                                            />
+                                        </TouchableOpacity>
+                                    ) : (
+                                        // For past habits, disable completion entirely
+                                        <View>
+                                            <HabitCard
+                                                habit={habit}
+                                                isDark={isDark}
+                                                onComplete={null} // No completion function for past habits
+                                                isCompleted={habit.completedToday || habit.isCompleted}
+                                                isPast={true} // Add a prop to style past habits differently if needed
+                                            />
+                                        </View>
+                                    )}
+                                </View>
                             ))
                         )}
                     </View>

@@ -1,14 +1,13 @@
-// src/controllers/leaderboardController.js
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 /**
- * Get leaderboard data for user points (weekly or monthly)
+ * Get leaderboard data for user points (weekly, monthly, or all-time)
  * Shows users with highest points earned in the specified timeframe
  */
 const getPointsLeaderboard = async (req, res) => {
     try {
-        const { timeframe = 'weekly', limit = 10 } = req.query;
+        const { timeframe = 'weekly', limit = 10, friendsOnly = false } = req.query;
         const userId = parseInt(req.user);
 
         // Determine date range based on timeframe
@@ -22,29 +21,74 @@ const getPointsLeaderboard = async (req, res) => {
         } else if (timeframe === 'monthly') {
             // Set to beginning of current month
             startDate.setDate(1);
+        } else if (timeframe === 'allTime') {
+            // No date filtering for all-time
+            startDate = null;
         } else {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid timeframe. Use "weekly" or "monthly"'
+                message: 'Invalid timeframe. Use "weekly", "monthly", or "allTime"'
             });
         }
 
-        // Reset hours to start of day
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setHours(23, 59, 59, 999);
+        // Reset hours to start of day if we have a date range
+        if (startDate) {
+            startDate.setHours(0, 0, 0, 0);
+            endDate.setHours(23, 59, 59, 999);
+            console.log(`Fetching points leaderboard from ${startDate.toISOString()} to ${endDate.toISOString()}`);
+        }
 
-        console.log(`Fetching points leaderboard from ${startDate.toISOString()} to ${endDate.toISOString()}`);
+        // Build the where clause for querying completions
+        const whereClause = {
+            completed: true,
+            skipped: false
+        };
 
-        // Get users with their completions to calculate points in the timeframe
+        // Add date range if not all-time
+        if (startDate) {
+            whereClause.completed_at = {
+                gte: startDate,
+                lte: endDate
+            };
+        }
+
+        // Determine user selection (all users or just friends)
+        let userSelection = {};
+
+        if (friendsOnly === 'true' || friendsOnly === true) {
+            // Get list of user's friends
+            const friendRequests = await prisma.friendRequest.findMany({
+                where: {
+                    OR: [
+                        { sender_id: userId },
+                        { receiver_id: userId }
+                    ],
+                    status: 'ACCEPTED'
+                }
+            });
+
+            // Extract friend IDs
+            const friendIds = friendRequests.map(fr =>
+                fr.sender_id === userId ? fr.receiver_id : fr.sender_id
+            );
+
+            // Add current user to the list
+            friendIds.push(userId);
+
+            // Modify user selection to only include friends
+            userSelection = {
+                user_id: {
+                    in: friendIds
+                }
+            };
+        }
+
+        // Get completions to calculate points in the timeframe
         const userCompletions = await prisma.habitLog.groupBy({
             by: ['user_id'],
             where: {
-                completed_at: {
-                    gte: startDate,
-                    lte: endDate
-                },
-                completed: true,
-                skipped: false
+                ...whereClause,
+                ...userSelection
             },
             _count: {
                 log_id: true
@@ -59,6 +103,7 @@ const getPointsLeaderboard = async (req, res) => {
 
         // Get top users by overall points
         const users = await prisma.user.findMany({
+            where: userSelection,
             select: {
                 user_id: true,
                 user_name: true,
@@ -77,13 +122,16 @@ const getPointsLeaderboard = async (req, res) => {
         // Format the leaderboard data
         const leaderboardData = users.map((user, index) => {
             const recentCompletions = completionsMap[user.user_id] || 0;
+            const points = timeframe === 'allTime'
+                ? user.points_gained
+                : recentCompletions * 10; // Simple points calculation for recent activity
 
             return {
                 rank: index + 1,
                 user_id: user.user_id,
                 user_name: user.user_name,
-                avatar: user.avatar,
-                points: user.points_gained,
+                avatar: user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.user_name)}`,
+                points: points,
                 totalCompletions: user.totalHabitsCompleted,
                 currentStreak: user.currentDailyStreak,
                 longestStreak: user.longestDailyStreak,
@@ -91,6 +139,16 @@ const getPointsLeaderboard = async (req, res) => {
                 isCurrentUser: user.user_id === userId
             };
         });
+
+        // Sort by points (specifically for weekly/monthly where we calculate)
+        if (timeframe !== 'allTime') {
+            leaderboardData.sort((a, b) => b.points - a.points);
+
+            // Update ranks after sorting
+            leaderboardData.forEach((item, index) => {
+                item.rank = index + 1;
+            });
+        }
 
         // Get current user's position if not in top results
         let currentUserData = leaderboardData.find(item => item.user_id === userId);
@@ -110,23 +168,40 @@ const getPointsLeaderboard = async (req, res) => {
             });
 
             if (userData) {
-                // Count users with more points to determine rank
-                const higherRankedUsers = await prisma.user.count({
-                    where: {
-                        points_gained: {
-                            gt: userData.points_gained
+                const recentCompletions = completionsMap[userData.user_id] || 0;
+                const points = timeframe === 'allTime'
+                    ? userData.points_gained
+                    : recentCompletions * 10;
+
+                // Determine rank
+                let higherRankedUsers;
+                if (timeframe === 'allTime') {
+                    higherRankedUsers = await prisma.user.count({
+                        where: {
+                            ...userSelection,
+                            points_gained: {
+                                gt: userData.points_gained
+                            }
+                        }
+                    });
+                } else {
+                    // For weekly/monthly, we need to manually calculate
+                    // This is simplified - in a real app, you might want to optimize this
+                    higherRankedUsers = 0;
+
+                    for (const userId in completionsMap) {
+                        if (completionsMap[userId] * 10 > points) {
+                            higherRankedUsers++;
                         }
                     }
-                });
-
-                const recentCompletions = completionsMap[userData.user_id] || 0;
+                }
 
                 currentUserData = {
                     rank: higherRankedUsers + 1,
                     user_id: userData.user_id,
                     user_name: userData.user_name,
-                    avatar: userData.avatar,
-                    points: userData.points_gained,
+                    avatar: userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.user_name)}`,
+                    points: points,
                     totalCompletions: userData.totalHabitsCompleted,
                     currentStreak: userData.currentDailyStreak,
                     longestStreak: userData.longestDailyStreak,
@@ -136,11 +211,19 @@ const getPointsLeaderboard = async (req, res) => {
             }
         }
 
+        // Prepare metadata based on timeframe
+        const metadata = {
+            timeframe,
+        };
+
+        if (startDate) {
+            metadata.startDate = startDate.toISOString().split('T')[0];
+            metadata.endDate = endDate.toISOString().split('T')[0];
+        }
+
         return res.status(200).json({
             success: true,
-            timeframe,
-            startDate: startDate.toISOString().split('T')[0],
-            endDate: endDate.toISOString().split('T')[0],
+            ...metadata,
             data: leaderboardData,
             currentUser: currentUserData || null
         });
@@ -160,12 +243,42 @@ const getPointsLeaderboard = async (req, res) => {
  */
 const getStreaksLeaderboard = async (req, res) => {
     try {
-        const { limit = 10 } = req.query;
+        const { limit = 10, friendsOnly = false } = req.query;
         const userId = parseInt(req.user);
 
+        // Determine user selection (all users or just friends)
+        let userSelection = {};
+
+        if (friendsOnly === 'true' || friendsOnly === true) {
+            // Get list of user's friends
+            const friendRequests = await prisma.friendRequest.findMany({
+                where: {
+                    OR: [
+                        { sender_id: userId },
+                        { receiver_id: userId }
+                    ],
+                    status: 'ACCEPTED'
+                }
+            });
+
+            // Extract friend IDs
+            const friendIds = friendRequests.map(fr =>
+                fr.sender_id === userId ? fr.receiver_id : fr.sender_id
+            );
+            // Add current user to the list
+            friendIds.push(userId);
+
+            // Modify user selection to only include friends
+            userSelection = {
+                user_id: {
+                    in: friendIds
+                }
+            };
+        }
         // Get users with top streaks
         const users = await prisma.user.findMany({
             where: {
+                ...userSelection,
                 currentDailyStreak: {
                     gt: 0
                 }
@@ -191,7 +304,7 @@ const getStreaksLeaderboard = async (req, res) => {
                 rank: index + 1,
                 user_id: user.user_id,
                 user_name: user.user_name,
-                avatar: user.avatar,
+                avatar: user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.user_name)}`,
                 points: user.points_gained,
                 currentStreak: user.currentDailyStreak,
                 longestStreak: user.longestDailyStreak,
@@ -217,10 +330,11 @@ const getStreaksLeaderboard = async (req, res) => {
                 }
             });
 
-            if (userData) {
+            if (userData && userData.currentDailyStreak > 0) {
                 // Count users with longer streaks to determine rank
                 const higherRankedUsers = await prisma.user.count({
                     where: {
+                        ...userSelection,
                         currentDailyStreak: {
                             gt: userData.currentDailyStreak
                         }
@@ -231,7 +345,7 @@ const getStreaksLeaderboard = async (req, res) => {
                     rank: higherRankedUsers + 1,
                     user_id: userData.user_id,
                     user_name: userData.user_name,
-                    avatar: userData.avatar,
+                    avatar: userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.user_name)}`,
                     points: userData.points_gained,
                     currentStreak: userData.currentDailyStreak,
                     longestStreak: userData.longestDailyStreak,
@@ -276,10 +390,13 @@ const getDomainLeaderboard = async (req, res) => {
         } else if (timeframe === 'monthly') {
             // Set to beginning of current month
             startDate.setDate(1);
+        } else if (timeframe === 'allTime') {
+            // Use a very old date for "all time"
+            startDate = new Date(2000, 0, 1);
         } else {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid timeframe. Use "weekly" or "monthly"'
+                message: 'Invalid timeframe. Use "weekly", "monthly", or "allTime"'
             });
         }
 
@@ -287,125 +404,148 @@ const getDomainLeaderboard = async (req, res) => {
         startDate.setHours(0, 0, 0, 0);
         endDate.setHours(23, 59, 59, 999);
 
-        // Get habit logs grouped by domain
-        const domainActivity = await prisma.$queryRaw`
-            SELECT
-                d.domain_id,
-                d.name,
-                d.color,
-                d.icon,
-                COUNT(hl.log_id) as completion_count,
-                COUNT(DISTINCT h.habit_id) as habit_count,
-                COUNT(DISTINCT hl.user_id) as user_count
-            FROM
-                "HabitLog" hl
-                    JOIN
-                "Habit" h ON hl.habit_id = h.habit_id
-                    JOIN
-                "HabitDomain" d ON h.domain_id = d.domain_id
-            WHERE
-                hl.completed_at >= ${startDate} AND
-                hl.completed_at <= ${endDate} AND
-                hl.completed = true AND
-                hl.skipped = false
-            GROUP BY
-                d.domain_id, d.name, d.color, d.icon
-            ORDER BY
-                completion_count DESC
-                LIMIT
-                ${parseInt(limit)}
-        `;
+        try {
+            // Use a simpler approach with normal Prisma queries to avoid SQL issues
+            // First get all completed habit logs in the time period
+            const completedLogs = await prisma.habitLog.findMany({
+                where: {
+                    completed_at: {
+                        gte: startDate,
+                        lte: endDate
+                    },
+                    completed: true,
+                    skipped: false
+                },
+                include: {
+                    habit: {
+                        select: {
+                            domain_id: true
+                        }
+                    }
+                }
+            });
 
-        // Format the leaderboard data
-        const leaderboardData = domainActivity.map((domain, index) => {
-            return {
-                rank: index + 1,
-                domain_id: domain.domain_id,
-                name: domain.name,
-                color: domain.color,
-                icon: domain.icon,
-                completions: parseInt(domain.completion_count),
-                habitCount: parseInt(domain.habit_count),
-                userCount: parseInt(domain.user_count)
-            };
-        });
+            // Then aggregate the data manually
+            const domainCompletions = {};
+            const domainHabits = {};
+            const domainUsers = {};
 
-        // Get user's most active domain for comparison
-        const userMostActiveDomain = await prisma.$queryRaw`
-            SELECT
-                d.domain_id,
-                d.name,
-                d.color,
-                d.icon,
-                COUNT(hl.log_id) as completion_count
-            FROM
-                "HabitLog" hl
-                    JOIN
-                "Habit" h ON hl.habit_id = h.habit_id
-                    JOIN
-                "HabitDomain" d ON h.domain_id = d.domain_id
-            WHERE
-                hl.completed_at >= ${startDate} AND
-                hl.completed_at <= ${endDate} AND
-                hl.completed = true AND
-                hl.skipped = false AND
-                hl.user_id = ${userId}
-            GROUP BY
-                d.domain_id, d.name, d.color, d.icon
-            ORDER BY
-                completion_count DESC
-                LIMIT 1
-        `;
+            // Populate domain maps with completion data
+            for (const log of completedLogs) {
+                const domainId = log.habit.domain_id;
 
-        let userDomainData = null;
-        if (userMostActiveDomain && userMostActiveDomain.length > 0) {
-            const domain = userMostActiveDomain[0];
+                // Count completions
+                if (!domainCompletions[domainId]) {
+                    domainCompletions[domainId] = 0;
+                }
+                domainCompletions[domainId]++;
 
-            // Find this domain's global rank
-            const domainRank = await prisma.$queryRaw`
-                SELECT
-                    COUNT(*) + 1 as rank
-                FROM
-                    (
-                        SELECT
-                            d.domain_id,
-                            COUNT(hl.log_id) as completion_count
-                        FROM
-                            "HabitLog" hl
-                                JOIN
-                            "Habit" h ON hl.habit_id = h.habit_id
-                                JOIN
-                            "HabitDomain" d ON h.domain_id = d.domain_id
-                        WHERE
-                            hl.completed_at >= ${startDate} AND
-                            hl.completed_at <= ${endDate} AND
-                            hl.completed = true AND
-                            hl.skipped = false
-                        GROUP BY
-                            d.domain_id
-                        HAVING
-                            COUNT(hl.log_id) > ${parseInt(domain.completion_count)}
-                    ) as higher_ranked
-            `;
+                // Count unique habits
+                if (!domainHabits[domainId]) {
+                    domainHabits[domainId] = new Set();
+                }
+                domainHabits[domainId].add(log.habit_id);
 
-            userDomainData = {
-                rank: parseInt(domainRank[0].rank),
-                domain_id: domain.domain_id,
-                name: domain.name,
-                color: domain.color,
-                icon: domain.icon,
-                completions: parseInt(domain.completion_count)
-            };
+                // Count unique users
+                if (!domainUsers[domainId]) {
+                    domainUsers[domainId] = new Set();
+                }
+                domainUsers[domainId].add(log.user_id);
+            }
+
+            // Get domain details
+            const domains = await prisma.habitDomain.findMany();
+
+            // Map domain IDs to details
+            const domainMap = {};
+            domains.forEach(domain => {
+                domainMap[domain.domain_id] = domain;
+            });
+
+            // Build the leaderboard data
+            const leaderboardData = Object.keys(domainCompletions)
+                .map(domainId => {
+                    const domain = domainMap[domainId];
+                    if (!domain) return null;
+
+                    return {
+                        domain_id: parseInt(domainId),
+                        name: domain.name,
+                        color: domain.color,
+                        icon: domain.icon,
+                        completions: domainCompletions[domainId],
+                        habitCount: domainHabits[domainId]?.size || 0,
+                        userCount: domainUsers[domainId]?.size || 0
+                    };
+                })
+                .filter(item => item !== null)
+                .sort((a, b) => b.completions - a.completions)
+                .slice(0, parseInt(limit))
+                .map((domain, index) => ({ ...domain, rank: index + 1 }));
+
+            // Get user's most active domain
+            let userDomainData = null;
+
+            // First check if the user has any completions in this timeframe
+            const userLogs = completedLogs.filter(log => log.user_id === userId);
+
+            if (userLogs.length > 0) {
+                // Count completions by domain for the user
+                const userDomainCompletions = {};
+
+                userLogs.forEach(log => {
+                    const domainId = log.habit.domain_id;
+                    if (!userDomainCompletions[domainId]) {
+                        userDomainCompletions[domainId] = 0;
+                    }
+                    userDomainCompletions[domainId]++;
+                });
+
+                // Find the domain with the most completions
+                let topDomainId = null;
+                let maxCompletions = 0;
+
+                for (const domainId in userDomainCompletions) {
+                    if (userDomainCompletions[domainId] > maxCompletions) {
+                        topDomainId = domainId;
+                        maxCompletions = userDomainCompletions[domainId];
+                    }
+                }
+
+                if (topDomainId) {
+                    const domain = domainMap[topDomainId];
+
+                    if (domain) {
+                        // Find this domain's global rank
+                        const allDomainsSorted = Object.keys(domainCompletions)
+                            .sort((a, b) => domainCompletions[b] - domainCompletions[a]);
+
+                        const domainRank = allDomainsSorted.indexOf(topDomainId) + 1;
+
+                        userDomainData = {
+                            rank: domainRank,
+                            domain_id: parseInt(topDomainId),
+                            name: domain.name,
+                            color: domain.color,
+                            icon: domain.icon,
+                            completions: userDomainCompletions[topDomainId]
+                        };
+                    }
+                }
+            }
+
+            return res.status(200).json({
+                success: true,
+                timeframe,
+                startDate: startDate.toISOString().split('T')[0],
+                endDate: endDate.toISOString().split('T')[0],
+                data: leaderboardData,
+                userTopDomain: userDomainData
+            });
+
+        } catch (error) {
+            throw error;
         }
-
-        return res.status(200).json({
-            success: true,
-            timeframe,
-            startDate: startDate.toISOString().split('T')[0],
-            endDate: endDate.toISOString().split('T')[0],
-            data: leaderboardData,
-            userTopDomain: userDomainData
-        });
     } catch (error) {
         console.error('Error fetching domain leaderboard:', error);
         return res.status(500).json({
@@ -451,7 +591,7 @@ const getRealTimeLeaderboard = async (req, res) => {
                 rank: index + 1,
                 user_id: user.user_id,
                 user_name: user.user_name,
-                avatar: user.avatar,
+                avatar: user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.user_name)}`,
                 points: user.points_gained,
                 currentStreak: user.currentDailyStreak,
                 totalCompletions: user.totalHabitsCompleted,
@@ -494,7 +634,7 @@ const getRealTimeLeaderboard = async (req, res) => {
                     rank: higherRankedUsers + 1,
                     user_id: userData.user_id,
                     user_name: userData.user_name,
-                    avatar: userData.avatar,
+                    avatar: userData.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userData.user_name)}`,
                     points: userData.points_gained,
                     currentStreak: userData.currentDailyStreak,
                     totalCompletions: userData.totalHabitsCompleted,
