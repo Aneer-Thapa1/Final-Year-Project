@@ -27,8 +27,7 @@ router.post('/toggleLike/:blog_id', validateToken, blogController.toggleLikeBlog
 // Route to get detailed blog information with comments (protected)
 router.get('/getBlogDetails/:blog_id', validateToken, blogController.getBlogDetails);
 
-// Route to add a comment to a blog (protected)
-router.post('/addComment/:blog_id', validateToken, blogController.addComment);
+
 
 // Route to get trending blogs (protected)
 router.get('/trending', validateToken, blogController.getTrendingBlogs);

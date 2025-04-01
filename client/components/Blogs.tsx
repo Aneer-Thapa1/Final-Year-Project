@@ -1,4 +1,17 @@
-import { Image, Text, View, TouchableOpacity, Modal, ScrollView, Pressable, ActivityIndicator, TextInput, Animated } from 'react-native';
+import {
+    Image,
+    Text,
+    View,
+    TouchableOpacity,
+    Modal,
+    ScrollView,
+    RefreshControl,
+    Pressable,
+    ActivityIndicator,
+    TextInput,
+    Animated,
+    StatusBar
+} from 'react-native';
 import React, { useState, useRef, useEffect } from 'react';
 import { Heart, MessageCircle, Share2, ArrowLeft, MoreHorizontal, Bookmark, Send, X } from 'lucide-react-native';
 import { MotiView, AnimatePresence } from 'moti';
@@ -7,17 +20,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Comment from './Comment';
 import icons from '../constants/images';
 import { API_BASE_URL } from '../services/api';
+import { toggleLikeBlog } from '../services/blogService';
+import { getComments, addComment } from '../services/commentService';
 
 const Blog = ({
                   blog,
                   isDark,
-                  onLike,
-                  onComment,
                   onShare,
                   onBookmark,
                   onMenuPress,
                   onReadMore,
-                  authorProfile = icons.maleProfile
+                  authorProfile = icons.maleProfile,
+                  currentUser
               }) => {
     // Animation values
     const likeScale = useRef(new Animated.Value(1)).current;
@@ -30,9 +44,18 @@ const Blog = ({
     const [likesCount, setLikesCount] = useState(blog.likesCount || 0);
     const [comments, setComments] = useState([]);
     const [newComment, setNewComment] = useState('');
+    const [replyingTo, setReplyingTo] = useState(null);
     const [loadingComments, setLoadingComments] = useState(false);
     const [showOptions, setShowOptions] = useState(false);
     const [imageError, setImageError] = useState(false);
+    const [refreshing, setRefreshing] = useState(false);
+
+    // Load comments when modal opens
+    useEffect(() => {
+        if (showComments) {
+            loadComments();
+        }
+    }, [showComments]);
 
     // Helper function to get full image URL
     const getFullImageUrl = (imagePath) => {
@@ -64,56 +87,30 @@ const Blog = ({
     const loadComments = async () => {
         try {
             setLoadingComments(true);
-            // In a real app, you would fetch comments from an API
-            // const response = await blogService.getBlogComments(blog.blog_id);
+            const response = await getComments(blog.blog_id);
 
-            // For now, we'll just use sample data
-            setTimeout(() => {
-                setComments([
-                    {
-                        id: '1',
-                        user: {
-                            name: 'Kamesh Chaudary',
-                            avatar: 'https://randomuser.me/api/portraits/men/32.jpg',
-                        },
-                        text: 'Thank you for this amazing post!',
-                        time: '2h ago',
-                        likes: 24,
-                        replies: [
-                            {
-                                id: '1.1',
-                                user: {
-                                    name: 'Anjil Neupane',
-                                    avatar: 'https://randomuser.me/api/portraits/women/44.jpg',
-                                },
-                                text: 'Totally agree, it is amazing!',
-                                time: '1h ago',
-                                likes: 12,
-                            }
-                        ]
-                    },
-                    {
-                        id: '2',
-                        user: {
-                            name: 'Rohit Sharma',
-                            avatar: 'https://randomuser.me/api/portraits/men/36.jpg',
-                        },
-                        text: 'This is exactly what I needed to read today.',
-                        time: '5h ago',
-                        likes: 16,
-                        replies: []
-                    }
-                ]);
-                setLoadingComments(false);
-            }, 1000);
+            if (response && response.success && response.data) {
+                setComments(response.data);
+            } else {
+                console.warn('Unexpected response format:', response);
+                setComments([]);
+            }
+            setLoadingComments(false);
         } catch (error) {
             console.error('Error loading comments:', error);
             setLoadingComments(false);
         }
     };
 
+    // Refresh comments
+    const refreshComments = async () => {
+        setRefreshing(true);
+        await loadComments();
+        setRefreshing(false);
+    };
+
     // Handle like with animation
-    const handleLike = () => {
+    const handleLike = async () => {
         // Haptic feedback
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
@@ -131,12 +128,37 @@ const Blog = ({
             }),
         ]).start();
 
-        // Toggle liked state locally
+        // Optimistic UI update
+        const previousIsLiked = isLiked;
+        const previousLikesCount = likesCount;
+
         setIsLiked(!isLiked);
         setLikesCount(isLiked ? likesCount - 1 : likesCount + 1);
 
-        // Call the parent handler
-        if (onLike) onLike(blog.blog_id, isLiked);
+        // Call API
+        try {
+            const response = await toggleLikeBlog(blog.blog_id);
+
+            if (response && response.success) {
+                // Update with actual server values if available
+                if (response.data && response.data.liked !== undefined) {
+                    setIsLiked(response.data.liked);
+                }
+                if (response.data && response.data.likesCount !== undefined) {
+                    setLikesCount(response.data.likesCount);
+                }
+            } else {
+                // Revert on error
+                setIsLiked(previousIsLiked);
+                setLikesCount(previousLikesCount);
+                console.error('Error toggling like:', response?.error || 'Unknown error');
+            }
+        } catch (error) {
+            // Revert on error
+            setIsLiked(previousIsLiked);
+            setLikesCount(previousLikesCount);
+            console.error('Error toggling like:', error);
+        }
     };
 
     // Handle bookmark with animation
@@ -173,35 +195,71 @@ const Blog = ({
 
     // Handle comment modal open
     const handleCommentPress = () => {
+        console.log("Opening comments modal");
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         setShowComments(true);
-        loadComments();
+    };
+
+    // Set replying state
+    const handleReply = (comment) => {
+        setReplyingTo(comment);
+        setNewComment(`@${comment.user.user_name || comment.user.name} `);
+    };
+
+    // Cancel reply
+    const cancelReply = () => {
+        setReplyingTo(null);
+        setNewComment('');
     };
 
     // Submit a new comment
-    const handleSubmitComment = () => {
+    const handleSubmitComment = async () => {
         if (!newComment.trim()) return;
 
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-        // Add new comment to the list
-        const newCommentObj = {
-            id: Date.now().toString(),
-            user: {
-                name: 'Current User',
-                avatar: 'https://randomuser.me/api/portraits/men/22.jpg',
-            },
-            text: newComment,
-            time: 'Just now',
-            likes: 0,
-            replies: []
-        };
+        try {
+            const commentData = {
+                content: newComment,
+                parent_id: replyingTo ? (replyingTo.comment_id || replyingTo.id) : undefined
+            };
 
-        setComments([newCommentObj, ...comments]);
-        setNewComment('');
+            const response = await addComment(blog.blog_id, commentData);
 
-        // Call the parent handler
-        if (onComment) onComment(blog.blog_id, newComment);
+            if (response && response.success && response.data) {
+                // If it's a reply, add it to the replies array of the parent comment
+                if (replyingTo) {
+                    const updatedComments = comments.map(comment => {
+                        if ((comment.comment_id || comment.id) === (replyingTo.comment_id || replyingTo.id)) {
+                            return {
+                                ...comment,
+                                replies: comment.replies ? [...comment.replies, response.data] : [response.data]
+                            };
+                        }
+                        return comment;
+                    });
+                    setComments(updatedComments);
+                } else {
+                    // If it's a top-level comment, add it to the beginning of the list
+                    setComments([response.data, ...comments]);
+                }
+
+                // Reset input and reply state
+                setNewComment('');
+                setReplyingTo(null);
+            } else {
+                console.error('Error adding comment:', response?.error || 'Unknown error');
+            }
+        } catch (error) {
+            console.error('Error adding comment:', error);
+        }
+    };
+
+    // Handle comment like
+    const handleCommentLike = (commentId) => {
+        // This function would call the API to like/unlike a comment
+        console.log('Like comment:', commentId);
+        // In a real implementation, make the API call here
     };
 
     // Handle menu options
@@ -232,112 +290,7 @@ const Blog = ({
         setImageError(true);
     };
 
-    // Comments Modal component
-    const CommentsModal = () => (
-        <Modal
-            animationType="slide"
-            transparent={false}
-            visible={showComments}
-            onRequestClose={() => setShowComments(false)}
-        >
-            <SafeAreaView className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-white'}`}>
-                {/* Modal Header */}
-                <View className="flex-row items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-800">
-                    <View className="flex-row items-center">
-                        <TouchableOpacity
-                            onPress={() => setShowComments(false)}
-                            className="p-2"
-                        >
-                            <ArrowLeft size={24} color={isDark ? '#E2E8F0' : '#1F2937'} />
-                        </TouchableOpacity>
-                        <Text className={`text-lg font-bold ml-2 ${
-                            isDark ? 'text-white' : 'text-gray-900'
-                        }`}>
-                            Comments
-                        </Text>
-                    </View>
-
-                    <TouchableOpacity
-                        onPress={() => setShowComments(false)}
-                        className="p-2"
-                    >
-                        <X size={24} color={isDark ? '#E2E8F0' : '#1F2937'} />
-                    </TouchableOpacity>
-                </View>
-
-                {/* Comments List */}
-                <ScrollView
-                    className="flex-1 px-4"
-                    showsVerticalScrollIndicator={false}
-                >
-                    {loadingComments ? (
-                        <View className="py-8 items-center justify-center">
-                            <ActivityIndicator size="large" color="#6366F1" />
-                            <Text className={`mt-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                Loading comments...
-                            </Text>
-                        </View>
-                    ) : comments.length > 0 ? (
-                        comments.map((comment) => (
-                            <Comment
-                                key={comment.id}
-                                comment={comment}
-                                isDark={isDark}
-                                onReply={(commentId, text) => {
-                                    // Handle reply
-                                    console.log(commentId, text);
-                                }}
-                                onLike={(commentId) => {
-                                    // Handle like
-                                    console.log(commentId);
-                                }}
-                            />
-                        ))
-                    ) : (
-                        <View className="py-8 items-center justify-center">
-                            <Text className={`text-center ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-                                No comments yet. Be the first to comment!
-                            </Text>
-                        </View>
-                    )}
-
-                    {/* Add some bottom padding for better scrolling */}
-                    <View className="h-20" />
-                </ScrollView>
-
-                {/* Comment Input */}
-                <View className={`px-4 py-3 border-t ${isDark ? 'border-gray-800 bg-gray-900' : 'border-gray-200 bg-white'}`}>
-                    <View className="flex-row items-center">
-                        <TextInput
-                            value={newComment}
-                            onChangeText={setNewComment}
-                            placeholder="Add a comment..."
-                            placeholderTextColor={isDark ? '#94A3B8' : '#9CA3AF'}
-                            className={`flex-1 py-2 px-4 rounded-full mr-2 ${
-                                isDark
-                                    ? 'bg-gray-800 text-white border-gray-700'
-                                    : 'bg-gray-100 text-gray-900 border-gray-200'
-                            } border`}
-                            multiline
-                            maxLength={500}
-                        />
-                        <TouchableOpacity
-                            onPress={handleSubmitComment}
-                            disabled={!newComment.trim()}
-                            className={`p-2 rounded-full ${
-                                newComment.trim()
-                                    ? 'bg-primary-500'
-                                    : isDark ? 'bg-gray-800' : 'bg-gray-200'
-                            }`}
-                        >
-                            <Send size={20} color={newComment.trim() ? '#FFFFFF' : isDark ? '#4B5563' : '#9CA3AF'} />
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </SafeAreaView>
-        </Modal>
-    );
-
+    // Main Blog component with styling using standard React Native styles instead of Tailwind classes
     return (
         <>
             {/* Options Menu Overlay */}
@@ -345,16 +298,34 @@ const Blog = ({
                 {showOptions && (
                     <Pressable
                         onPress={() => setShowOptions(false)}
-                        className="absolute inset-0 z-50 bg-black/30"
+                        style={{
+                            position: 'absolute',
+                            top: 0,
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            zIndex: 50,
+                            backgroundColor: 'rgba(0, 0, 0, 0.3)'
+                        }}
                     >
                         <MotiView
                             from={{ opacity: 0, translateY: -10 }}
                             animate={{ opacity: 1, translateY: 0 }}
                             exit={{ opacity: 0, translateY: -10 }}
                             transition={{ type: 'timing', duration: 200 }}
-                            className={`absolute right-6 top-16 rounded-xl p-2 shadow-xl ${
-                                isDark ? 'bg-gray-800' : 'bg-white'
-                            }`}
+                            style={{
+                                position: 'absolute',
+                                right: 24,
+                                top: 64,
+                                borderRadius: 12,
+                                padding: 8,
+                                shadowColor: "#000",
+                                shadowOffset: { width: 0, height: 2 },
+                                shadowOpacity: 0.25,
+                                shadowRadius: 3.84,
+                                elevation: 5,
+                                backgroundColor: isDark ? '#1F2937' : '#FFFFFF'
+                            }}
                         >
                             <TouchableOpacity
                                 onPress={() => {
@@ -362,11 +333,13 @@ const Blog = ({
                                     // Add your report function here
                                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                                 }}
-                                className={`px-4 py-3 rounded-lg ${
-                                    isDark ? 'hover:bg-gray-700' : 'hover:bg-gray-100'
-                                }`}
+                                style={{
+                                    paddingHorizontal: 16,
+                                    paddingVertical: 12,
+                                    borderRadius: 8
+                                }}
                             >
-                                <Text className={`${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                <Text style={{ color: isDark ? '#FFFFFF' : '#1F2937' }}>
                                     Report post
                                 </Text>
                             </TouchableOpacity>
@@ -379,33 +352,57 @@ const Blog = ({
                 from={{ opacity: 0, translateY: 20 }}
                 animate={{ opacity: 1, translateY: 0 }}
                 transition={{ type: 'timing', duration: 500 }}
-                className={`mb-4 rounded-3xl overflow-hidden shadow-sm ${
-                    isDark ? 'bg-gray-800' : 'bg-white'
-                }`}
+                style={{
+                    marginBottom: 16,
+                    borderRadius: 24,
+                    overflow: 'hidden',
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: 0.1,
+                    shadowRadius: 2,
+                    elevation: 2,
+                    backgroundColor: isDark ? '#1F2937' : '#FFFFFF'
+                }}
             >
                 {/* Author Info */}
-                <View className="p-4 flex-row items-center justify-between">
-                    <View className="flex-row items-center space-x-3 gap-2">
+                <View style={{
+                    padding: 16,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                }}>
+                    <View style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8
+                    }}>
                         <Image
                             source={blog.user?.avatar ? { uri: blog.user.avatar } : authorProfile}
-                            className="w-10 h-10 rounded-full bg-gray-300"
+                            style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 20,
+                                backgroundColor: '#D1D5DB'
+                            }}
                         />
                         <View>
-                            <Text className={`font-bold ${
-                                isDark ? 'text-white' : 'text-gray-900'
-                            }`}>
+                            <Text style={{
+                                fontWeight: 'bold',
+                                color: isDark ? '#FFFFFF' : '#1F2937'
+                            }}>
                                 {blog.user?.user_name || "Anonymous"}
                             </Text>
-                            <Text className={`text-sm ${
-                                isDark ? 'text-gray-400' : 'text-gray-500'
-                            }`}>
+                            <Text style={{
+                                fontSize: 12,
+                                color: isDark ? '#9CA3AF' : '#6B7280'
+                            }}>
                                 {formatDate(blog.createdAt || new Date())}
                             </Text>
                         </View>
                     </View>
 
                     <TouchableOpacity
-                        className="p-2"
+                        style={{ padding: 8 }}
                         onPress={handleMenuPress}
                     >
                         <MoreHorizontal size={20} color={isDark ? '#94A3B8' : '#6B7280'} />
@@ -414,12 +411,21 @@ const Blog = ({
 
                 {/* Category Tag */}
                 {blog.category && (
-                    <View className="px-4 mb-2">
+                    <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
                         <View
-                            className="self-start rounded-full px-3 py-1"
-                            style={{ backgroundColor: blog.category.color || '#6366F1' }}
+                            style={{
+                                alignSelf: 'flex-start',
+                                borderRadius: 9999,
+                                paddingHorizontal: 12,
+                                paddingVertical: 4,
+                                backgroundColor: blog.category.color || '#6366F1'
+                            }}
                         >
-                            <Text className="text-white text-xs font-medium">
+                            <Text style={{
+                                color: '#FFFFFF',
+                                fontSize: 12,
+                                fontWeight: '500'
+                            }}>
                                 {blog.category.icon ? `${blog.category.icon} ` : ''}{blog.category.category_name || 'General'}
                             </Text>
                         </View>
@@ -428,32 +434,36 @@ const Blog = ({
 
                 {/* Blog Title - if available */}
                 {blog.title && (
-                    <View className="px-4 pb-2">
-                        <Text className={`text-lg font-bold ${
-                            isDark ? 'text-white' : 'text-gray-900'
-                        }`}>
+                    <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
+                        <Text style={{
+                            fontSize: 18,
+                            fontWeight: 'bold',
+                            color: isDark ? '#FFFFFF' : '#1F2937'
+                        }}>
                             {blog.title}
                         </Text>
                     </View>
                 )}
 
                 {/* Blog Content */}
-                <View className="px-4 pb-3">
-                    <Text className={`text-base leading-6 ${
-                        isDark ? 'text-gray-300' : 'text-gray-700'
-                    }`}>
+                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
+                    <Text style={{
+                        fontSize: 16,
+                        lineHeight: 24,
+                        color: isDark ? '#D1D5DB' : '#4B5563'
+                    }}>
                         {formatContentPreview(blog.content)}
                     </Text>
                 </View>
 
                 {/* Blog Image - if available */}
                 {blog.image && !imageError && (
-                    <View className="w-full h-64">
+                    <View style={{ width: '100%', height: 256 }}>
                         <Image
                             source={{
                                 uri: getFullImageUrl(blog.image)
                             }}
-                            className="w-full h-full"
+                            style={{ width: '100%', height: '100%' }}
                             resizeMode="cover"
                             onError={handleImageError}
                         />
@@ -461,12 +471,24 @@ const Blog = ({
                 )}
 
                 {/* Action Buttons */}
-                <View className="px-4 py-3 flex-row items-center justify-between border-t border-gray-100 dark:border-gray-800">
-                    <View className="flex-row items-center">
+                <View style={{
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    borderTopWidth: 1,
+                    borderTopColor: isDark ? '#374151' : '#F3F4F6'
+                }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                         {/* Like Button */}
                         <TouchableOpacity
                             onPress={handleLike}
-                            className="flex-row items-center mr-6"
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                marginRight: 24
+                            }}
                         >
                             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
                                 <Heart
@@ -475,11 +497,12 @@ const Blog = ({
                                     fill={isLiked ? '#7C3AED' : 'none'}
                                 />
                             </Animated.View>
-                            <Text className={`ml-1.5 ${
-                                isLiked
-                                    ? 'text-primary-500'
-                                    : (isDark ? 'text-gray-400' : 'text-gray-600')
-                            }`}>
+                            <Text style={{
+                                marginLeft: 6,
+                                color: isLiked
+                                    ? '#7C3AED'
+                                    : (isDark ? '#9CA3AF' : '#4B5563')
+                            }}>
                                 {likesCount > 999 ? `${(likesCount / 1000).toFixed(1)}k` : likesCount}
                             </Text>
                         </TouchableOpacity>
@@ -487,13 +510,20 @@ const Blog = ({
                         {/* Comment Button */}
                         <TouchableOpacity
                             onPress={handleCommentPress}
-                            className="flex-row items-center mr-6"
+                            style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                marginRight: 24
+                            }}
                         >
                             <MessageCircle
                                 size={22}
                                 color={isDark ? '#94A3B8' : '#6B7280'}
                             />
-                            <Text className={`ml-1.5 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
+                            <Text style={{
+                                marginLeft: 6,
+                                color: isDark ? '#9CA3AF' : '#4B5563'
+                            }}>
                                 {blog.commentsCount || 0}
                             </Text>
                         </TouchableOpacity>
@@ -525,13 +555,19 @@ const Blog = ({
                 {blog.content && blog.content.length > 150 && (
                     <TouchableOpacity
                         onPress={handleReadMore}
-                        className={`mx-4 mb-4 py-2 rounded-xl ${
-                            isDark ? 'bg-gray-700' : 'bg-gray-100'
-                        }`}
+                        style={{
+                            marginHorizontal: 16,
+                            marginBottom: 16,
+                            paddingVertical: 8,
+                            borderRadius: 12,
+                            backgroundColor: isDark ? '#374151' : '#F3F4F6'
+                        }}
                     >
-                        <Text className={`text-center font-medium ${
-                            isDark ? 'text-primary-400' : 'text-primary-600'
-                        }`}>
+                        <Text style={{
+                            textAlign: 'center',
+                            fontWeight: '500',
+                            color: isDark ? '#A5B4FC' : '#6366F1'
+                        }}>
                             Read more
                         </Text>
                     </TouchableOpacity>
@@ -539,7 +575,174 @@ const Blog = ({
             </MotiView>
 
             {/* Comments Modal */}
-            {showComments && <CommentsModal />}
+            {showComments && (
+                <Modal
+                    animationType="slide"
+                    transparent={false}
+                    visible={showComments}
+                    onRequestClose={() => setShowComments(false)}
+                >
+                    <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+                    <View style={{
+                        flex: 1,
+                        backgroundColor: isDark ? '#111827' : '#FFFFFF'
+                    }}>
+                        {/* Modal Header */}
+                        <SafeAreaView style={{ flex: 1 }}>
+                            <View style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                paddingHorizontal: 16,
+                                paddingVertical: 8,
+                                borderBottomWidth: 1,
+                                borderBottomColor: isDark ? '#374151' : '#E5E7EB'
+                            }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <TouchableOpacity
+                                        onPress={() => setShowComments(false)}
+                                        style={{ padding: 8 }}
+                                    >
+                                        <ArrowLeft size={24} color={isDark ? '#E2E8F0' : '#1F2937'} />
+                                    </TouchableOpacity>
+                                    <Text style={{
+                                        fontSize: 18,
+                                        fontWeight: 'bold',
+                                        marginLeft: 8,
+                                        color: isDark ? '#FFFFFF' : '#1F2937'
+                                    }}>
+                                        Comments
+                                    </Text>
+                                </View>
+
+                                <TouchableOpacity
+                                    onPress={() => setShowComments(false)}
+                                    style={{ padding: 8 }}
+                                >
+                                    <X size={24} color={isDark ? '#E2E8F0' : '#1F2937'} />
+                                </TouchableOpacity>
+                            </View>
+
+                            {/* Comments List */}
+                            <ScrollView
+                                style={{ flex: 1, paddingHorizontal: 16 }}
+                                showsVerticalScrollIndicator={false}
+                                refreshControl={
+                                    <RefreshControl
+                                        refreshing={refreshing}
+                                        onRefresh={refreshComments}
+                                        colors={['#6366F1']}
+                                        tintColor={isDark ? '#6366F1' : '#6366F1'}
+                                    />
+                                }
+                            >
+                                {loadingComments ? (
+                                    <View style={{ paddingVertical: 32, alignItems: 'center', justifyContent: 'center' }}>
+                                        <ActivityIndicator size="large" color="#6366F1" />
+                                        <Text style={{
+                                            marginTop: 8,
+                                            color: isDark ? '#9CA3AF' : '#6B7280'
+                                        }}>
+                                            Loading comments...
+                                        </Text>
+                                    </View>
+                                ) : comments.length > 0 ? (
+                                    comments.map((comment) => (
+                                        <Comment
+                                            key={comment.comment_id || comment.id}
+                                            comment={comment}
+                                            isDark={isDark}
+                                            onReply={handleReply}
+                                            onLike={handleCommentLike}
+                                            currentUser={currentUser}
+                                            formatDate={formatDate}
+                                            refreshComments={refreshComments}
+                                            blogId={blog.blog_id}
+                                        />
+                                    ))
+                                ) : (
+                                    <View style={{ paddingVertical: 32, alignItems: 'center', justifyContent: 'center' }}>
+                                        <Text style={{
+                                            textAlign: 'center',
+                                            color: isDark ? '#9CA3AF' : '#6B7280'
+                                        }}>
+                                            No comments yet. Be the first to comment!
+                                        </Text>
+                                    </View>
+                                )}
+
+                                {/* Add some bottom padding for better scrolling */}
+                                <View style={{ height: 80 }} />
+                            </ScrollView>
+
+                            {/* Reply indicator */}
+                            {replyingTo && (
+                                <View style={{
+                                    paddingHorizontal: 16,
+                                    paddingVertical: 8,
+                                    borderTopWidth: 1,
+                                    flexDirection: 'row',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                                    borderTopColor: isDark ? '#374151' : '#E5E7EB'
+                                }}>
+                                    <Text style={{ color: isDark ? '#D1D5DB' : '#4B5563' }}>
+                                        Replying to <Text style={{ fontWeight: 'bold' }}>{replyingTo.user.user_name || replyingTo.user.name}</Text>
+                                    </Text>
+                                    <TouchableOpacity onPress={cancelReply}>
+                                        <X size={18} color={isDark ? '#94A3B8' : '#6B7280'} />
+                                    </TouchableOpacity>
+                                </View>
+                            )}
+
+                            {/* Comment Input */}
+                            <View style={{
+                                paddingHorizontal: 16,
+                                paddingVertical: 12,
+                                borderTopWidth: 1,
+                                borderTopColor: isDark ? '#374151' : '#E5E7EB',
+                                backgroundColor: isDark ? '#111827' : '#FFFFFF'
+                            }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <TextInput
+                                        value={newComment}
+                                        onChangeText={setNewComment}
+                                        placeholder={replyingTo ? "Write a reply..." : "Add a comment..."}
+                                        placeholderTextColor={isDark ? '#94A3B8' : '#9CA3AF'}
+                                        style={{
+                                            flex: 1,
+                                            paddingVertical: 8,
+                                            paddingHorizontal: 16,
+                                            borderRadius: 9999,
+                                            marginRight: 8,
+                                            backgroundColor: isDark ? '#1F2937' : '#F3F4F6',
+                                            color: isDark ? '#FFFFFF' : '#1F2937',
+                                            borderWidth: 1,
+                                            borderColor: isDark ? '#374151' : '#E5E7EB'
+                                        }}
+                                        multiline
+                                        maxLength={500}
+                                    />
+                                    <TouchableOpacity
+                                        onPress={handleSubmitComment}
+                                        disabled={!newComment.trim()}
+                                        style={{
+                                            padding: 8,
+                                            borderRadius: 9999,
+                                            backgroundColor: newComment.trim()
+                                                ? '#7C3AED'
+                                                : isDark ? '#1F2937' : '#E5E7EB'
+                                        }}
+                                    >
+                                        <Send size={20} color={newComment.trim() ? '#FFFFFF' : isDark ? '#4B5563' : '#9CA3AF'} />
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </SafeAreaView>
+                    </View>
+                </Modal>
+            )}
         </>
     );
 };
