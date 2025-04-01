@@ -180,19 +180,6 @@ export const getBlogDetails = async (blogId: number) => {
     }
 };
 
-// Function to add a comment to a blog
-export const addComment = async (blogId: number, commentData: {
-    content: string;
-    parent_id?: number;
-}) => {
-    try {
-        return await postData<ApiResponse<Comment>>(`/api/blog/addComment/${blogId}`, commentData);
-    } catch (error: any) {
-        console.error('Error in addComment:', error);
-        throw error.response?.data?.error || 'Failed to add comment';
-    }
-};
-
 // Function to get trending blogs
 export const getTrendingBlogs = async (limit: number = 5) => {
     try {

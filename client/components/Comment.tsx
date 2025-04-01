@@ -1,94 +1,216 @@
-import { View, Text, Image, TouchableOpacity, TextInput, useColorScheme, Pressable } from 'react-native';
+import { View, Text, Image, TouchableOpacity, TextInput, Pressable, Alert, Platform } from 'react-native';
 import React, { useState, useRef } from 'react';
-import { Heart, Reply, MoreHorizontal, Send, ChevronDown, ChevronUp } from 'lucide-react-native';
+import { Heart, Reply, MoreHorizontal, Send, ChevronDown, ChevronUp, Edit, Trash } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import { MotiView, AnimatePresence } from 'moti';
 import { BlurView } from 'expo-blur';
-
-interface Reply {
-    id: string;
-    user: {
-        name: string;
-        avatar: string;
-    };
-    text: string;
-    time: string;
-    likes: number;
-    isLiked?: boolean;
-}
-
-interface CommentProps {
-    comment: {
-        id: string;
-        user: {
-            name: string;
-            avatar: string;
-        };
-        text: string;
-        time: string;
-        likes: number;
-        isLiked?: boolean;
-        replies?: Reply[];
-    };
-    depth?: number;
-    onReply?: (commentId: string, text: string) => void;
-    onLike?: (commentId: string) => void;
-}
+import { updateComment, deleteComment, addComment } from '../services/commentService';
 
 const MAX_NESTING_DEPTH = 3;
 
-const Comment = ({ comment, depth = 0, onReply, onLike }: CommentProps) => {
-    const colorScheme = useColorScheme();
-    const isDark = colorScheme === 'dark';
-    const inputRef = useRef<TextInput>(null);
+const Comment = ({
+                     comment,
+                     isDark,
+                     onReply,
+                     onLike,
+                     currentUser,
+                     formatDate,
+                     refreshComments,
+                     blogId
+                 }) => {
+    // Make sure comment is defined before using it
+    if (!comment) {
+        return null;
+    }
 
+    const inputRef = useRef(null);
+
+    // States - with safe defaults to prevent undefined errors
     const [isLiked, setIsLiked] = useState(comment.isLiked || false);
     const [showReplyInput, setShowReplyInput] = useState(false);
     const [replyText, setReplyText] = useState('');
-    const [showReplies, setShowReplies] = useState(false);
+    const [showReplies, setShowReplies] = useState(true);
     const [isOptionsVisible, setIsOptionsVisible] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editText, setEditText] = useState(comment.content || comment.text || '');
+    const [likesCount, setLikesCount] = useState(comment.likes || 0);
 
+    // Calculate depth based on whether this is a reply
+    const depth = comment.parent_id ? 1 : 0;
+
+    // Safely extract user data
+    const userName = comment.user?.user_name || comment.user?.name || 'Anonymous';
+    const userAvatar = comment.user?.avatar || 'https://via.placeholder.com/40';
+    const commentText = comment.content || comment.text || '';
+    const commentTime = formatDate ? formatDate(comment.createdAt || comment.time) : (comment.time || 'Recently');
+
+    // Check if current user is the comment author (with null checking)
+    const isCommentAuthor = currentUser &&
+        ((comment.user_id && currentUser.user_id === comment.user_id) ||
+            (comment.user && comment.user.user_id && currentUser.user_id === comment.user.user_id));
+
+    // Get replies safely
+    const replies = comment.replies || [];
+
+    // Handle like - Updated to work properly with backend
     const handleLike = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        setIsLiked(!isLiked);
-        onLike?.(comment.id);
 
-        // Like animation will be handled by MotiView
+        // Update local state for immediate feedback
+        const newIsLiked = !isLiked;
+        setIsLiked(newIsLiked);
+        setLikesCount(newIsLiked ? likesCount + 1 : likesCount - 1);
+
+        // Call parent onLike handler with the comment ID for the API call
+        if (onLike && typeof onLike === 'function') {
+            // Pass both the ID and the new liked state for proper backend handling
+            onLike(comment.comment_id || comment.id, newIsLiked);
+        }
     };
 
+    // Handle reply button click
     const handleReply = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+        // If the parent component provides an onReply function, use it
+        if (onReply && typeof onReply === 'function') {
+            onReply(comment);
+            return;
+        }
+
+        // Otherwise use the built-in reply functionality
         setShowReplyInput(!showReplyInput);
         if (!showReplyInput) {
             setTimeout(() => inputRef.current?.focus(), 100);
         }
     };
 
-    const submitReply = () => {
-        if (replyText.trim()) {
-            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            onReply?.(comment.id, replyText);
-            setReplyText('');
-            setShowReplyInput(false);
+    // Submit a reply
+    const submitReply = async () => {
+        if (!replyText.trim()) return;
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        try {
+            const commentData = {
+                content: replyText,
+                parent_id: comment.comment_id || comment.id
+            };
+
+            const response = await addComment(blogId, commentData);
+
+            if (response && response.success) {
+                setReplyText('');
+                setShowReplyInput(false);
+                refreshComments();
+            } else {
+                Alert.alert('Error', 'Failed to add reply');
+            }
+        } catch (error) {
+            console.error('Error adding reply:', error);
+            Alert.alert('Error', 'Failed to add reply');
         }
     };
 
+    // Toggle showing replies
     const toggleReplies = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         setShowReplies(!showReplies);
     };
 
+    // Start editing comment
+    const startEditing = () => {
+        setIsEditing(true);
+        setIsOptionsVisible(false);
+        setTimeout(() => inputRef.current?.focus(), 100);
+    };
+
+    // Cancel editing
+    const cancelEditing = () => {
+        setIsEditing(false);
+        setEditText(comment.content || comment.text || '');
+    };
+
+    // Save edited comment
+    const saveEditedComment = async () => {
+        if (!editText.trim()) return;
+
+        try {
+            const response = await updateComment(comment.comment_id || comment.id, {
+                content: editText
+            });
+
+            if (response && response.success) {
+                setIsEditing(false);
+                refreshComments();
+            } else {
+                Alert.alert('Error', 'Failed to update comment');
+            }
+        } catch (error) {
+            console.error('Error updating comment:', error);
+            Alert.alert('Error', 'Failed to update comment');
+        }
+    };
+
+    // Confirm deletion
+    const confirmDeleteComment = () => {
+        Alert.alert(
+            'Delete Comment',
+            'Are you sure you want to delete this comment?',
+            [
+                {
+                    text: 'Cancel',
+                    style: 'cancel'
+                },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: handleDeleteComment
+                }
+            ]
+        );
+    };
+
+    // Delete comment
+    const handleDeleteComment = async () => {
+        try {
+            const response = await deleteComment(comment.comment_id || comment.id);
+
+            if (response && response.success) {
+                setIsOptionsVisible(false);
+                refreshComments();
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            } else {
+                Alert.alert('Error', 'Failed to delete comment');
+            }
+        } catch (error) {
+            console.error('Error deleting comment:', error);
+            Alert.alert('Error', 'Failed to delete comment');
+        }
+    };
+
     return (
-        <View className={`${depth > 0 ? 'ml-8 border-l-2 border-gray-100 dark:border-gray-800 pl-4' : ''}`}>
+        <View style={{
+            marginLeft: depth > 0 ? 32 : 0,
+            borderLeftWidth: depth > 0 ? 2 : 0,
+            borderLeftColor: isDark ? '#374151' : '#E5E7EB',
+            paddingLeft: depth > 0 ? 16 : 0,
+            marginBottom: 16, // Increased bottom margin for better spacing
+            paddingTop: depth > 0 ? 8 : 16, // Add top padding, more for top-level comments
+            paddingBottom: 4 // Add bottom padding
+        }}>
             {/* Main Comment */}
             <MotiView
                 from={{ opacity: 0, translateY: 10 }}
                 animate={{ opacity: 1, translateY: 0 }}
                 transition={{ type: 'timing', duration: 300 }}
-                className={`mb-3 ${depth > 0 ? 'mt-3' : ''}`}
+                style={{
+                    marginBottom: 12,
+                    marginTop: depth > 0 ? 4 : 0 // Adjusted top margin
+                }}
             >
                 {/* User Info and Comment */}
-                <View className="flex-row space-x-3">
+                <View style={{ flexDirection: 'row', gap: 12 }}>
                     {/* Avatar */}
                     <MotiView
                         from={{ scale: 0.8, opacity: 0 }}
@@ -96,128 +218,267 @@ const Comment = ({ comment, depth = 0, onReply, onLike }: CommentProps) => {
                         transition={{ type: 'spring', delay: 150 }}
                     >
                         <Image
-                            source={{ uri: comment.user.avatar }}
-                            className="w-10 h-10 rounded-full"
+                            source={{ uri: userAvatar }}
+                            style={{
+                                width: 40,
+                                height: 40,
+                                borderRadius: 20,
+                                backgroundColor: isDark ? '#374151' : '#F3F4F6'
+                            }}
                         />
                     </MotiView>
 
                     {/* Comment Content */}
-                    <View className="flex-1">
-                        {/* Comment Bubble */}
-                        <View className={`rounded-2xl p-3 ${
-                            isDark ? 'bg-theme-card-dark' : 'bg-theme-input'
-                        }`}>
-                            {/* Username and Options */}
-                            <View className="flex-row items-center justify-between mb-1">
-                                <Text className={`font-semibold ${
-                                    isDark ? 'text-theme-text-primary-dark' : 'text-gray-900'
-                                }`}>
-                                    {comment.user.name}
-                                </Text>
-                                <TouchableOpacity
-                                    onPress={() => {
-                                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                                        setIsOptionsVisible(!isOptionsVisible);
+                    <View style={{ flex: 1 }}>
+                        {isEditing ? (
+                            <View style={{ marginBottom: 12 }}>
+                                <TextInput
+                                    ref={inputRef}
+                                    value={editText}
+                                    onChangeText={setEditText}
+                                    style={{
+                                        borderRadius: 16,
+                                        paddingHorizontal: 16,
+                                        paddingVertical: 12,
+                                        backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                                        color: isDark ? '#F9FAFB' : '#111827',
+                                        borderWidth: 1,
+                                        borderColor: isDark ? '#374151' : '#E5E7EB',
+                                        minHeight: 80 // Minimum height for better editing experience
                                     }}
-                                    className="p-1"
-                                >
-                                    <MoreHorizontal
-                                        size={16}
-                                        color={isDark ? '#94A3B8' : '#6B7280'}
-                                    />
-                                </TouchableOpacity>
-                            </View>
-
-                            {/* Comment Text */}
-                            <Text className={`text-[15px] ${
-                                isDark ? 'text-theme-text-secondary-dark' : 'text-gray-700'
-                            }`}>
-                                {comment.text}
-                            </Text>
-                        </View>
-
-                        {/* Options Menu */}
-                        <AnimatePresence>
-                            {isOptionsVisible && (
-                                <MotiView
-                                    from={{ opacity: 0, scale: 0.95 }}
-                                    animate={{ opacity: 1, scale: 1 }}
-                                    exit={{ opacity: 0, scale: 0.95 }}
-                                    className="absolute right-0 top-12 z-50"
-                                >
-                                    <BlurView
-                                        intensity={isDark ? 30 : 70}
-                                        className={`rounded-xl overflow-hidden ${
-                                            isDark ? 'bg-gray-800/90' : 'bg-white/90'
-                                        }`}
+                                    placeholderTextColor={isDark ? '#94A3B8' : '#9CA3AF'}
+                                    multiline
+                                    maxLength={500}
+                                />
+                                <View style={{
+                                    flexDirection: 'row',
+                                    justifyContent: 'flex-end',
+                                    marginTop: 12, // Increased margin
+                                    gap: 12 // Increased gap
+                                }}>
+                                    <TouchableOpacity
+                                        onPress={cancelEditing}
+                                        style={{
+                                            paddingHorizontal: 16, // Wider button
+                                            paddingVertical: 8, // Taller button
+                                            borderRadius: 8,
+                                            backgroundColor: isDark ? '#374151' : '#E5E7EB'
+                                        }}
                                     >
-                                        <View className="p-2">
-                                            <Pressable className="px-4 py-2 rounded-lg active:bg-gray-100 dark:active:bg-gray-700">
-                                                <Text className={isDark ? 'text-white' : 'text-gray-800'}>
-                                                    Copy text
-                                                </Text>
-                                            </Pressable>
-                                            <Pressable className="px-4 py-2 rounded-lg active:bg-gray-100 dark:active:bg-gray-700">
-                                                <Text className="text-red-500">
-                                                    Report
-                                                </Text>
-                                            </Pressable>
-                                        </View>
-                                    </BlurView>
-                                </MotiView>
-                            )}
-                        </AnimatePresence>
+                                        <Text style={{ color: isDark ? '#F9FAFB' : '#111827' }}>Cancel</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={saveEditedComment}
+                                        style={{
+                                            paddingHorizontal: 16, // Wider button
+                                            paddingVertical: 8, // Taller button
+                                            borderRadius: 8,
+                                            backgroundColor: '#7C3AED'
+                                        }}
+                                    >
+                                        <Text style={{ color: '#FFFFFF' }}>Save</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        ) : (
+                            <>
+                                {/* Comment Bubble */}
+                                <View style={{
+                                    borderRadius: 16,
+                                    padding: 16, // Increased padding
+                                    backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                                }}>
+                                    {/* Username and Options */}
+                                    <View style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        marginBottom: 6 // Increased margin
+                                    }}>
+                                        <Text style={{
+                                            fontWeight: '600',
+                                            fontSize: 15, // Slightly larger username
+                                            color: isDark ? '#F9FAFB' : '#111827'
+                                        }}>
+                                            {userName}
+                                        </Text>
+                                        {isCommentAuthor && (
+                                            <TouchableOpacity
+                                                onPress={() => {
+                                                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                                                    setIsOptionsVisible(!isOptionsVisible);
+                                                }}
+                                                style={{
+                                                    padding: 6, // Larger touch target
+                                                    marginRight: -4 // Adjust positioning
+                                                }}
+                                            >
+                                                <MoreHorizontal
+                                                    size={16}
+                                                    color={isDark ? '#94A3B8' : '#6B7280'}
+                                                />
+                                            </TouchableOpacity>
+                                        )}
+                                    </View>
 
-                        {/* Actions Row */}
-                        <View className="flex-row items-center mt-2 space-x-5">
-                            <Text className={`text-sm ${
-                                isDark ? 'text-theme-text-muted-dark' : 'text-gray-500'
-                            }`}>
-                                {comment.time}
-                            </Text>
-
-                            {/* Like Button */}
-                            <MotiView
-                                animate={{ scale: isLiked ? [1, 1.2, 1] : 1 }}
-                                transition={{ type: 'spring', damping: 10 }}
-                            >
-                                <TouchableOpacity
-                                    onPress={handleLike}
-                                    className="flex-row items-center space-x-1"
-                                >
-                                    <Heart
-                                        size={16}
-                                        color={isLiked ? '#7C3AED' : (isDark ? '#94A3B8' : '#6B7280')}
-                                        fill={isLiked ? '#7C3AED' : 'none'}
-                                    />
-                                    <Text className={`text-sm font-medium ${
-                                        isLiked
-                                            ? 'text-primary-500'
-                                            : (isDark ? 'text-theme-text-muted-dark' : 'text-gray-500')
-                                    }`}>
-                                        {comment.likes + (isLiked ? 1 : 0)}
+                                    {/* Comment Text */}
+                                    <Text style={{
+                                        fontSize: 15,
+                                        color: isDark ? '#D1D5DB' : '#374151',
+                                        lineHeight: 22 // Increased line height for better readability
+                                    }}>
+                                        {commentText}
                                     </Text>
-                                </TouchableOpacity>
-                            </MotiView>
+                                </View>
 
-                            {/* Reply Button */}
-                            {depth < MAX_NESTING_DEPTH && (
-                                <TouchableOpacity
-                                    onPress={handleReply}
-                                    className="flex-row items-center space-x-1"
-                                >
-                                    <Reply
-                                        size={16}
-                                        color={isDark ? '#94A3B8' : '#6B7280'}
-                                    />
-                                    <Text className={`text-sm font-medium ${
-                                        isDark ? 'text-theme-text-muted-dark' : 'text-gray-500'
-                                    }`}>
-                                        Reply
+                                {/* Options Menu */}
+                                <AnimatePresence>
+                                    {isOptionsVisible && (
+                                        <MotiView
+                                            from={{ opacity: 0, scale: 0.95 }}
+                                            animate={{ opacity: 1, scale: 1 }}
+                                            exit={{ opacity: 0, scale: 0.95 }}
+                                            style={{
+                                                position: 'absolute',
+                                                right: 0,
+                                                top: 50, // Adjusted position
+                                                zIndex: 50,
+                                                borderRadius: 12,
+                                                overflow: 'hidden',
+                                                shadowColor: "#000",
+                                                shadowOffset: {
+                                                    width: 0,
+                                                    height: 2,
+                                                },
+                                                shadowOpacity: 0.25,
+                                                shadowRadius: 3.84,
+                                                elevation: 5,
+                                                backgroundColor: isDark ? 'rgba(31, 41, 55, 0.95)' : 'rgba(255, 255, 255, 0.95)'
+                                            }}
+                                        >
+                                            <View style={{ padding: 8 }}>
+                                                <Pressable
+                                                    onPress={startEditing}
+                                                    style={{
+                                                        paddingHorizontal: 16,
+                                                        paddingVertical: 10, // Taller buttons
+                                                        borderRadius: 8,
+                                                        flexDirection: 'row',
+                                                        alignItems: 'center'
+                                                    }}
+                                                >
+                                                    <Edit
+                                                        size={16}
+                                                        color={isDark ? '#E2E8F0' : '#4B5563'}
+                                                        style={{ marginRight: 8 }}
+                                                    />
+                                                    <Text style={{
+                                                        color: isDark ? '#F9FAFB' : '#111827',
+                                                        fontSize: 14 // Slightly larger text
+                                                    }}>
+                                                        Edit
+                                                    </Text>
+                                                </Pressable>
+                                                <Pressable
+                                                    onPress={confirmDeleteComment}
+                                                    style={{
+                                                        paddingHorizontal: 16,
+                                                        paddingVertical: 10, // Taller buttons
+                                                        borderRadius: 8,
+                                                        flexDirection: 'row',
+                                                        alignItems: 'center'
+                                                    }}
+                                                >
+                                                    <Trash
+                                                        size={16}
+                                                        color="#EF4444"
+                                                        style={{ marginRight: 8 }}
+                                                    />
+                                                    <Text style={{
+                                                        color: '#EF4444',
+                                                        fontSize: 14 // Slightly larger text
+                                                    }}>
+                                                        Delete
+                                                    </Text>
+                                                </Pressable>
+                                            </View>
+                                        </MotiView>
+                                    )}
+                                </AnimatePresence>
+
+                                {/* Actions Row */}
+                                <View style={{
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    marginTop: 10, // Slightly more margin
+                                    paddingLeft: 4, // Add left padding
+                                    gap: 24 // More space between items
+                                }}>
+                                    <Text style={{
+                                        fontSize: 12,
+                                        color: isDark ? '#9CA3AF' : '#6B7280'
+                                    }}>
+                                        {commentTime}
                                     </Text>
-                                </TouchableOpacity>
-                            )}
-                        </View>
+
+                                    {/* Like Button */}
+                                    <MotiView
+                                        animate={{ scale: isLiked ? [1, 1.2, 1] : 1 }}
+                                        transition={{ type: 'spring', damping: 10 }}
+                                    >
+                                        <TouchableOpacity
+                                            onPress={handleLike}
+                                            style={{
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                gap: 4,
+                                                padding: 4 // Added padding for larger touch target
+                                            }}
+                                        >
+                                            <Heart
+                                                size={16}
+                                                color={isLiked ? '#7C3AED' : (isDark ? '#94A3B8' : '#6B7280')}
+                                                fill={isLiked ? '#7C3AED' : 'none'}
+                                            />
+                                            <Text style={{
+                                                fontSize: 12,
+                                                fontWeight: '500',
+                                                color: isLiked
+                                                    ? '#7C3AED'
+                                                    : (isDark ? '#9CA3AF' : '#6B7280')
+                                            }}>
+                                                {likesCount}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    </MotiView>
+
+                                    {/* Reply Button */}
+                                    {depth < MAX_NESTING_DEPTH && (
+                                        <TouchableOpacity
+                                            onPress={handleReply}
+                                            style={{
+                                                flexDirection: 'row',
+                                                alignItems: 'center',
+                                                gap: 4,
+                                                padding: 4 // Added padding for larger touch target
+                                            }}
+                                        >
+                                            <Reply
+                                                size={16}
+                                                color={isDark ? '#94A3B8' : '#6B7280'}
+                                            />
+                                            <Text style={{
+                                                fontSize: 12,
+                                                fontWeight: '500',
+                                                color: isDark ? '#9CA3AF' : '#6B7280'
+                                            }}>
+                                                Reply
+                                            </Text>
+                                        </TouchableOpacity>
+                                    )}
+                                </View>
+                            </>
+                        )}
 
                         {/* Reply Input */}
                         <AnimatePresence>
@@ -226,19 +487,28 @@ const Comment = ({ comment, depth = 0, onReply, onLike }: CommentProps) => {
                                     from={{ opacity: 0, height: 0 }}
                                     animate={{ opacity: 1, height: 'auto' }}
                                     exit={{ opacity: 0, height: 0 }}
-                                    className="mt-3"
+                                    style={{ marginTop: 16 }} // More space above reply input
                                 >
-                                    <View className="flex-row items-end space-x-2">
+                                    <View style={{
+                                        flexDirection: 'row',
+                                        alignItems: 'flex-end',
+                                        gap: 8
+                                    }}>
                                         <TextInput
                                             ref={inputRef}
                                             value={replyText}
                                             onChangeText={setReplyText}
                                             placeholder="Write a reply..."
-                                            className={`flex-1 rounded-2xl px-4 py-3 ${
-                                                isDark
-                                                    ? 'bg-theme-input-dark text-theme-text-primary-dark'
-                                                    : 'bg-gray-50 text-gray-700'
-                                            }`}
+                                            style={{
+                                                flex: 1,
+                                                borderRadius: 16,
+                                                paddingHorizontal: 16,
+                                                paddingVertical: 12,
+                                                backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
+                                                color: isDark ? '#F9FAFB' : '#111827',
+                                                borderWidth: 1,
+                                                borderColor: isDark ? '#374151' : '#E5E7EB'
+                                            }}
                                             placeholderTextColor={isDark ? '#94A3B8' : '#9CA3AF'}
                                             multiline
                                             maxLength={500}
@@ -246,11 +516,13 @@ const Comment = ({ comment, depth = 0, onReply, onLike }: CommentProps) => {
                                         <TouchableOpacity
                                             onPress={submitReply}
                                             disabled={!replyText.trim()}
-                                            className={`p-3 rounded-xl ${
-                                                replyText.trim()
-                                                    ? 'bg-primary-500'
-                                                    : (isDark ? 'bg-gray-700' : 'bg-gray-200')
-                                            }`}
+                                            style={{
+                                                padding: 12,
+                                                borderRadius: 12,
+                                                backgroundColor: replyText.trim()
+                                                    ? '#7C3AED'
+                                                    : (isDark ? '#374151' : '#E5E7EB')
+                                            }}
                                         >
                                             <Send
                                                 size={20}
@@ -266,20 +538,30 @@ const Comment = ({ comment, depth = 0, onReply, onLike }: CommentProps) => {
             </MotiView>
 
             {/* Nested Replies */}
-            {comment.replies && comment.replies.length > 0 && (
+            {replies.length > 0 && (
                 <View>
                     {/* Show/Hide Replies Button */}
                     <TouchableOpacity
                         onPress={toggleReplies}
-                        className={`flex-row items-center py-2 ${depth > 0 ? 'ml-13' : 'ml-13'}`}
+                        style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            paddingVertical: 8,
+                            marginLeft: 52, // Align with comment content
+                            paddingLeft: 4 // Small left padding
+                        }}
                     >
                         {showReplies ? (
-                            <ChevronUp size={16} className="text-primary-500 mr-1" />
+                            <ChevronUp size={16} color="#7C3AED" style={{ marginRight: 4 }} />
                         ) : (
-                            <ChevronDown size={16} className="text-primary-500 mr-1" />
+                            <ChevronDown size={16} color="#7C3AED" style={{ marginRight: 4 }} />
                         )}
-                        <Text className="text-primary-500 text-sm font-medium">
-                            {showReplies ? 'Hide replies' : `Show ${comment.replies.length} replies`}
+                        <Text style={{
+                            color: '#7C3AED',
+                            fontSize: 13,
+                            fontWeight: '500'
+                        }}>
+                            {showReplies ? 'Hide replies' : `Show ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`}
                         </Text>
                     </TouchableOpacity>
 
@@ -291,13 +573,17 @@ const Comment = ({ comment, depth = 0, onReply, onLike }: CommentProps) => {
                                 animate={{ opacity: 1 }}
                                 exit={{ opacity: 0 }}
                             >
-                                {comment.replies.map((reply) => (
+                                {replies.map((reply) => (
                                     <Comment
-                                        key={reply.id}
+                                        key={reply.comment_id || reply.id}
                                         comment={reply}
-                                        depth={depth + 1}
+                                        isDark={isDark}
                                         onReply={onReply}
                                         onLike={onLike}
+                                        currentUser={currentUser}
+                                        formatDate={formatDate}
+                                        refreshComments={refreshComments}
+                                        blogId={blogId}
                                     />
                                 ))}
                             </MotiView>

@@ -537,79 +537,7 @@ const getBlogDetails = async (req, res) => {
     }
 };
 
-// Function to add a comment to a blog
-const addComment = async (req, res) => {
-    try {
-        const blog_id = parseInt(req.params.blog_id);
-        const user_id = req.user;
-        const { content, parent_id } = req.body;
 
-        if (!content) {
-            return res.status(400).json({
-                success: false,
-                error: 'Comment content is required'
-            });
-        }
-
-        // Check if blog exists
-        const blog = await prisma.blog.findUnique({
-            where: { blog_id }
-        });
-
-        if (!blog) {
-            return res.status(404).json({
-                success: false,
-                error: 'Blog not found'
-            });
-        }
-
-        // If parent_id is provided, check if parent comment exists
-        if (parent_id) {
-            const parentComment = await prisma.comment.findUnique({
-                where: { comment_id: parseInt(parent_id) }
-            });
-
-            if (!parentComment) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Parent comment not found'
-                });
-            }
-        }
-
-        // Create the comment
-        const newComment = await prisma.comment.create({
-            data: {
-                content,
-                user_id: parseInt(user_id),
-                blog_id,
-                parent_id: parent_id ? parseInt(parent_id) : null
-            },
-            include: {
-                user: {
-                    select: {
-                        user_id: true,
-                        user_name: true,
-                        avatar: true
-                    }
-                }
-            }
-        });
-
-        return res.status(201).json({
-            success: true,
-            message: 'Comment added successfully',
-            data: newComment
-        });
-    } catch (error) {
-        console.error('Error adding comment:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Failed to add comment',
-            details: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-};
 
 // Function to get trending blogs
 const getTrendingBlogs = async (req, res) => {
@@ -712,7 +640,6 @@ module.exports = {
     getUserBlogs,
     toggleLikeBlog,
     getBlogDetails,
-    addComment,
     getTrendingBlogs,
     getCategories
 };

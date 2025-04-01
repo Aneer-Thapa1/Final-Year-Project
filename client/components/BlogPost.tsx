@@ -14,8 +14,6 @@ import { MotiView } from 'moti';
 import images  from '../constants/images'
 
 
-
-
 const BlogPost = ({ post, isDark, authorProfile }) => {
     const [isLiked, setIsLiked] = useState(false);
     const [isSaved, setIsSaved] = useState(false);
