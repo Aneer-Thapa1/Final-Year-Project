@@ -180,7 +180,8 @@ export interface ApiResponse<T> {
 // Function to get user profile (own or others)
 export const getUserProfile = async (userId: number) => {
     try {
-        return await fetchData<ApiResponse<Profile>>(`/api/profile/${userId}`);
+        console.log(userId)
+        return await fetchData<ApiResponse<Profile>>(`/api/profile/${parseInt(userId)}`);
     } catch (error: any) {
         console.error('Error in getUserProfile:', error);
         throw error.response?.data?.error || 'Failed to fetch user profile';

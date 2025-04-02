@@ -10,18 +10,23 @@ import {
     ActivityIndicator,
     TextInput,
     Animated,
-    StatusBar
+    StatusBar,
+    KeyboardAvoidingView,
+    Platform,
+    Keyboard
 } from 'react-native';
 import React, { useState, useRef, useEffect } from 'react';
 import { Heart, MessageCircle, Share2, ArrowLeft, MoreHorizontal, Bookmark, Send, X } from 'lucide-react-native';
 import { MotiView, AnimatePresence } from 'moti';
 import * as Haptics from 'expo-haptics';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Comment from './Comment';
 import icons from '../constants/images';
 import { API_BASE_URL } from '../services/api';
 import { toggleLikeBlog } from '../services/blogService';
 import { getComments, addComment } from '../services/commentService';
+import {useSelector} from "react-redux";
+import {router} from "expo-router";
 
 const Blog = ({
                   blog,
@@ -31,8 +36,11 @@ const Blog = ({
                   onMenuPress,
                   onReadMore,
                   authorProfile = icons.maleProfile,
-                  currentUser
+
               }) => {
+    // Safe area insets for proper Dynamic Island padding
+    const insets = useSafeAreaInsets();
+
     // Animation values
     const likeScale = useRef(new Animated.Value(1)).current;
     const saveScale = useRef(new Animated.Value(1)).current;
@@ -49,6 +57,42 @@ const Blog = ({
     const [showOptions, setShowOptions] = useState(false);
     const [imageError, setImageError] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [keyboardVisible, setKeyboardVisible] = useState(false);
+    const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+    const scrollViewRef = useRef(null);
+    const commentInputRef = useRef(null);
+
+    // Keyboard event listeners
+    useEffect(() => {
+        const keyboardDidShowListener = Keyboard.addListener(
+            'keyboardDidShow',
+            (event) => {
+                setKeyboardVisible(true);
+                setKeyboardHeight(event.endCoordinates.height);
+
+                // Scroll to the bottom when keyboard appears
+                if (scrollViewRef.current) {
+                    setTimeout(() => {
+                        scrollViewRef.current.scrollToEnd({ animated: true });
+                    }, 100);
+                }
+            }
+        );
+
+        const keyboardDidHideListener = Keyboard.addListener(
+            'keyboardDidHide',
+            () => {
+                setKeyboardVisible(false);
+                setKeyboardHeight(0);
+            }
+        );
+
+        return () => {
+            keyboardDidShowListener.remove();
+            keyboardDidHideListener.remove();
+        };
+    }, []);
 
     // Load comments when modal opens
     useEffect(() => {
@@ -204,6 +248,13 @@ const Blog = ({
     const handleReply = (comment) => {
         setReplyingTo(comment);
         setNewComment(`@${comment.user.user_name || comment.user.name} `);
+
+        // Focus the input with a delay to ensure the UI has updated
+        setTimeout(() => {
+            if (commentInputRef.current) {
+                commentInputRef.current.focus();
+            }
+        }, 50);
     };
 
     // Cancel reply
@@ -211,6 +262,14 @@ const Blog = ({
         setReplyingTo(null);
         setNewComment('');
     };
+
+    const closeCommentsModal = () => {
+        setShowComments(false);
+    };
+
+    // Get current user from Redux
+    const userDetails = useSelector((state) => state.user);
+    const currentUser = userDetails?.user || {};
 
     // Submit a new comment
     const handleSubmitComment = async () => {
@@ -247,6 +306,7 @@ const Blog = ({
                 // Reset input and reply state
                 setNewComment('');
                 setReplyingTo(null);
+                Keyboard.dismiss();
             } else {
                 console.error('Error adding comment:', response?.error || 'Unknown error');
             }
@@ -256,9 +316,9 @@ const Blog = ({
     };
 
     // Handle comment like
-    const handleCommentLike = (commentId) => {
+    const handleCommentLike = (commentId, isLiked) => {
         // This function would call the API to like/unlike a comment
-        console.log('Like comment:', commentId);
+        console.log('Like comment:', commentId, isLiked);
         // In a real implementation, make the API call here
     };
 
@@ -289,6 +349,29 @@ const Blog = ({
         console.log('Image failed to load:', blog.image);
         setImageError(true);
     };
+
+    // Handle profile navigation
+    const navigateToProfile = (userId, userName) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+        // Small delay to ensure the modal closes properly before navigation
+        setTimeout(() => {
+            if (currentUser?.user?.user_id === userId) {
+                router.push('/profile');
+            } else {
+                router.push({
+                    pathname: `/(profile)/${userId}`,
+                    params: {
+                        name: userName || ''
+                    }
+                });
+            }
+        }, 10);
+    };
+
+    // Calculate proper padding for Dynamic Island on iOS
+    const iosTopPadding = Platform.OS === 'ios' ? Math.max(insets.top, 34) : 0;
+    const iosBottomPadding = Platform.OS === 'ios' ? Math.max(insets.bottom, 5) : 0;
 
     // Main Blog component with styling using standard React Native styles instead of Tailwind classes
     return (
@@ -386,12 +469,15 @@ const Blog = ({
                             }}
                         />
                         <View>
-                            <Text style={{
-                                fontWeight: 'bold',
-                                color: isDark ? '#FFFFFF' : '#1F2937'
-                            }}>
-                                {blog.user?.user_name || "Anonymous"}
-                            </Text>
+
+                            <TouchableOpacity onPress={() => navigateToProfile(blog.user.user_id, blog.user.user_name)}>
+                                <Text style={{
+                                    fontWeight: 'bold',
+                                    color: isDark ? '#FFFFFF' : '#1F2937'
+                                }}>
+                                    {blog.user?.user_name || "Anonymous"}
+                                </Text>
+                            </TouchableOpacity>
                             <Text style={{
                                 fontSize: 12,
                                 color: isDark ? '#9CA3AF' : '#6B7280'
@@ -583,21 +669,31 @@ const Blog = ({
                     onRequestClose={() => setShowComments(false)}
                 >
                     <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
-                    <View style={{
-                        flex: 1,
-                        backgroundColor: isDark ? '#111827' : '#FFFFFF'
-                    }}>
-                        {/* Modal Header */}
-                        <SafeAreaView style={{ flex: 1 }}>
-                            <View style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                paddingHorizontal: 16,
-                                paddingVertical: 8,
-                                borderBottomWidth: 1,
-                                borderBottomColor: isDark ? '#374151' : '#E5E7EB'
-                            }}>
+                    <SafeAreaView
+                        edges={['left', 'right']} // Don't use top/bottom edges - we'll handle manually
+                        style={{
+                            flex: 1,
+                            backgroundColor: isDark ? '#111827' : '#FFFFFF'
+                        }}
+                    >
+                        <KeyboardAvoidingView
+                            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                            style={{ flex: 1 }}
+                            keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+                        >
+                            {/* Header with proper padding for Dynamic Island */}
+                            <View
+                                style={{
+                                    paddingTop: iosTopPadding,
+                                    flexDirection: 'row',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    paddingHorizontal: 16,
+                                    paddingBottom: 8,
+                                    borderBottomWidth: 1,
+                                    borderBottomColor: isDark ? '#374151' : '#E5E7EB'
+                                }}
+                            >
                                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                                     <TouchableOpacity
                                         onPress={() => setShowComments(false)}
@@ -625,8 +721,14 @@ const Blog = ({
 
                             {/* Comments List */}
                             <ScrollView
-                                style={{ flex: 1, paddingHorizontal: 16 }}
+                                ref={scrollViewRef}
+                                style={{ flex: 1 }}
+                                contentContainerStyle={{
+                                    paddingHorizontal: 16,
+                                    paddingBottom: keyboardVisible ? 100 : 20 // Extra padding when keyboard is visible
+                                }}
                                 showsVerticalScrollIndicator={false}
+                                keyboardShouldPersistTaps="handled"
                                 refreshControl={
                                     <RefreshControl
                                         refreshing={refreshing}
@@ -658,6 +760,7 @@ const Blog = ({
                                             formatDate={formatDate}
                                             refreshComments={refreshComments}
                                             blogId={blog.blog_id}
+                                            closeCommentsModal={closeCommentsModal}
                                         />
                                     ))
                                 ) : (
@@ -672,7 +775,7 @@ const Blog = ({
                                 )}
 
                                 {/* Add some bottom padding for better scrolling */}
-                                <View style={{ height: 80 }} />
+                                <View style={{ height: keyboardVisible ? 120 : 80 }} />
                             </ScrollView>
 
                             {/* Reply indicator */}
@@ -696,25 +799,29 @@ const Blog = ({
                                 </View>
                             )}
 
-                            {/* Comment Input */}
+                            {/* Comment Input - Fixed at bottom */}
                             <View style={{
                                 paddingHorizontal: 16,
-                                paddingVertical: 12,
+                                paddingTop: 12,
+                                paddingBottom: Platform.OS === 'ios' ? Math.max(iosBottomPadding, 0) : 5,
                                 borderTopWidth: 1,
                                 borderTopColor: isDark ? '#374151' : '#E5E7EB',
                                 backgroundColor: isDark ? '#111827' : '#FFFFFF'
                             }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
                                     <TextInput
+                                        ref={commentInputRef}
                                         value={newComment}
                                         onChangeText={setNewComment}
                                         placeholder={replyingTo ? "Write a reply..." : "Add a comment..."}
                                         placeholderTextColor={isDark ? '#94A3B8' : '#9CA3AF'}
                                         style={{
                                             flex: 1,
-                                            paddingVertical: 8,
+                                            maxHeight: 100,
+                                            minHeight: Platform.OS === 'ios' ? 40 : 56,
+                                            paddingVertical: Platform.OS === 'ios' ? 10 : 8,
                                             paddingHorizontal: 16,
-                                            borderRadius: 9999,
+                                            borderRadius: 24,
                                             marginRight: 8,
                                             backgroundColor: isDark ? '#1F2937' : '#F3F4F6',
                                             color: isDark ? '#FFFFFF' : '#1F2937',
@@ -728,19 +835,21 @@ const Blog = ({
                                         onPress={handleSubmitComment}
                                         disabled={!newComment.trim()}
                                         style={{
-                                            padding: 8,
-                                            borderRadius: 9999,
+                                            padding: 12,
+                                            borderRadius: 24,
                                             backgroundColor: newComment.trim()
                                                 ? '#7C3AED'
-                                                : isDark ? '#1F2937' : '#E5E7EB'
-                                        }}
+                                                : isDark ? '#1F2937' : '#E5E7EB'}}
                                     >
-                                        <Send size={20} color={newComment.trim() ? '#FFFFFF' : isDark ? '#4B5563' : '#9CA3AF'} />
+                                        <Send
+                                            size={20}
+                                            color={newComment.trim() ? '#FFFFFF' : (isDark ? '#4B5563' : '#9CA3AF')}
+                                        />
                                     </TouchableOpacity>
                                 </View>
                             </View>
-                        </SafeAreaView>
-                    </View>
+                        </KeyboardAvoidingView>
+                    </SafeAreaView>
                 </Modal>
             )}
         </>

@@ -28,6 +28,7 @@ import {
     useChatRooms,
     getPotentialChatRecipients
 } from '../../services/chatServices';
+import { useSelector } from 'react-redux';
 
 export default function ChatScreen() {
     const navigation = useNavigation();
@@ -36,6 +37,8 @@ export default function ChatScreen() {
 
     // Use custom hook for chat rooms with fallback empty array
     const { chatRooms = [], loading: isLoading, error, refetch } = useChatRooms();
+
+    const userDetails = useSelector((state) => state.user)
 
     // State management
     const [friends, setFriends] = useState([]);
@@ -420,8 +423,7 @@ export default function ChatScreen() {
         // Fall back to original logic if displayName isn't provided
         if (room.type === 'DM') {
             // Find the other user in the chat (not the current user)
-            const otherParticipant = room.participants?.find(p => p.user_id !== 1);
-            return otherParticipant?.user?.user_name || 'User';
+            return otherParticipant?.user_name || 'User';
         }
         return room.name || 'Group';
     };

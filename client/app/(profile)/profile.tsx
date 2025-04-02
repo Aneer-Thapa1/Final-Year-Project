@@ -24,7 +24,6 @@ const Profile = () => {
         totalPoints: userDetails?.user?.user?.points_gained || 1250,
         level: 7
     });
-
     // Tab definitions with enhanced metadata
     const tabs = [
         {
@@ -72,7 +71,7 @@ const Profile = () => {
     // Navigation handlers
     const handleBackPress = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push('/add');
+        router.back();
     };
 
     const handleSettingsPress = () => {

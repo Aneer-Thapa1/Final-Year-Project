@@ -6,7 +6,7 @@ const prisma = new PrismaClient();
  * Send a friend request to another user
  * @route POST /api/friends/request
  */
-const sendFriendRequest = async (req, res) => {
+const   sendFriendRequest = async (req, res) => {
     try {
         const { user_id: receiver_id } = req.body;
         // Make sure we're using the right user ID field from the auth middleware
@@ -166,6 +166,13 @@ const respondToFriendRequest = async (req, res) => {
                         user_name: true,
                         avatar: true
                     }
+                },
+                receiver: {
+                    select: {
+                        user_id: true,
+                        user_name: true,
+                        avatar: true
+                    }
                 }
             }
         });
@@ -178,38 +185,50 @@ const respondToFriendRequest = async (req, res) => {
             });
         }
 
-        // Get the current user's name
-        const currentUser = await prisma.user.findUnique({
-            where: { user_id },
-            select: { user_name: true }
-        });
+        // Prepare notification details
+        const notificationDetails = {
+            user_id: friendRequest.sender_id,
+            title: status === 'ACCEPTED'
+                ? 'Friend Request Accepted'
+                : 'Friend Request Declined',
+            content: status === 'ACCEPTED'
+                ? `${friendRequest.receiver.user_name} accepted your friend request`
+                : `${friendRequest.receiver.user_name} declined your friend request`,
+            type: 'FRIEND_REQUEST',
+            related_id: request_id,
+            action_url: `/profile/${friendRequest.receiver_id}` // Optional: deep link to user's profile
+        };
 
         // Use transaction to update request and create notification
         const [updatedRequest, notification] = await prisma.$transaction([
             // Update request status
             prisma.friendRequest.update({
                 where: { request_id },
-                data: { status }
+                data: {
+                    status,
+                    updatedAt: new Date()
+                }
             }),
 
-            // Create notification for sender
+            // Create comprehensive notification
             prisma.notification.create({
-                data: {
-                    user_id: friendRequest.sender_id,
-                    title: status === 'ACCEPTED' ? 'Friend Request Accepted' : 'Friend Request Declined',
-                    content: status === 'ACCEPTED'
-                        ? `${currentUser?.user_name || 'User'} accepted your friend request`
-                        : `${currentUser?.user_name || 'User'} declined your friend request`,
-                    type: 'FRIEND_REQUEST',
-                    related_id: request_id
-                }
+                data: notificationDetails
             })
         ]);
+
+        // If accepted, create a reciprocal record (if not already exists)
+        if (status === 'ACCEPTED') {
+            // You might want to add additional logic here to manage friendships
+            // For example, creating a friendship record or updating user connections
+        }
 
         return res.status(200).json({
             success: true,
             message: `Friend request ${status.toLowerCase()} successfully`,
-            data: updatedRequest
+            data: {
+                request: updatedRequest,
+                notification
+            }
         });
 
     } catch (error) {

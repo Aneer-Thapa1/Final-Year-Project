@@ -92,7 +92,7 @@ export const getUserHabits = async (
 };
 
 // Function to get a single habit's comprehensive details
-export const getHabitById = async (habitId: number) => {
+export const getHabitDetails = async (habitId: number) => {
     try {
         return await fetchData(`/api/habit/getHabit/${habitId}`);
     } catch (error: any) {

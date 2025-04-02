@@ -1061,11 +1061,41 @@ const logHabitCompletion = async (req, res) => {
             await handleSkippedHabit(habit, userId, completionDay, skip_reason);
         }
 
-        // Update user's total habits completed
-        if (completed && !skipped) {
+        // Check daily goal completion
+        const completedHabitsToday = await prisma.habitDailyStatus.count({
+            where: {
+                user_id: userId,
+                date: today,
+                is_completed: true
+            }
+        });
+
+        // Get user's daily goal
+        const user = await prisma.user.findUnique({
+            where: { user_id: userId }
+        });
+
+        // If daily goal is completed, increment daily streak
+        if (completedHabitsToday >= user.dailyGoal) {
             await prisma.user.update({
                 where: { user_id: userId },
-                data: { totalHabitsCompleted: { increment: 1 } }
+                data: {
+                    currentDailyStreak: { increment: 1 },
+                    totalHabitsCompleted: { increment: 1 },
+                    longestDailyStreak: {
+                        set: {
+                            connectOrCreate: {
+                                where: {
+                                    currentDailyStreak: {
+                                        gt: user.longestDailyStreak
+                                    }
+                                },
+                                update: user.currentDailyStreak + 1,
+                                create: user.currentDailyStreak + 1
+                            }
+                        }
+                    }
+                }
             });
         }
 
@@ -1088,7 +1118,9 @@ const logHabitCompletion = async (req, res) => {
             data: {
                 log: newLog,
                 streak: updatedHabit.streak[0] || null,
-                dailyStatus: updatedHabit.dailyStatuses[0] || null
+                dailyStatus: updatedHabit.dailyStatuses[0] || null,
+                completedHabitsToday,
+                dailyGoalMet: completedHabitsToday >= user.dailyGoal
             }
         });
     } catch (error) {
