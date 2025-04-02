@@ -25,6 +25,8 @@ import icons from '../constants/images';
 import { API_BASE_URL } from '../services/api';
 import { toggleLikeBlog } from '../services/blogService';
 import { getComments, addComment } from '../services/commentService';
+import {useSelector} from "react-redux";
+import {router} from "expo-router";
 
 const Blog = ({
                   blog,
@@ -34,7 +36,7 @@ const Blog = ({
                   onMenuPress,
                   onReadMore,
                   authorProfile = icons.maleProfile,
-                  currentUser
+
               }) => {
     // Safe area insets for proper Dynamic Island padding
     const insets = useSafeAreaInsets();
@@ -262,10 +264,12 @@ const Blog = ({
     };
 
     const closeCommentsModal = () => {
-
-        console.log('close comments modal');
         setShowComments(false);
     };
+
+    // Get current user from Redux
+    const userDetails = useSelector((state) => state.user);
+    const currentUser = userDetails?.user || {};
 
     // Submit a new comment
     const handleSubmitComment = async () => {
@@ -344,6 +348,25 @@ const Blog = ({
     const handleImageError = () => {
         console.log('Image failed to load:', blog.image);
         setImageError(true);
+    };
+
+    // Handle profile navigation
+    const navigateToProfile = (userId, userName) => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+        // Small delay to ensure the modal closes properly before navigation
+        setTimeout(() => {
+            if (currentUser?.user?.user_id === userId) {
+                router.push('/profile');
+            } else {
+                router.push({
+                    pathname: `/(profile)/${userId}`,
+                    params: {
+                        name: userName || ''
+                    }
+                });
+            }
+        }, 10);
     };
 
     // Calculate proper padding for Dynamic Island on iOS
@@ -446,12 +469,15 @@ const Blog = ({
                             }}
                         />
                         <View>
-                            <Text style={{
-                                fontWeight: 'bold',
-                                color: isDark ? '#FFFFFF' : '#1F2937'
-                            }}>
-                                {blog.user?.user_name || "Anonymous"}
-                            </Text>
+
+                            <TouchableOpacity onPress={() => navigateToProfile(blog.user.user_id, blog.user.user_name)}>
+                                <Text style={{
+                                    fontWeight: 'bold',
+                                    color: isDark ? '#FFFFFF' : '#1F2937'
+                                }}>
+                                    {blog.user?.user_name || "Anonymous"}
+                                </Text>
+                            </TouchableOpacity>
                             <Text style={{
                                 fontSize: 12,
                                 color: isDark ? '#9CA3AF' : '#6B7280'

@@ -95,7 +95,7 @@ const Comment = ({
                     }
                 });
             }
-        }, 50);
+        }, 20);
     };
 
     // Handle like - Updated to work properly with backend

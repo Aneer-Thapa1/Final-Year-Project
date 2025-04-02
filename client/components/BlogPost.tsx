@@ -12,6 +12,8 @@ import { Heart, MessageCircle, Share2, Bookmark, MoreHorizontal, ChevronDown } f
 import * as Haptics from 'expo-haptics';
 import { MotiView } from 'moti';
 import images  from '../constants/images'
+import {router} from "expo-router";
+import {useSelector} from "react-redux";
 
 
 const BlogPost = ({ post, isDark, authorProfile }) => {
@@ -20,6 +22,11 @@ const BlogPost = ({ post, isDark, authorProfile }) => {
     const [expandContent, setExpandContent] = useState(false);
     const [showAllImages, setShowAllImages] = useState(false);
 
+    console.log(post)
+
+    // Get current user from Redux
+    const userDetails = useSelector((state) => state.user);
+    const currentUser = userDetails?.user || {};
 
     const { width } = Dimensions.get('window');
     const imageWidth = width - 48; // Full width minus padding
@@ -68,9 +75,11 @@ const BlogPost = ({ post, isDark, authorProfile }) => {
                             className="w-10 h-10 rounded-full"
                         />
                         <View className="ml-3">
-                            <Text className={`font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            <TouchableOpacity >
+                            <Text  className={`font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                 {post.author || 'You'}
                             </Text>
+                            </TouchableOpacity>
                             <View className="flex-row items-center">
                                 <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                                     {formatDate(post.createdAt)}

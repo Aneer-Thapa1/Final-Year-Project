@@ -14,9 +14,10 @@ const profileController = {
      */
     getUserProfile: async (req, res) => {
         try {
-            const { userId } = req.params;
+            const userId  = req.params.userId;
+            console.log(userId);
             const requesterId = req.user; // Current authenticated user
-
+            console.log(requesterId);
             const targetUserId = parseInt(userId);
 
             // Check if user exists
@@ -671,6 +672,7 @@ const profileController = {
             const { userId } = req.params;
             const requesterId = req.user;
             const targetUserId = parseInt(userId);
+
 
             // Check if viewing other user's friends and if they're friends with requester
             if (targetUserId !== requesterId) {
