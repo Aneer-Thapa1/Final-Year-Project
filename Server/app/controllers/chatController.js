@@ -1700,17 +1700,39 @@ const getChatRoomDetails = async (req, res) => {
             });
         }
 
-        // For DM rooms, get the other participant's info for display
+        // For DM rooms, explicitly identify the other participant relative to the requesting user
         let otherParticipant = null;
+        let currentParticipant = null;
+
         if (room.type === 'DM') {
-            otherParticipant = room.participants.find(p => p.user_id !== userId)?.user;
+            // First, get all participants with their user info
+            const allParticipants = room.participants.map(p => ({
+                participantId: p.participant_id,
+                userId: p.user_id,
+                userInfo: p.user
+            }));
+
+            // Find the current user's participant object
+            currentParticipant = allParticipants.find(p => p.userId === userId);
+
+            // Find the other participant (not the current user)
+            const otherParticipantData = allParticipants.find(p => p.userId !== userId);
+
+            if (otherParticipantData && otherParticipantData.userInfo) {
+                otherParticipant = otherParticipantData.userInfo;
+            }
+
+            console.log(`Room ${roomId} - DM chat`);
+            console.log(`Current user: ${userId}, Other user: ${otherParticipant?.user_id}`);
         }
 
+        // Return the room data with the explicitly identified other participant
         res.json({
             success: true,
             data: {
                 ...room,
-                otherParticipant
+                otherParticipant,
+                currentUserId: userId // Include the current user ID to help frontend logic
             }
         });
     } catch (error) {
@@ -1732,8 +1754,7 @@ const getFriendIds = async (userId) => {
                 { receiver_id: userId }
             ],
             status: 'ACCEPTED'
-        }
-    });
+        }    });
 
     return friendships.map(f =>
         f.sender_id === userId ? f.receiver_id : f.sender_id

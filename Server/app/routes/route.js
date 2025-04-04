@@ -10,6 +10,8 @@ const leaderboardRoute = require('./leaderboardRoute');
 const recommendationRoute = require('./recommendationRoute');
 const profileRoute = require('./profileRoute');
 const commentRoute = require('./commentRoute');
+const notificationRoute = require('./notificationRoute');
+const settingsRoute = require('./settingsRoute');
 
 const router = express.Router();
 
@@ -45,5 +47,11 @@ router.use('/profile', profileRoute)
 
 // routes related to comments (/api/comments)
 router.use('/comments', commentRoute)
+
+// routes related to notification (/api/notification)
+router.use('/notifications', notificationRoute)
+
+// routes related to notification (/api/notification)
+router.use('/settings', settingsRoute)
 
 module.exports = router;

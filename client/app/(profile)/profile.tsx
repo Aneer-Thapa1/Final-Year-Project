@@ -136,7 +136,7 @@ const Profile = () => {
                                     className="h-24 w-24 rounded-full"
                                 />
                                 <View className="absolute -bottom-1 -right-1 bg-primary-500 h-8 w-8 rounded-full items-center justify-center border-2 border-white">
-                                    <Text className="text-white font-montserrat-bold text-xs">{userStats.level}</Text>
+                                    <Text className="text-white font-montserrat-bold text-xs">{userDetails?.user?.user?.dailyGoal}</Text>
                                 </View>
                             </MotiView>
 
@@ -185,7 +185,7 @@ const Profile = () => {
                                 <View className="flex-row items-center justify-center">
                                     <Calendar size={16} color="#6366F1" />
                                     <Text className={`ml-1.5 font-montserrat-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                        {userStats.streakDays}
+                                        {userDetails?.user?.user?.currentDailyStreak}
                                     </Text>
                                 </View>
                                 <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
@@ -199,7 +199,7 @@ const Profile = () => {
                                 <View className="flex-row items-center justify-center">
                                     <Star size={16} color="#6366F1" />
                                     <Text className={`ml-1.5 font-montserrat-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                        {userStats.completedHabits}
+                                        {userDetails?.user?.user?.totalHabitsCompleted}
                                     </Text>
                                 </View>
                                 <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
@@ -213,7 +213,7 @@ const Profile = () => {
                                 <View className="flex-row items-center justify-center">
                                     <Award size={16} color="#6366F1" />
                                     <Text className={`ml-1.5 font-montserrat-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                        {userStats.level}
+                                        {userDetails?.user?.user?.dailyGoal}
                                     </Text>
                                 </View>
                                 <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
