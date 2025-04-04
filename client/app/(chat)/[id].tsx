@@ -10,7 +10,8 @@ import {
     Platform,
     ActivityIndicator,
     FlatList,
-    Alert  // Added missing import
+    Alert,
+    Vibration
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useColorScheme } from 'nativewind';
@@ -36,13 +37,17 @@ import {
     updateTypingStatus
 } from '../../services/chatServices';
 
-// Import store/socket related functionality if needed
-import { useSelector } from 'react-redux';
+// Import socket service directly
+import socketService, { getSocket } from '../../store/slices/socketService';
+
+// Import store/socket related functionality
+import { useSelector, useDispatch } from 'react-redux';
 
 export default function ChatDetailScreen() {
     const { colorScheme } = useColorScheme();
     const isDark = colorScheme === 'dark';
     const insets = useSafeAreaInsets();
+    const dispatch = useDispatch();
 
     // Get room ID and other params from the URL
     const params = useLocalSearchParams();
@@ -61,6 +66,7 @@ export default function ChatDetailScreen() {
     const [page, setPage] = useState(1);
     const [hasMore, setHasMore] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
+    const [socketConnected, setSocketConnected] = useState(false);
 
     // Store the current user ID in component state as a backup
     const [currentUserId, setCurrentUserId] = useState(null);
@@ -69,10 +75,48 @@ export default function ChatDetailScreen() {
     const scrollViewRef = useRef(null);
     const typingTimeoutRef = useRef(null);
     const flatListRef = useRef(null);
+    const processedMessageIds = useRef(new Set());
 
-    // Get socket connection status and user from Redux store
-    const socketConnected = useSelector(state => state.chat?.socketConnected) || false;
+    // Get user from Redux store
     const currentUser = useSelector(state => state.user?.user);
+
+    // Initialize socket when component mounts
+    useEffect(() => {
+        const initSocket = async () => {
+            try {
+                // Initialize socket connection
+                const socket = await socketService.initializeSocket();
+
+                if (socket) {
+                    setSocketConnected(socket.connected);
+
+                    // Listen for connection status changes
+                    socket.on('connect', () => {
+                        console.log('Socket connected in component');
+                        setSocketConnected(true);
+                    });
+
+                    socket.on('disconnect', () => {
+                        console.log('Socket disconnected in component');
+                        setSocketConnected(false);
+                    });
+                }
+            } catch (error) {
+                console.error('Failed to initialize socket:', error);
+            }
+        };
+
+        initSocket();
+
+        return () => {
+            // Clean up connection listeners
+            const socket = getSocket();
+            if (socket) {
+                socket.off('connect');
+                socket.off('disconnect');
+            }
+        };
+    }, []);
 
     // Load initial data and set current user ID
     useEffect(() => {
@@ -89,15 +133,153 @@ export default function ChatDetailScreen() {
         // Mark messages as read when the chat is opened
         markAsRead();
 
+        // Reset processed message IDs when changing rooms
+        processedMessageIds.current = new Set();
+
         return () => {
+            // Clean up typing status
             clearTypingTimeout();
+            // Let the server know the user has left the chat room
+            socketService.leaveRoom(roomId);
         };
     }, [roomId, currentUser]);
+
+    // Set up socket event listeners when socket connection or room changes
+    useEffect(() => {
+        if (socketConnected) {
+            setupSocketListeners();
+        }
+
+        return () => {
+            cleanupSocketListeners();
+        };
+    }, [socketConnected, roomId]);
+
+    // Set up socket event listeners
+    const setupSocketListeners = () => {
+        const socket = getSocket();
+
+        if (!socket) {
+            console.warn('Socket not available, cannot set up listeners');
+            return;
+        }
+
+        // Join the chat room
+        socketService.joinRoom(roomId);
+
+        // Listen for new messages
+        socket.on('message:received', handleNewMessage);
+
+        // Listen for typing status updates
+        socket.on('user:typing', handleTypingStatus);
+        socket.on('user:stopTyping', handleStopTypingStatus);
+
+        // Listen for message read receipts
+        socket.on('message:read', handleMessageRead);
+
+        console.log('Socket listeners set up successfully for room:', roomId);
+    };
+
+    // Clean up socket event listeners
+    const cleanupSocketListeners = () => {
+        const socket = getSocket();
+
+        if (!socket) return;
+
+        socket.off('message:received', handleNewMessage);
+        socket.off('user:typing', handleTypingStatus);
+        socket.off('user:stopTyping', handleStopTypingStatus);
+        socket.off('message:read', handleMessageRead);
+
+        console.log('Socket listeners cleaned up for room:', roomId);
+    };
+
+    // Handle incoming new message
+    const handleNewMessage = (message) => {
+        console.log('New message received:', message);
+
+        // Make sure the message is for this room
+        if (message.room_id != roomId) {
+            return;
+        }
+
+        // Check if we've already processed this message
+        if (processedMessageIds.current.has(message.message_id)) {
+            console.log('Duplicate message, skipping:', message.message_id);
+            return;
+        }
+
+        // Add to processed set
+        processedMessageIds.current.add(message.message_id);
+
+        // For inverted FlatList, add new messages to the beginning of the array
+        setMessages(prev => {
+            // Check if message already exists in the array
+            const messageExists = prev.some(msg => msg.message_id === message.message_id);
+            if (messageExists) {
+                return prev;
+            }
+            return [message, ...prev];
+        });
+
+        // Mark the message as read if it's not from the current user
+        if (message.sender?.user_id !== currentUserId) {
+            // Vibrate the phone when receiving a message from someone else
+            Vibration.vibrate(200);
+            markAsRead();
+        }
+    };
+
+    // Handle typing status updates
+    const handleTypingStatus = (data) => {
+        console.log('Typing status received:', data);
+
+        // Make sure the typing status is for this room
+        if (data.roomId != roomId || data.userId == currentUserId) {
+            return;
+        }
+
+        setTypingUsers(prev => {
+            if (!prev.includes(data.userName)) {
+                return [...prev, data.userName];
+            }
+            return prev;
+        });
+    };
+
+    // Handle stop typing status updates
+    const handleStopTypingStatus = (data) => {
+        console.log('Stop typing status received:', data);
+
+        // Make sure the typing status is for this room
+        if (data.roomId != roomId) {
+            return;
+        }
+
+        setTypingUsers(prev => prev.filter(name => name !== data.userName));
+    };
+
+    // Handle message read receipts
+    const handleMessageRead = (data) => {
+        console.log('Message read receipt:', data);
+
+        // Make sure the read receipt is for this room
+        if (data.roomId != roomId || data.userId == currentUserId) {
+            return;
+        }
+
+        // Update read status for messages if needed
+    };
 
     // Mark messages as read
     const markAsRead = async () => {
         try {
             await markMessagesAsRead(roomId);
+
+            // Emit socket event to notify others that messages have been read
+            if (socketConnected) {
+                socketService.getSocket()?.emit('message:read', { roomId });
+            }
         } catch (error) {
             console.error('Error marking messages as read:', error);
         }
@@ -109,6 +291,12 @@ export default function ChatDetailScreen() {
             const response = await getChatRoomDetails(roomId);
             if (response && response.success && response.data) {
                 setRoomDetails(response.data);
+                console.log('Room details:', response.data);
+
+                // If this is a direct message, use otherParticipant's name
+                if (isDirect && response.data.otherParticipant) {
+                    console.log('Other participant:', response.data.otherParticipant);
+                }
             }
         } catch (error) {
             console.error('Error fetching room details:', error);
@@ -125,13 +313,30 @@ export default function ChatDetailScreen() {
             const response = await getChatMessages(roomId, { page: nextPage, limit: 20 });
 
             if (response && response.success && response.data) {
+                // Convert message IDs to strings to avoid comparison issues
+                const messageData = response.data.map(msg => ({
+                    ...msg,
+                    message_id: msg.message_id.toString()
+                }));
+
+                // Backend already returns messages in reverse chronological order
+                // Just need to add to the processed set to avoid duplicates
+                messageData.forEach(msg => {
+                    processedMessageIds.current.add(msg.message_id);
+                });
+
                 if (nextPage === 1) {
-                    setMessages(response.data);
+                    setMessages(messageData);
                 } else {
-                    setMessages(prev => [...prev, ...response.data]);
+                    // Merge with existing messages, avoiding duplicates
+                    setMessages(prev => {
+                        const existingIds = new Set(prev.map(m => m.message_id));
+                        const newMessages = messageData.filter(msg => !existingIds.has(msg.message_id));
+                        return [...prev, ...newMessages];
+                    });
                 }
 
-                setHasMore(response.data.hasMore);
+                setHasMore(response.hasMore);
                 setPage(nextPage);
             }
         } catch (error) {
@@ -165,19 +370,50 @@ export default function ChatDetailScreen() {
             // Send typing stopped notification
             try {
                 await updateTypingStatus(roomId, false);
+                socketService.emitStopTyping(roomId);
             } catch (typingError) {
                 console.error('Error updating typing status:', typingError);
             }
+
+            // Create a temporary message with a local ID
+            const tempId = `temp-${Date.now()}`;
+            const tempMessage = {
+                message_id: tempId,
+                room_id: roomId,
+                content: messageText,
+                sender: {
+                    user_id: currentUserId,
+                    user_name: currentUser?.user?.user_name || 'You',
+                    avatar: currentUser?.user?.avatar
+                },
+                createdAt: new Date().toISOString(),
+                status: 'sending'
+            };
+
+            // Add temporary message to the list for immediate feedback
+            setMessages(prev => [tempMessage, ...prev]);
+
+            // Add to processed message IDs to avoid duplication
+            processedMessageIds.current.add(tempId);
 
             // Send the actual message
             const response = await sendMessage(roomId, { content: messageText });
 
             if (response && response.success && response.data) {
-                // Add the new message to the list
-                // Note: You might not need this if you're using sockets and receiving the message that way
-                setMessages(prev => [response.data, ...prev]);
+                // Add server message ID to processed set
+                processedMessageIds.current.add(response.data.message_id.toString());
 
-                // Scroll to bottom
+                // Replace temporary message with the real one from the server
+                setMessages(prev =>
+                    prev.map(msg =>
+                        msg.message_id === tempId ? {
+                            ...response.data,
+                            message_id: response.data.message_id.toString()
+                        } : msg
+                    )
+                );
+
+                // Scroll to top (since the list is inverted)
                 if (flatListRef.current) {
                     flatListRef.current.scrollToOffset({ offset: 0, animated: true });
                 }
@@ -185,6 +421,16 @@ export default function ChatDetailScreen() {
         } catch (error) {
             console.error('Error sending message:', error);
             Alert.alert('Error', 'Failed to send message');
+
+            // Update the temporary message to show error status
+            setMessages(prev =>
+                prev.map(msg =>
+                    msg.message_id === tempId
+                        ? { ...msg, status: 'error' }
+                        : msg
+                )
+            );
+
             // Restore the input text in case of error
             setInputText(messageText);
         }
@@ -198,6 +444,9 @@ export default function ChatDetailScreen() {
         if (!isTyping) {
             setIsTyping(true);
             updateTypingStatus(roomId, true).catch(console.error);
+
+            // Also emit socket event for real-time typing indicator
+            socketService.emitTyping(roomId);
         }
 
         // Clear previous timeout
@@ -207,6 +456,9 @@ export default function ChatDetailScreen() {
         typingTimeoutRef.current = setTimeout(() => {
             setIsTyping(false);
             updateTypingStatus(roomId, false).catch(console.error);
+
+            // Also emit socket event for stopping typing
+            socketService.emitStopTyping(roomId);
         }, 3000);
     };
 
@@ -217,9 +469,25 @@ export default function ChatDetailScreen() {
         }
     };
 
+    // Get display name for chat room
+    const getDisplayName = () => {
+        if (!roomDetails) return roomName || 'Chat';
+
+        if (isDirect && roomDetails.otherParticipant) {
+            return roomDetails.otherParticipant.user_name;
+        }
+
+        return roomDetails.name || roomName;
+    };
+
     // Get other user details for direct messages
     const getOtherUser = () => {
         if (!roomDetails || !isDirect) return null;
+
+        // Use directly provided otherParticipant if available
+        if (roomDetails.otherParticipant) {
+            return roomDetails.otherParticipant;
+        }
 
         const otherParticipant = roomDetails.participants?.find(
             p => p.user_id !== currentUserId
@@ -246,8 +514,12 @@ export default function ChatDetailScreen() {
 
     // Render functions
     const renderMessage = ({ item }) => {
+        // Convert IDs to strings for comparison
+        const msgUserId = String(item.sender?.user_id);
+        const currUserId = String(currentUserId);
+
         // Use the local state currentUserId which is more reliable
-        const isMyMessage = item.sender?.user_id === currentUserId;
+        const isMyMessage = msgUserId === currUserId;
 
         // Safety check - if sender is missing, default to false
         if (!item.sender) {
@@ -279,6 +551,8 @@ export default function ChatDetailScreen() {
                 <View className={`flex-row items-center mt-1 ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
                     <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} font-montserrat`}>
                         {formatMessageTime(item.createdAt)}
+                        {item.status === 'sending' && ' • Sending...'}
+                        {item.status === 'error' && ' • Failed to send'}
                     </Text>
                 </View>
             </MotiView>
@@ -346,28 +620,28 @@ export default function ChatDetailScreen() {
                                     : 'bg-amber-500'
                             }`}>
                                 <Text className="text-white text-lg font-montserrat-bold">
-                                    {roomName ? roomName[0].toUpperCase() : isDirect ? 'C' : 'G'}
+                                    {getDisplayName()[0]?.toUpperCase() || (isDirect ? 'C' : 'G')}
                                 </Text>
                             </View>
                         )}
 
                         <View className="ml-3">
                             <Text className={`font-montserrat-semibold ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                {roomName || (isDirect ? otherUser?.user_name : 'Group Chat')}
+                                {getDisplayName()}
                             </Text>
 
                             {/* Online Status Indicator for Direct Messages */}
                             {isDirect && (
                                 <View className="flex-row items-center">
                                     <View className={`h-2 w-2 rounded-full mr-1.5 ${
-                                        socketConnected ? 'bg-green-500' : 'bg-gray-400'
+                                        isOtherUserOnline ? 'bg-green-500' : 'bg-gray-400'
                                     }`} />
                                     <Text className={`text-xs font-montserrat ${
-                                        socketConnected
+                                        isOtherUserOnline
                                             ? isDark ? 'text-green-400' : 'text-green-600'
                                             : isDark ? 'text-gray-400' : 'text-gray-500'
                                     }`}>
-                                        {socketConnected ? 'Online' : 'Offline'}
+                                        {isOtherUserOnline ? 'Online' : 'Offline'}
                                     </Text>
                                 </View>
                             )}
@@ -397,7 +671,7 @@ export default function ChatDetailScreen() {
                                     ? `/(chat)/info/${otherUser?.user_id}`
                                     : `/(chat)/info/${roomId}`,
                                 params: {
-                                    name: roomName || ''
+                                    name: getDisplayName() || ''
                                 }
                             });
                         }}
@@ -407,12 +681,14 @@ export default function ChatDetailScreen() {
                 </View>
             </View>
 
-            {/* Typing indicator */}
+            {/* Typing indicator - Positioned at the top of messages */}
             {typingUsers.length > 0 && (
-                <View className={`px-4 py-2 ${isDark ? 'bg-gray-800' : 'bg-white'}`}>
-                    <Text className={`italic text-xs ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
-                        {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-                    </Text>
+                <View className={`px-4 py-2 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
+                    <View className={`rounded-lg px-3 py-2 ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                        <Text className={`italic text-xs ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
+                            {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+                        </Text>
+                    </View>
                 </View>
             )}
 

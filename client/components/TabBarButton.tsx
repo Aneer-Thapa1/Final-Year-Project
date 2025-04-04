@@ -47,7 +47,7 @@ const TabBarButton = ({
                     `}
                     style={isAndroid ? {
                         elevation: 4,
-                        backgroundColor: isDark ? '#22C55E' : '#7C3AED',
+                        backgroundColor: isDark ? '#7C3AED' : '#22C55E',
                     } : {}}
                 >
                     {icon[routeName]({
@@ -78,7 +78,7 @@ const TabBarButton = ({
                 {icon[routeName]({
                     color: isFocused
                         ? isDark ? '#22C55E' : '#7C3AED'  // Primary color
-                        : isDark ? '#94A3B8' : '#6B7280', // Muted color
+                        : isDark ? '#6B7280' : '#94A3B8', // Muted color
                     size: 24,
                     strokeWidth: 2
                 })}
@@ -87,7 +87,7 @@ const TabBarButton = ({
                     text-xs font-montserrat-medium
                     ${isFocused
                     ? isDark ? 'text-primary-400' : 'text-primary-500'
-                    : isDark ? 'text-white' : 'text-gray-500'
+                    : isDark ? 'text-white' : 'text-red-500'
                 }
                 `}>
                     {label}
