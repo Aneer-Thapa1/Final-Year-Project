@@ -13,7 +13,7 @@ model User {
   user_email           String    @unique
   user_name            String
   avatar               String?
-  points_gained        Int
+  points_gained        Int       @default(0)
   password             String
   gender               String? // Made optional to be more inclusive
   timezone             String    @default("UTC")
@@ -56,6 +56,14 @@ model User {
   challenges     UserChallenge[]
   dailyStatuses  HabitDailyStatus[]
 
+  // Reminder System Relationships
+  scheduledReminders      ScheduledReminder[]
+  notificationPreferences UserNotificationPreference[]
+  devices                 UserDevice[]
+
+  // Points System
+  pointsLogs PointsLog[]
+
   // Timestamps
   registeredAt DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
@@ -68,6 +76,118 @@ model User {
   longestDailyStreak   Int @default(0)
 
   @@index([user_email])
+  @@index([points_gained]) // Add index for leaderboard queries
+}
+
+// 🔹 Points Log - For Tracking User Points History
+model PointsLog {
+  log_id      Int              @id @default(autoincrement())
+  user_id     Int
+  points      Int // Can be positive or negative
+  reason      String
+  description String?
+  source_type PointsSourceType
+  source_id   Int? // ID of the related entity (habit_id, achievement_id, etc.)
+  createdAt   DateTime         @default(now())
+
+  // Relationships
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id, createdAt])
+  @@index([source_type, source_id])
+  @@index([createdAt]) // For time-based queries (weekly/monthly reports)
+}
+
+enum PointsSourceType {
+  HABIT_COMPLETION
+  STREAK_MILESTONE
+  ACHIEVEMENT
+  CHALLENGE
+  SOCIAL_ACTIVITY
+  SYSTEM_BONUS
+  ADMIN_ADJUSTMENT
+}
+
+// 🔹 ScheduledReminder - For Individual Reminder Instances
+model ScheduledReminder {
+  scheduled_reminder_id Int       @id @default(autoincrement())
+  habit_id              Int
+  user_id               Int
+  scheduled_time        DateTime
+  reminder_type         String // 'PRIMARY', 'PRE_NOTIFICATION', 'FOLLOW_UP'
+  message               String
+  is_sent               Boolean   @default(false)
+  is_prepared           Boolean   @default(false)
+  actual_send_time      DateTime?
+  send_status           String? // 'SENT', 'FAILED', 'SKIPPED_COMPLETED', 'DISMISSED_BY_USER'
+  failure_reason        String?
+  reminder_config_id    Int? // References the HabitReminder that generated this
+  metadata              Json? // Additional data like habit color, icon, etc.
+  createdAt             DateTime  @default(now())
+
+  // Relationships
+  habit          Habit          @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
+  user           User           @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  reminderConfig HabitReminder? @relation(fields: [reminder_config_id], references: [reminder_id], onDelete: SetNull)
+
+  @@index([habit_id])
+  @@index([user_id])
+  @@index([scheduled_time])
+  @@index([is_sent, scheduled_time])
+}
+
+// Advanced settings for notifications
+model UserNotificationPreference {
+  preference_id Int      @id @default(autoincrement())
+  user_id       Int
+  type          String // 'REMINDER', 'STREAK', 'QUIET_HOURS', etc.
+  channel       String? // 'EMAIL', 'PUSH', null for general settings
+  enabled       Boolean  @default(true)
+  settings      Json? // Flexible JSON field for different settings
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relationship
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id, type, channel])
+}
+
+// For push notifications
+model UserDevice {
+  device_id      Int       @id @default(autoincrement())
+  user_id        Int
+  device_type    String // 'IOS', 'ANDROID', 'WEB'
+  token          String    @unique
+  is_active      Boolean   @default(true)
+  last_active    DateTime  @default(now())
+  last_failure   DateTime?
+  failure_reason String?
+  app_version    String?
+  os_version     String?
+  device_name    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  // Relationship
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([token])
+}
+
+// 🔹 Leaderboard Cache - For optimizing leaderboard queries
+model LeaderboardCache {
+  id          Int      @id @default(autoincrement())
+  period_type String // 'WEEKLY', 'MONTHLY', 'ALL_TIME'
+  period_key  String // 'YYYY-WW' for weeks, 'YYYY-MM' for months
+  data        Json // Cached leaderboard results
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime
+
+  @@unique([period_type, period_key])
+  @@index([period_type, expiresAt])
 }
 
 // 🔹 Friend Request - For Social Connection Features
@@ -245,13 +365,18 @@ model Habit {
   reward     String? // What reward comes after completion
   difficulty DifficultyLevel @default(MEDIUM)
 
+  // Points Configuration
+  points_per_completion Int @default(5)
+  bonus_points_streak   Int @default(1) // Additional points per streak day
+
   // Related Records
-  habitLogs     HabitLog[]
-  streak        HabitStreak[]
-  reminders     HabitReminder[]
-  challenges    HabitChallenge[]
-  resets        HabitReset[]
-  dailyStatuses HabitDailyStatus[]
+  habitLogs          HabitLog[]
+  streak             HabitStreak[]
+  reminders          HabitReminder[]
+  challenges         HabitChallenge[]
+  resets             HabitReset[]
+  dailyStatuses      HabitDailyStatus[]
+  scheduledReminders ScheduledReminder[]
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -298,9 +423,10 @@ model HabitLog {
   mood             Int? // Optional mood rating (1-5)
 
   // New fields
-  auto_logged Boolean @default(false) // Whether system generated this log (missed habits)
-  logged_late Boolean @default(false) // Whether logged after scheduled time
-  skip_reason String? // Reason provided when user skips habit
+  auto_logged   Boolean @default(false) // Whether system generated this log (missed habits)
+  logged_late   Boolean @default(false) // Whether logged after scheduled time
+  skip_reason   String? // Reason provided when user skips habit
+  points_earned Int     @default(0) // Track points earned for this completion
 
   // For tracked habits
   duration_completed Int? // For duration habits
@@ -377,8 +503,9 @@ model HabitReminder {
   follow_up_minutes        Int     @default(30) // Minutes after to send follow-up
 
   // Relationships
-  habit Habit @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
-  user  User  @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  habit              Habit               @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
+  user               User                @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  scheduledReminders ScheduledReminder[]
 }
 
 enum ReminderRepeat {
@@ -409,6 +536,7 @@ model Achievement {
   criteria_type  AchievementType
   criteria_value Int
   xp_value       Int             @default(0)
+  points_reward  Int             @default(0) // Points awarded for unlocking
   is_hidden      Boolean         @default(false)
 
   // Relationships
@@ -420,6 +548,7 @@ model UserAchievement {
   user_id        Int
   achievement_id Int
   unlocked_at    DateTime @default(now())
+  points_awarded Int      @default(0) // Record points awarded at unlock time
 
   // Relationships
   user        User        @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
@@ -441,14 +570,15 @@ enum AchievementType {
 
 // 🔹 Challenge - For Social Challenges
 model Challenge {
-  challenge_id Int      @id @default(autoincrement())
-  name         String
-  description  String
-  start_date   DateTime
-  end_date     DateTime
-  created_by   Int
-  is_public    Boolean  @default(false)
-  image        String?
+  challenge_id  Int      @id @default(autoincrement())
+  name          String
+  description   String
+  start_date    DateTime
+  end_date      DateTime
+  created_by    Int
+  is_public     Boolean  @default(false)
+  image         String?
+  points_reward Int      @default(50) // Points awarded for completing challenge
 
   // Relationships
   habitChallenges HabitChallenge[]
@@ -469,11 +599,13 @@ model HabitChallenge {
 
 // User-Challenge join table
 model UserChallenge {
-  user_id      Int
-  challenge_id Int
-  joined_at    DateTime @default(now())
-  progress     Float    @default(0)
-  completed    Boolean  @default(false)
+  user_id        Int
+  challenge_id   Int
+  joined_at      DateTime  @default(now())
+  progress       Float     @default(0)
+  completed      Boolean   @default(false)
+  completed_at   DateTime?
+  points_awarded Int       @default(0) // Track points awarded for completion
 
   // Relationships
   user      User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
@@ -573,6 +705,7 @@ enum NotificationType {
   BLOG_COMMENT
   NEW_MESSAGE
   GROUP_INVITATION
+  POINTS_AWARDED
 }
 
 // 🔹 UserStats - For Analytics Dashboard
@@ -585,6 +718,7 @@ model UserStats {
   total_habits_completed Int     @default(0)
   total_duration_tracked Int     @default(0)
   streak_maintained      Boolean @default(false)
+  points_earned_today    Int     @default(0)
 }
 
 // 🔹 HabitReset - Tracks When and Why Streaks Reset

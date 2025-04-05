@@ -5,8 +5,8 @@
   "scripts": {
     "start": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest --watchAll",
     "lint": "expo lint"
@@ -28,7 +28,7 @@
     "axios": "^1.7.9",
     "babel-plugin-module-resolver": "^5.0.2",
     "date-fns": "^4.1.0",
-    "expo": "~52.0.38",
+    "expo": "^52.0.44",
     "expo-blur": "~14.0.3",
     "expo-constants": "~17.0.4",
     "expo-font": "~13.0.3",
@@ -36,12 +36,12 @@
     "expo-image-picker": "~16.0.6",
     "expo-linear-gradient": "^14.0.2",
     "expo-linking": "~7.0.5",
-    "expo-router": "~4.0.19",
+    "expo-router": "~4.0.20",
     "expo-speech": "~13.0.1",
     "expo-splash-screen": "~0.29.22",
     "expo-status-bar": "~2.0.1",
     "expo-symbols": "~0.2.2",
-    "expo-system-ui": "~4.0.8",
+    "expo-system-ui": "~4.0.9",
     "expo-web-browser": "~14.0.2",
     "formik": "^2.4.6",
     "lucide-react-native": "^0.471.0",
@@ -49,7 +49,7 @@
     "nativewind": "^4.1.23",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "react-native": "0.76.7",
+    "react-native": "0.76.9",
     "react-native-chart-kit": "^6.12.0",
     "react-native-gesture-handler": "~2.20.2",
     "react-native-haptic-feedback": "^2.3.3",
@@ -63,7 +63,8 @@
     "react-redux": "^9.2.0",
     "socket.io-client": "^4.8.1",
     "tailwindcss": "^3.4.17",
-    "yup": "^1.6.1"
+    "yup": "^1.6.1",
+    "expo-notifications": "~0.29.14"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
