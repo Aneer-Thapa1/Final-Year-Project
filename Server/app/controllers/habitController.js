@@ -1,5 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
+const moment = require('moment-timezone');
 
 /**
  * Helper function to determine if a habit should be scheduled for a specific date
@@ -17,6 +18,19 @@ const isHabitScheduledForDate = (habit, targetDate) => {
 
     // If habit hasn't started yet, it's not scheduled
     if (daysSinceStart < 0) return false;
+
+    // Check if the habit has ended
+    if (habit.end_date) {
+        const endDate = new Date(habit.end_date);
+        endDate.setHours(23, 59, 59, 999);
+
+        if (targetDate > endDate) return false;
+    }
+
+    // Check if user is on vacation and habit should be skipped
+    if (habit.user?.onVacation && habit.skip_on_vacation) {
+        return false;
+    }
 
     // Date is between start and end, check frequency type
     switch (habit.frequency_type) {
@@ -46,21 +60,17 @@ const isHabitScheduledForDate = (habit, targetDate) => {
             startOfWeek.setHours(0, 0, 0, 0);
 
             // Check if this habit has already been scheduled enough times this week
-            // This is a simplified approach - in a real app, you would check actual scheduled records
-            const scheduledDaysThisWeek =  getScheduledDaysInRange(
+            // This is a simplified approach - we'll handle the async call separately
+            return getScheduledDaysInRange(
                 habit.habit_id,
                 startOfWeek,
                 targetDate
-            );
-
-            // If we've already scheduled it enough times this week, don't schedule more
-            if (scheduledDaysThisWeek >= habit.frequency_value) {
-                return false;
-            }
-
-            // Otherwise, tentatively schedule it
-            // In a real app, you might have more complex logic for which days of the week to pick
-            return true;
+            ).then(scheduledDaysThisWeek => {
+                return scheduledDaysThisWeek < habit.frequency_value;
+            }).catch(() => {
+                console.error(`Error checking X_TIMES_WEEK for habit ${habit.habit_id}`);
+                return true; // Default to scheduling if there's an error
+            });
 
         case 'X_TIMES_MONTH':
             // Get the start of the month
@@ -69,19 +79,16 @@ const isHabitScheduledForDate = (habit, targetDate) => {
             startOfMonth.setHours(0, 0, 0, 0);
 
             // Check if this habit has already been scheduled enough times this month
-            const scheduledDaysThisMonth =  getScheduledDaysInRange(
+            return getScheduledDaysInRange(
                 habit.habit_id,
                 startOfMonth,
                 targetDate
-            );
-
-            // If we've already scheduled it enough times this month, don't schedule more
-            if (scheduledDaysThisMonth >= habit.frequency_value) {
-                return false;
-            }
-
-            // Otherwise, tentatively schedule it
-            return true;
+            ).then(scheduledDaysThisMonth => {
+                return scheduledDaysThisMonth < habit.frequency_value;
+            }).catch(() => {
+                console.error(`Error checking X_TIMES_MONTH for habit ${habit.habit_id}`);
+                return true; // Default to scheduling if there's an error
+            });
 
         default:
             // Unknown frequency type, default to scheduled
@@ -137,21 +144,11 @@ const getFrequencyDisplay = (habit) => {
 };
 
 /**
- * Helper function to get a formatted time display string for a habit
- * In a real app, this would use habit's actual time settings
- */
-const getHabitTimeDisplay = (habit) => {
-    // This is a placeholder - in a real app, you would use the habit's scheduled time
-    // For now, we'll return a default value
-    return "Anytime";
-};
-
-/**
  * Helper function to create a daily status record for a habit
  */
 const createHabitDailyStatus = async (habitId, userId, date, isScheduled) => {
     try {
-        await prisma.habitDailyStatus.create({
+        return await prisma.habitDailyStatus.create({
             data: {
                 habit_id: habitId,
                 user_id: userId,
@@ -163,11 +160,12 @@ const createHabitDailyStatus = async (habitId, userId, date, isScheduled) => {
         });
     } catch (error) {
         console.error('Error creating habit daily status:', error);
+        return null;
     }
 };
 
 /**
- * Add a new habit to the database with enhanced reminder support
+ * Add a new habit to the database with enhanced reminder support and points setup
  */
 const addHabit = async (req, res) => {
     try {
@@ -205,7 +203,9 @@ const addHabit = async (req, res) => {
             domain_id,
             reminders,
             grace_period_enabled,
-            grace_period_hours
+            grace_period_hours,
+            points_per_completion,
+            bonus_points_streak
         } = req.body;
 
         const user_id = parseInt(req.user);
@@ -260,6 +260,31 @@ const addHabit = async (req, res) => {
             processedTags = JSON.stringify(tags);
         }
 
+        // Determine difficulty-appropriate points
+        let pointsValue = points_per_completion || 5; // Default to 5 points
+        let streakBonusPoints = bonus_points_streak || 1; // Default to 1 bonus point per streak day
+
+        // Adjust points based on difficulty if not explicitly provided
+        if (!points_per_completion && difficulty) {
+            switch (difficulty) {
+                case 'VERY_EASY':
+                    pointsValue = 2;
+                    break;
+                case 'EASY':
+                    pointsValue = 3;
+                    break;
+                case 'MEDIUM':
+                    pointsValue = 5;
+                    break;
+                case 'HARD':
+                    pointsValue = 8;
+                    break;
+                case 'VERY_HARD':
+                    pointsValue = 10;
+                    break;
+            }
+        }
+
         // Create the new habit
         const newHabit = await prisma.habit.create({
             data: {
@@ -297,7 +322,9 @@ const addHabit = async (req, res) => {
                 domain_id: parseInt(domain_id, 10),
                 user_id: parseInt(user_id, 10),
                 grace_period_enabled: grace_period_enabled !== undefined ? grace_period_enabled : true,
-                grace_period_hours: grace_period_hours ? parseInt(grace_period_hours, 10) : 24
+                grace_period_hours: grace_period_hours ? parseInt(grace_period_hours, 10) : 24,
+                points_per_completion: pointsValue,
+                bonus_points_streak: streakBonusPoints
             }
         });
 
@@ -318,12 +345,23 @@ const addHabit = async (req, res) => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
+        // Get user info to check vacation status
+        const user = await prisma.user.findUnique({
+            where: { user_id: parseInt(user_id, 10) }
+        });
+
+        // Create daily status with proper scheduling check
+        const isScheduled = await isHabitScheduledForDate({
+            ...newHabit,
+            user: user
+        }, today);
+
         await prisma.habitDailyStatus.create({
             data: {
                 habit_id: newHabit.habit_id,
                 user_id: user_id,
                 date: today,
-                is_scheduled: isHabitScheduledForDate(newHabit, today),
+                is_scheduled: isScheduled,
                 is_completed: false,
                 is_skipped: false
             }
@@ -352,6 +390,18 @@ const addHabit = async (req, res) => {
         await prisma.user.update({
             where: { user_id: user_id },
             data: { totalHabitsCreated: { increment: 1 } }
+        });
+
+        // Create welcome notification for the new habit
+        await prisma.notification.create({
+            data: {
+                user_id: user_id,
+                title: 'New Habit Created',
+                content: `You've set up a new habit: ${name}. Start building that streak!`,
+                type: 'SYSTEM_MESSAGE',
+                related_id: newHabit.habit_id,
+                action_url: `/habits/${newHabit.habit_id}`
+            }
         });
 
         // Return the newly created habit with domain information
@@ -390,7 +440,7 @@ const addHabit = async (req, res) => {
 const getHabitById = async (req, res) => {
     try {
         const { habitId } = req.params;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         if (!habitId) {
             return res.status(400).json({
@@ -476,6 +526,18 @@ const getHabitById = async (req, res) => {
             }
         });
 
+        // Calculate total points earned from this habit
+        const totalPoints = await prisma.pointsLog.aggregate({
+            where: {
+                user_id: userId,
+                source_type: 'HABIT_COMPLETION',
+                source_id: habitIdInt
+            },
+            _sum: {
+                points: true
+            }
+        });
+
         return res.status(200).json({
             success: true,
             data: {
@@ -490,7 +552,8 @@ const getHabitById = async (req, res) => {
                 stats: {
                     totalLogs,
                     completedLogs,
-                    completionRate: Math.round(completionRate * 10) / 10
+                    completionRate: Math.round(completionRate * 10) / 10,
+                    totalPoints: totalPoints._sum.points || 0
                 }
             }
         });
@@ -626,14 +689,26 @@ const getUserHabits = async (req, res) => {
             habitStatusMap[status.habit_id] = status;
         });
 
+        // Get user info to check vacation status
+        const user = await prisma.user.findUnique({
+            where: { user_id: userId },
+            select: { onVacation: true }
+        });
+
         // Add completion and scheduled status
-        const enhancedHabits = habits.map(habit => {
+        const enhancedHabits = await Promise.all(habits.map(async habit => {
             const todayStatus = habitStatusMap[habit.habit_id];
 
             // If no status exists yet, determine if it should be scheduled
-            const isScheduled = todayStatus ?
-                todayStatus.is_scheduled :
-                isHabitScheduledForDate(habit, today);
+            const isScheduled = todayStatus
+                ? todayStatus.is_scheduled
+                : await isHabitScheduledForDate({ ...habit, user }, today);
+
+            // Get next occurrence if needed
+            let nextOccurrence = null;
+            if (todayStatus && !todayStatus.is_scheduled) {
+                nextOccurrence = await getNextOccurrence(habit);
+            }
 
             return {
                 ...habit,
@@ -641,10 +716,9 @@ const getUserHabits = async (req, res) => {
                 completedToday: todayStatus ? todayStatus.is_completed : false,
                 skippedToday: todayStatus ? todayStatus.is_skipped : false,
                 todayStatus: todayStatus || null,
-                nextOccurrence: todayStatus && !todayStatus.is_scheduled ?
-                    getNextOccurrence(habit) : null
+                nextOccurrence
             };
-        });
+        }));
 
         return res.status(200).json({
             success: true,
@@ -674,6 +748,8 @@ const getHabitsByDate = async (req, res) => {
         const userId = parseInt(req.user);
         const { date } = req.params; // Format: YYYY-MM-DD
 
+        console.log(date)
+
         if (!date || !date.match(/^\d{4}-\d{2}-\d{2}$/)) {
             return res.status(400).json({
                 success: false,
@@ -688,8 +764,16 @@ const getHabitsByDate = async (req, res) => {
         const nextDate = new Date(targetDate);
         nextDate.setDate(nextDate.getDate() + 1);
 
-        // Get day of week (0-6, Sunday is 0)
-        const dayOfWeek = targetDate.getDay();
+        // Get user info for vacation status
+        const user = await prisma.user.findUnique({
+            where: { user_id: userId },
+            select: {
+                dailyGoal: true,
+                onVacation: true,
+                vacation_start: true,
+                vacation_end: true
+            }
+        });
 
         // Get all active habits for the user
         const habits = await prisma.habit.findMany({
@@ -750,7 +834,10 @@ const getHabitsByDate = async (req, res) => {
                 }
             } else {
                 // No existing status, determine if it should be scheduled
-                const isScheduled = isHabitScheduledForDate(habit, targetDate);
+                const isScheduled = await isHabitScheduledForDate({
+                    ...habit,
+                    user
+                }, targetDate);
 
                 // If it should be scheduled, create a status record
                 if (isScheduled) {
@@ -781,10 +868,18 @@ const getHabitsByDate = async (req, res) => {
         const totalHabits = processedHabits.length;
         const completedHabits = processedHabits.filter(h => h.completedToday).length;
 
-        // Get user's daily goal
-        const user = await prisma.user.findUnique({
-            where: { user_id: userId },
-            select: { dailyGoal: true }
+        // Calculate total points earned on this day
+        const dayPoints = await prisma.pointsLog.aggregate({
+            where: {
+                user_id: userId,
+                createdAt: {
+                    gte: targetDate,
+                    lt: nextDate
+                }
+            },
+            _sum: {
+                points: true
+            }
         });
 
         return res.status(200).json({
@@ -796,7 +891,8 @@ const getHabitsByDate = async (req, res) => {
                 completed: completedHabits,
                 completionRate: totalHabits > 0 ? Math.round((completedHabits / totalHabits) * 100) : 0,
                 dailyGoal: user?.dailyGoal || 0,
-                goalAchieved: completedHabits >= (user?.dailyGoal || 0)
+                goalAchieved: completedHabits >= (user?.dailyGoal || 0),
+                pointsEarned: dayPoints._sum.points || 0
             }
         });
     } catch (error) {
@@ -814,7 +910,7 @@ const getHabitsByDate = async (req, res) => {
  */
 const getHabitsByDomain = async (req, res) => {
     try {
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
         const { domainId } = req.params;
 
         if (!domainId) {
@@ -837,6 +933,12 @@ const getHabitsByDomain = async (req, res) => {
                 message: 'Domain not found'
             });
         }
+
+        // Get user info for vacation status
+        const user = await prisma.user.findUnique({
+            where: { user_id: userId },
+            select: { onVacation: true }
+        });
 
         // Get habits in this domain
         const habits = await prisma.habit.findMany({
@@ -873,7 +975,7 @@ const getHabitsByDomain = async (req, res) => {
         });
 
         // Add completion status
-        const habitsWithStatus = habits.map(habit => {
+        const habitsWithStatus = await Promise.all(habits.map(async habit => {
             const todayStatus = statusMap[habit.habit_id];
 
             if (todayStatus) {
@@ -887,21 +989,32 @@ const getHabitsByDomain = async (req, res) => {
             }
 
             // Determine if this habit should be scheduled for today
-            const isScheduled = isHabitScheduledForDate(habit, today);
+            const isScheduled = await isHabitScheduledForDate({
+                ...habit,
+                user
+            }, today);
 
-            // Create status if needed (async - no await)
+            // Create status if needed
             if (isScheduled) {
-                createHabitDailyStatus(habit.habit_id, userId, today, true);
+                const newStatus = await createHabitDailyStatus(habit.habit_id, userId, today, true);
+
+                return {
+                    ...habit,
+                    isScheduledToday: true,
+                    completedToday: false,
+                    skippedToday: false,
+                    todayStatus: newStatus
+                };
             }
 
             return {
                 ...habit,
-                isScheduledToday: isScheduled,
+                isScheduledToday: false,
                 completedToday: false,
                 skippedToday: false,
                 todayStatus: null
             };
-        });
+        }));
 
         // Get domain stats
         const domainStats = {
@@ -913,11 +1026,26 @@ const getHabitsByDomain = async (req, res) => {
                 : 0
         };
 
+        // Calculate total points for this domain
+        const domainPoints = await prisma.pointsLog.aggregate({
+            where: {
+                user_id: userId,
+                source_type: 'HABIT_COMPLETION',
+                source_id: { in: habitIds }
+            },
+            _sum: {
+                points: true
+            }
+        });
+
         return res.status(200).json({
             success: true,
             domain,
             data: habitsWithStatus,
-            stats: domainStats
+            stats: {
+                ...domainStats,
+                totalPoints: domainPoints._sum.points || 0
+            }
         });
     } catch (error) {
         console.error('Error getting habits by domain:', error);
@@ -930,7 +1058,7 @@ const getHabitsByDomain = async (req, res) => {
 };
 
 /**
- * Log a habit completion with enhanced streak management
+ * Log a habit completion with enhanced streak management and points system
  */
 const logHabitCompletion = async (req, res) => {
     try {
@@ -957,7 +1085,8 @@ const logHabitCompletion = async (req, res) => {
                 user_id: userId
             },
             include: {
-                streak: true
+                streak: true,
+                domain: true
             }
         });
 
@@ -992,18 +1121,23 @@ const logHabitCompletion = async (req, res) => {
 
         // If no status exists, create one
         if (!dailyStatus) {
-            const isScheduled = isHabitScheduledForDate(habit, completionDay);
-
-            dailyStatus = await prisma.habitDailyStatus.create({
-                data: {
-                    habit_id: parseInt(habitId, 10),
-                    user_id: userId,
-                    date: completionDay,
-                    is_scheduled: isScheduled,
-                    is_completed: false,
-                    is_skipped: false
-                }
+            // Check if it should be scheduled for this date
+            const user = await prisma.user.findUnique({
+                where: { user_id: userId },
+                select: { onVacation: true, timezone: true }
             });
+
+            const isScheduled = await isHabitScheduledForDate({
+                ...habit,
+                user: user
+            }, completionDay);
+
+            dailyStatus = await createHabitDailyStatus(
+                parseInt(habitId, 10),
+                userId,
+                completionDay,
+                isScheduled
+            );
         }
 
         // Update the daily status
@@ -1019,6 +1153,9 @@ const logHabitCompletion = async (req, res) => {
             }
         });
 
+        let pointsEarned = 0;
+        let streakData = null;
+
         // Prepare log data
         const logData = {
             habit_id: parseInt(habitId, 10),
@@ -1031,7 +1168,8 @@ const logHabitCompletion = async (req, res) => {
             evidence_image: evidence_image || null,
             auto_logged: false,
             logged_late: isBackdated,
-            skip_reason: skipped ? skip_reason : null
+            skip_reason: skipped ? skip_reason : null,
+            points_earned: 0 // Will update after streak calculation if completed
         };
 
         // Add tracking-specific data
@@ -1048,14 +1186,69 @@ const logHabitCompletion = async (req, res) => {
         }
 
         // Create the log entry
-        const newLog = await prisma.habitLog.create({
+        let newLog = await prisma.habitLog.create({
             data: logData
         });
 
-        // Update streak based on enhanced rules
+        // Handle streak and points for completion
         if (completed && !skipped) {
-            // Handle streak calculation with more sophisticated rules
-            await updateHabitStreak(habit, userId, completionDay);
+            // Update streak with enhanced rules
+            streakData = await updateHabitStreak(habit, userId, completionDay);
+
+            // Calculate points based on streak
+            const basePoints = habit.points_per_completion || 5;
+            const streakMultiplier = habit.bonus_points_streak || 1;
+
+            // Cap the streak bonus at 30 days to prevent excessive points
+            const cappedStreak = Math.min(streakData.newStreak - 1, 30);
+            const streakBonus = cappedStreak * streakMultiplier;
+
+            // Calculate difficulty bonus (if applicable)
+            let difficultyBonus = 0;
+            switch(habit.difficulty) {
+                case 'HARD':
+                    difficultyBonus = Math.round(basePoints * 0.2);
+                    break;
+                case 'VERY_HARD':
+                    difficultyBonus = Math.round(basePoints * 0.5);
+                    break;
+            }
+
+            // Total points earned
+            pointsEarned = basePoints + streakBonus + difficultyBonus;
+
+            // Update the log with points earned
+            newLog = await prisma.habitLog.update({
+                where: { log_id: newLog.log_id },
+                data: { points_earned: pointsEarned }
+            });
+
+            // Create points log entry
+            await prisma.pointsLog.create({
+                data: {
+                    user_id: userId,
+                    points: pointsEarned,
+                    reason: `Completed habit: ${habit.name}`,
+                    description: streakData.newStreak > 1 ?
+                        `${streakData.newStreak} day streak (+${streakBonus} bonus)` :
+                        undefined,
+                    source_type: 'HABIT_COMPLETION',
+                    source_id: parseInt(habitId, 10)
+                }
+            });
+
+            // Update user's total points
+            await prisma.user.update({
+                where: { user_id: userId },
+                data: {
+                    points_gained: { increment: pointsEarned }
+                }
+            });
+
+            // Check for streak milestones and award bonus points
+            if (streakData.newStreak >= 7) {
+                await checkAndAwardStreakMilestone(habit, userId, streakData.newStreak);
+            }
         } else if (skipped) {
             // Handle skips based on user's preferences
             await handleSkippedHabit(habit, userId, completionDay, skip_reason);
@@ -1072,31 +1265,87 @@ const logHabitCompletion = async (req, res) => {
 
         // Get user's daily goal
         const user = await prisma.user.findUnique({
-            where: { user_id: userId }
+            where: { user_id: userId },
+            select: {
+                dailyGoal: true,
+                currentDailyStreak: true,
+                longestDailyStreak: true
+            }
         });
 
-        // If daily goal is completed, increment daily streak
+        let dailyGoalAchieved = false;
+        let dailyGoalPoints = 0;
+
+        // If daily goal is completed and not previously completed today
         if (completedHabitsToday >= user.dailyGoal) {
-            await prisma.user.update({
-                where: { user_id: userId },
-                data: {
-                    currentDailyStreak: { increment: 1 },
-                    totalHabitsCompleted: { increment: 1 },
-                    longestDailyStreak: {
-                        set: {
-                            connectOrCreate: {
-                                where: {
-                                    currentDailyStreak: {
-                                        gt: user.longestDailyStreak
-                                    }
-                                },
-                                update: user.currentDailyStreak + 1,
-                                create: user.currentDailyStreak + 1
-                            }
-                        }
+            // Check if we need to record daily goal achievement
+            const todayStats = await prisma.userStats.findFirst({
+                where: {
+                    user_id: userId,
+                    date: {
+                        gte: today,
+                        lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
                     }
                 }
             });
+
+            if (!todayStats || !todayStats.streak_maintained) {
+                // Daily goal bonus points
+                dailyGoalPoints = 20;
+                dailyGoalAchieved = true;
+
+                // Update or create today's stats
+                if (todayStats) {
+                    await prisma.userStats.update({
+                        where: { stat_id: todayStats.stat_id },
+                        data: {
+                            streak_maintained: true,
+                            points_earned_today: { increment: dailyGoalPoints }
+                        }
+                    });
+                } else {
+                    await prisma.userStats.create({
+                        data: {
+                            user_id: userId,
+                            date: today,
+                            total_habits_completed: completedHabitsToday,
+                            streak_maintained: true,
+                            points_earned_today: dailyGoalPoints
+                        }
+                    });
+                }
+
+                // Create points log for daily goal
+                await prisma.pointsLog.create({
+                    data: {
+                        user_id: userId,
+                        points: dailyGoalPoints,
+                        reason: 'Daily Goal Achieved',
+                        description: `Completed ${user.dailyGoal} habits today`,
+                        source_type: 'SYSTEM_BONUS'
+                    }
+                });
+
+                // Update user's total points and streak
+                await prisma.user.update({
+                    where: { user_id: userId },
+                    data: {
+                        points_gained: { increment: dailyGoalPoints },
+                        currentDailyStreak: { increment: 1 },
+                        longestDailyStreak: Math.max(user.currentDailyStreak + 1, user.longestDailyStreak)
+                    }
+                });
+
+                // Create notification for daily goal achievement
+                await prisma.notification.create({
+                    data: {
+                        user_id: userId,
+                        title: 'Daily Goal Achieved!',
+                        content: `You've completed your daily goal of ${user.dailyGoal} habits and earned ${dailyGoalPoints} points!`,
+                        type: 'SYSTEM_MESSAGE'
+                    }
+                });
+            }
         }
 
         // Get the updated habit with streak
@@ -1120,7 +1369,12 @@ const logHabitCompletion = async (req, res) => {
                 streak: updatedHabit.streak[0] || null,
                 dailyStatus: updatedHabit.dailyStatuses[0] || null,
                 completedHabitsToday,
-                dailyGoalMet: completedHabitsToday >= user.dailyGoal
+                dailyGoalMet: dailyGoalAchieved,
+                points: {
+                    earned: pointsEarned,
+                    dailyGoalBonus: dailyGoalPoints,
+                    total: pointsEarned + dailyGoalPoints
+                }
             }
         });
     } catch (error) {
@@ -1128,159 +1382,6 @@ const logHabitCompletion = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Failed to log habit completion',
-            error: error.message
-        });
-    }
-};
-
-/**
- * Process daily habit reset for habits that were due but not completed
- * This should be run every day at midnight for each user's timezone
- */
-const processHabitDailyReset = async (req, res) => {
-    try {
-        const userId = req.user.user_id;
-
-        // Get yesterday's date in user's timezone
-        const user = await prisma.user.findUnique({
-            where: { user_id: userId },
-            select: { timezone: true }
-        });
-
-        // Get yesterday in user's timezone
-        const userTimezone = user.timezone || 'UTC';
-        const yesterday = new Date(new Date().toLocaleString('en-US', { timeZone: userTimezone }));
-        yesterday.setDate(yesterday.getDate() - 1);
-        yesterday.setHours(0, 0, 0, 0);
-
-        // Get all active habits for the user
-        const habits = await prisma.habit.findMany({
-            where: {
-                user_id: userId,
-                is_active: true
-            },
-            include: {
-                streak: true
-            }
-        });
-
-        // Process each habit
-        const results = [];
-
-        for (const habit of habits) {
-            // Check if this habit was scheduled for yesterday
-            const isScheduled = isHabitScheduledForDate(habit, yesterday);
-
-            if (!isScheduled) {
-                continue; // Skip habits not scheduled for yesterday
-            }
-
-            // Get the daily status for yesterday
-            let dailyStatus = await prisma.habitDailyStatus.findUnique({
-                where: {
-                    habit_id_date: {
-                        habit_id: habit.habit_id,
-                        date: yesterday
-                    }
-                }
-            });
-
-            // If no status exists, create one
-            if (!dailyStatus) {
-                dailyStatus = await prisma.habitDailyStatus.create({
-                    data: {
-                        habit_id: habit.habit_id,
-                        user_id: userId,
-                        date: yesterday,
-                        is_scheduled: true,
-                        is_completed: false,
-                        is_skipped: false
-                    }
-                });
-            }
-
-            // If not completed or skipped, mark as missed and reset streak if needed
-            if (!dailyStatus.is_completed && !dailyStatus.is_skipped) {
-                // Create auto-logged entry for the missed habit
-                const missedLog = await prisma.habitLog.create({
-                    data: {
-                        habit_id: habit.habit_id,
-                        user_id: userId,
-                        completed: false,
-                        skipped: false,
-                        completed_at: new Date(),
-                        auto_logged: true
-                    }
-                });
-
-                // Reset streak if grace period is not enabled or already used
-                if (!habit.grace_period_enabled || habit.streak[0]?.grace_period_used) {
-                    // Get the current streak
-                    const currentStreak = habit.streak[0]?.current_streak || 0;
-
-                    // Create reset record
-                    await prisma.habitReset.create({
-                        data: {
-                            habit_id: habit.habit_id,
-                            user_id: userId,
-                            reset_date: new Date(),
-                            previous_streak: currentStreak,
-                            reason: 'MISSED_COMPLETION',
-                            user_initiated: false,
-                            notes: 'Automatically reset due to missed completion.'
-                        }
-                    });
-
-                    // Reset the streak
-                    await prisma.habitStreak.update({
-                        where: { streak_id: habit.streak[0].streak_id },
-                        data: {
-                            current_streak: 0,
-                            missed_days_count: habit.streak[0].missed_days_count + 1,
-                            last_reset_reason: 'MISSED_COMPLETION',
-                            grace_period_used: false
-                        }
-                    });
-
-                    results.push({
-                        habit_id: habit.habit_id,
-                        name: habit.name,
-                        action: 'streak_reset',
-                        previous_streak: currentStreak
-                    });
-                } else {
-                    // Use grace period instead of resetting
-                    await prisma.habitStreak.update({
-                        where: { streak_id: habit.streak[0].streak_id },
-                        data: {
-                            grace_period_used: true,
-                            missed_days_count: habit.streak[0].missed_days_count + 1
-                        }
-                    });
-
-                    results.push({
-                        habit_id: habit.habit_id,
-                        name: habit.name,
-                        action: 'grace_period_used',
-                        current_streak: habit.streak[0].current_streak
-                    });
-                }
-            }
-        }
-
-        return res.status(200).json({
-            success: true,
-            message: 'Daily habit reset process completed',
-            data: {
-                processed_date: yesterday.toISOString().split('T')[0],
-                results
-            }
-        });
-    } catch (error) {
-        console.error('Error processing daily habit reset:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to process daily habit reset',
             error: error.message
         });
     }
@@ -1307,6 +1408,9 @@ const skipHabit = async (req, res) => {
             where: {
                 habit_id: parseInt(habitId, 10),
                 user_id: userId
+            },
+            include: {
+                streak: true
             }
         });
 
@@ -1330,19 +1434,24 @@ const skipHabit = async (req, res) => {
             }
         });
 
-        if (!dailyStatus) {
-            const isScheduled = isHabitScheduledForDate(habit, skipDate);
+        // Get user info to check vacation status
+        const user = await prisma.user.findUnique({
+            where: { user_id: userId },
+            select: { onVacation: true, timezone: true }
+        });
 
-            dailyStatus = await prisma.habitDailyStatus.create({
-                data: {
-                    habit_id: parseInt(habitId, 10),
-                    user_id: userId,
-                    date: skipDate,
-                    is_scheduled: isScheduled,
-                    is_completed: false,
-                    is_skipped: false
-                }
-            });
+        if (!dailyStatus) {
+            const isScheduled = await isHabitScheduledForDate({
+                ...habit,
+                user: user
+            }, skipDate);
+
+            dailyStatus = await createHabitDailyStatus(
+                parseInt(habitId, 10),
+                userId,
+                skipDate,
+                isScheduled
+            );
         }
 
         // Update the daily status to skipped
@@ -1370,13 +1479,17 @@ const skipHabit = async (req, res) => {
             }
         });
 
-        // Handle streak based on habit settings
-        if (habit.skip_on_vacation || (reason && reason.toLowerCase().includes('vacation'))) {
+        // Determine if this should affect streak
+        const isVacationSkip = user.onVacation || (reason && reason.toLowerCase().includes('vacation'));
+
+        // Handle streak based on habit settings and vacation status
+        let streakResult;
+        if (habit.skip_on_vacation || isVacationSkip) {
             // Vacation skip doesn't affect streak
-            await handleSkippedHabit(habit, userId, skipDate, reason, true);
+            streakResult = await handleSkippedHabit(habit, userId, skipDate, reason, true);
         } else {
-            // Regular skip - may affect streak based on settings
-            await handleSkippedHabit(habit, userId, skipDate, reason, false);
+            // Regular skip resets streak to 0
+            streakResult = await handleSkippedHabit(habit, userId, skipDate, reason, false);
         }
 
         return res.status(200).json({
@@ -1387,7 +1500,9 @@ const skipHabit = async (req, res) => {
                 date: skipDate.toISOString().split('T')[0],
                 status: 'skipped',
                 reason: reason || 'User skipped',
-                log: skipLog
+                log: skipLog,
+                streak: streakResult?.currentStreak || 0,
+                streak_maintained: habit.skip_on_vacation || isVacationSkip
             }
         });
     } catch (error) {
@@ -1401,12 +1516,212 @@ const skipHabit = async (req, res) => {
 };
 
 /**
+ * Process daily habit reset for habits that were due but not completed
+ * This should be run every day at midnight for each user's timezone
+ */
+const processHabitDailyReset = async (req, res) => {
+    try {
+        const userId = parseInt(req.user);
+
+        // Get yesterday's date in user's timezone
+        const user = await prisma.user.findUnique({
+            where: { user_id: userId },
+            select: { timezone: true, onVacation: true }
+        });
+
+        // Get yesterday in user's timezone
+        const userTimezone = user.timezone || 'UTC';
+        const yesterday = moment().tz(userTimezone).subtract(1, 'day').startOf('day').toDate();
+
+        // Get all active habits for the user
+        const habits = await prisma.habit.findMany({
+            where: {
+                user_id: userId,
+                is_active: true
+            },
+            include: {
+                streak: true
+            }
+        });
+
+        // Process each habit
+        const results = [];
+
+        for (const habit of habits) {
+            // Skip processing if user is on vacation and habit should be skipped
+            if (user.onVacation && habit.skip_on_vacation) {
+                results.push({
+                    habit_id: habit.habit_id,
+                    name: habit.name,
+                    action: 'vacation_skip',
+                    current_streak: habit.streak[0]?.current_streak || 0
+                });
+                continue;
+            }
+
+            // Check if this habit was scheduled for yesterday
+            const isScheduled = await isHabitScheduledForDate({
+                ...habit,
+                user: user
+            }, yesterday);
+
+            if (!isScheduled) {
+                continue; // Skip habits not scheduled for yesterday
+            }
+
+            // Get the daily status for yesterday
+            let dailyStatus = await prisma.habitDailyStatus.findUnique({
+                where: {
+                    habit_id_date: {
+                        habit_id: habit.habit_id,
+                        date: yesterday
+                    }
+                }
+            });
+
+            // If no status exists, create one
+            if (!dailyStatus) {
+                dailyStatus = await createHabitDailyStatus(
+                    habit.habit_id,
+                    userId,
+                    yesterday,
+                    true // It was scheduled
+                );
+            }
+
+            // If not completed or skipped, mark as missed and reset streak
+            if (!dailyStatus.is_completed && !dailyStatus.is_skipped) {
+                // Create auto-logged entry for the missed habit
+                const missedLog = await prisma.habitLog.create({
+                    data: {
+                        habit_id: habit.habit_id,
+                        user_id: userId,
+                        completed: false,
+                        skipped: false,
+                        completed_at: new Date(),
+                        auto_logged: true
+                    }
+                });
+
+                // Reset streak immediately (we don't use grace period for daily reset)
+                // This is important - even if grace period is enabled, after the day passes,
+                // we reset the streak as it's a missed completion
+
+                const currentStreak = habit.streak[0]?.current_streak || 0;
+
+                // Create reset record
+                await prisma.habitReset.create({
+                    data: {
+                        habit_id: habit.habit_id,
+                        user_id: userId,
+                        reset_date: new Date(),
+                        previous_streak: currentStreak,
+                        reason: 'MISSED_COMPLETION',
+                        user_initiated: false,
+                        notes: 'Automatically reset due to missed completion.'
+                    }
+                });
+
+                // Reset the streak
+                await prisma.habitStreak.update({
+                    where: { streak_id: habit.streak[0].streak_id },
+                    data: {
+                        current_streak: 0,
+                        missed_days_count: habit.streak[0].missed_days_count + 1,
+                        last_reset_reason: 'MISSED_COMPLETION',
+                        grace_period_used: false
+                    }
+                });
+
+                // If streak was significant (> 7 days), create a notification
+                if (currentStreak >= 7) {
+                    await prisma.notification.create({
+                        data: {
+                            user_id: userId,
+                            title: 'Streak Lost',
+                            content: `Your ${currentStreak}-day streak for "${habit.name}" was reset because you missed yesterday's completion.`,
+                            type: 'STREAK_MILESTONE',
+                            related_id: habit.habit_id
+                        }
+                    });
+                }
+
+                results.push({
+                    habit_id: habit.habit_id,
+                    name: habit.name,
+                    action: 'streak_reset',
+                    previous_streak: currentStreak
+                });
+            }
+        }
+
+        // If this is a new day, check if user completed their daily goal yesterday
+        // If not, reset their daily streak
+        const yesterdayCompletedCount = await prisma.habitDailyStatus.count({
+            where: {
+                user_id: userId,
+                date: yesterday,
+                is_completed: true
+            }
+        });
+
+        const userGoals = await prisma.user.findUnique({
+            where: { user_id: userId },
+            select: { dailyGoal: true, currentDailyStreak: true }
+        });
+
+        if (yesterdayCompletedCount < userGoals.dailyGoal && userGoals.currentDailyStreak > 0) {
+            // User missed their daily goal, reset the streak
+            await prisma.user.update({
+                where: { user_id: userId },
+                data: {
+                    currentDailyStreak: 0
+                }
+            });
+
+            // Create notification about lost daily goal streak
+            if (userGoals.currentDailyStreak >= 3) {
+                await prisma.notification.create({
+                    data: {
+                        user_id: userId,
+                        title: 'Daily Goal Streak Lost',
+                        content: `Your ${userGoals.currentDailyStreak}-day streak of completing your daily goal was reset.`,
+                        type: 'STREAK_MILESTONE'
+                    }
+                });
+            }
+
+            results.push({
+                action: 'daily_goal_streak_reset',
+                previous_streak: userGoals.currentDailyStreak
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Daily habit reset process completed',
+            data: {
+                processed_date: yesterday.toISOString().split('T')[0],
+                results
+            }
+        });
+    } catch (error) {
+        console.error('Error processing daily habit reset:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to process daily habit reset',
+            error: error.message
+        });
+    }
+};
+
+/**
  * Delete a habit log entry with streak recalculation
  */
 const deleteHabitLog = async (req, res) => {
     try {
         const { logId } = req.params;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         // Validate log exists and belongs to user
         const log = await prisma.habitLog.findFirst({
@@ -1426,6 +1741,28 @@ const deleteHabitLog = async (req, res) => {
         // Get the completion date from the log
         const completionDate = new Date(log.completed_at);
         completionDate.setHours(0, 0, 0, 0);
+
+        // If log had points, remove those points from user's total
+        if (log.points_earned > 0) {
+            // Create a negative points log entry
+            await prisma.pointsLog.create({
+                data: {
+                    user_id: userId,
+                    points: -log.points_earned,
+                    reason: 'Log Entry Deleted',
+                    description: `Deleted log entry for habit ID ${log.habit_id}`,
+                    source_type: 'ADMIN_ADJUSTMENT'
+                }
+            });
+
+            // Update user's total points
+            await prisma.user.update({
+                where: { user_id: userId },
+                data: {
+                    points_gained: { increment: -log.points_earned }
+                }
+            });
+        }
 
         // If this was a completion or skip, update the daily status
         await prisma.habitDailyStatus.updateMany({
@@ -1448,12 +1785,11 @@ const deleteHabitLog = async (req, res) => {
         });
 
         // Recalculate streak if this was a completed log
+        let newStreak = null;
         if (log.completed) {
-            await recalculateHabitStreak(log.habit_id, userId);
-        }
+            newStreak = await recalculateHabitStreak(log.habit_id, userId);
 
-        // Update user's total habits completed if needed
-        if (log.completed) {
+            // Update user's total habits completed if needed
             await prisma.user.update({
                 where: { user_id: userId },
                 data: { totalHabitsCompleted: { decrement: 1 } }
@@ -1462,7 +1798,11 @@ const deleteHabitLog = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: 'Habit log deleted successfully'
+            message: 'Habit log deleted successfully',
+            data: {
+                points_removed: log.points_earned > 0 ? log.points_earned : 0,
+                new_streak: newStreak?.current_streak || 0
+            }
         });
     } catch (error) {
         console.error('Error deleting habit log:', error);
@@ -1475,453 +1815,12 @@ const deleteHabitLog = async (req, res) => {
 };
 
 /**
- * Add a reminder to a habit with enhanced notification settings
- */
-const addReminder = async (req, res) => {
-    try {
-        const { habitId } = req.params;
-        const userId = req.user.user_id;
-        const {
-            time,
-            repeat = 'DAILY',
-            message,
-            pre_notification_minutes = 10,
-            follow_up_enabled = true,
-            follow_up_minutes = 30
-        } = req.body;
-
-        // Validate habit exists and belongs to user
-        const habit = await prisma.habit.findFirst({
-            where: {
-                habit_id: parseInt(habitId, 10),
-                user_id: userId
-            }
-        });
-
-        if (!habit) {
-            return res.status(404).json({
-                success: false,
-                message: 'Habit not found or you do not have permission to add a reminder'
-            });
-        }
-
-        if (!time) {
-            return res.status(400).json({
-                success: false,
-                message: 'Reminder time is required'
-            });
-        }
-
-        // Create the reminder with enhanced features
-        const newReminder = await prisma.habitReminder.create({
-            data: {
-                habit_id: parseInt(habitId, 10),
-                user_id: userId,
-                reminder_time: new Date(time),
-                repeat,
-                notification_message: message || `Time to complete your ${habit.name} habit!`,
-                is_enabled: true,
-                pre_notification_minutes,
-                follow_up_enabled,
-                follow_up_minutes
-            }
-        });
-
-        return res.status(201).json({
-            success: true,
-            message: 'Reminder added successfully',
-            data: newReminder
-        });
-    } catch (error) {
-        console.error('Error adding reminder:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to add reminder',
-            error: error.message
-        });
-    }
-};
-
-/**
- * Updates a habit's streak based on completion
- */
-async function updateHabitStreak(habit, userId, completionDate) {
-    try {
-        const habitId = habit.habit_id;
-        const streak = habit.streak[0];
-
-        if (!streak) {
-            // Create new streak record if none exists
-            await prisma.habitStreak.create({
-                data: {
-                    habit_id: habitId,
-                    user_id: userId,
-                    current_streak: 1,
-                    longest_streak: 1,
-                    last_completed: completionDate,
-                    start_date: completionDate,
-                    missed_days_count: 0,
-                    grace_period_used: false
-                }
-            });
-            return;
-        }
-
-        // Get the previous completion date
-        const lastCompleted = streak.last_completed ? new Date(streak.last_completed) : null;
-        lastCompleted?.setHours(0, 0, 0, 0);
-
-        // Determine if this completion continues a streak
-        if (!lastCompleted) {
-            // First completion ever
-            await prisma.habitStreak.update({
-                where: { streak_id: streak.streak_id },
-                data: {
-                    current_streak: 1,
-                    longest_streak: Math.max(1, streak.longest_streak),
-                    last_completed: completionDate,
-                    start_date: completionDate,
-                    missed_days_count: 0,
-                    grace_period_used: false
-                }
-            });
-            return;
-        }
-
-        // Handle streak continuation based on habit frequency
-        const newStreakValue = await determineNewStreakValue(
-            habit,
-            streak,
-            lastCompleted,
-            completionDate
-        );
-
-        // Update the streak record
-        await prisma.habitStreak.update({
-            where: { streak_id: streak.streak_id },
-            data: {
-                current_streak: newStreakValue,
-                longest_streak: Math.max(newStreakValue, streak.longest_streak),
-                last_completed: completionDate,
-                missed_days_count: 0,
-                grace_period_used: false,
-                // If we're starting a new streak, update the start date
-                ...(newStreakValue === 1 ? { start_date: completionDate } : {})
-            }
-        });
-    } catch (error) {
-        console.error('Error updating habit streak:', error);
-    }
-}
-
-/**
- * Determines the new streak value based on completion date and habit frequency
- */
-async function determineNewStreakValue(habit, streak, lastCompleted, completionDate) {
-    const currentStreak = streak.current_streak || 0;
-
-    // For daily habits
-    if (habit.frequency_type === 'DAILY') {
-        const oneDayAfterLastCompleted = new Date(lastCompleted);
-        oneDayAfterLastCompleted.setDate(lastCompleted.getDate() + 1);
-        oneDayAfterLastCompleted.setHours(0, 0, 0, 0);
-
-        // Check if this completion is on the same day or the day after
-        if (completionDate.getTime() === lastCompleted.getTime() ||
-            completionDate.getTime() === oneDayAfterLastCompleted.getTime()) {
-            return currentStreak + 1;
-        }
-
-        // Check if this is within grace period
-        if (habit.grace_period_enabled && !streak.grace_period_used) {
-            const gracePeriodEnd = new Date(lastCompleted);
-            gracePeriodEnd.setHours(gracePeriodEnd.getHours() + habit.grace_period_hours);
-
-            if (completionDate <= gracePeriodEnd) {
-                // Mark grace period as used
-                await prisma.habitStreak.update({
-                    where: { streak_id: streak.streak_id },
-                    data: { grace_period_used: true }
-                });
-                return currentStreak + 1;
-            }
-        }
-
-        // Otherwise, start a new streak
-        return 1;
-    }
-
-    // For non-daily habits, we need to check if this is the next expected date
-    const nextScheduledDate = getNextScheduledDate(habit, lastCompleted);
-
-    if (!nextScheduledDate) {
-        // If we can't determine next date, be lenient
-        return currentStreak + 1;
-    }
-
-    // Check if completion is on or before the next scheduled date
-    if (completionDate <= nextScheduledDate) {
-        return currentStreak + 1;
-    }
-
-    // Check for grace period
-    if (habit.grace_period_enabled && !streak.grace_period_used) {
-        const gracePeriodEnd = new Date(nextScheduledDate);
-        gracePeriodEnd.setHours(gracePeriodEnd.getHours() + habit.grace_period_hours);
-
-        if (completionDate <= gracePeriodEnd) {
-            await prisma.habitStreak.update({
-                where: { streak_id: streak.streak_id },
-                data: { grace_period_used: true }
-            });
-            return currentStreak + 1;
-        }
-    }
-
-    // Otherwise, start a new streak
-    return 1;
-}
-
-/**
- * Get the next scheduled date for a habit
- */
-function getNextScheduledDate(habit, fromDate) {
-    // For daily habits
-    if (habit.frequency_type === 'DAILY') {
-        const nextDate = new Date(fromDate);
-        nextDate.setDate(fromDate.getDate() + 1);
-        return nextDate;
-    }
-
-    // For weekdays
-    if (habit.frequency_type === 'WEEKDAYS') {
-        const nextDate = new Date(fromDate);
-        nextDate.setDate(fromDate.getDate() + 1);
-
-        // If it's Friday, the next weekday is Monday (+3 days)
-        if (fromDate.getDay() === 5) { // Friday
-            nextDate.setDate(fromDate.getDate() + 3);
-        }
-
-        return nextDate;
-    }
-
-    // For weekends
-    if (habit.frequency_type === 'WEEKENDS') {
-        const day = fromDate.getDay();
-        const nextDate = new Date(fromDate);
-
-        if (day === 0) { // Sunday -> next is Saturday (+6)
-            nextDate.setDate(fromDate.getDate() + 6);
-        } else if (day === 6) { // Saturday -> next is Sunday (+1)
-            nextDate.setDate(fromDate.getDate() + 1);
-        } else { // Weekday -> next is Saturday
-            nextDate.setDate(fromDate.getDate() + (6 - day));
-        }
-
-        return nextDate;
-    }
-
-    // For specific days, find the next occurrence
-    if (habit.frequency_type === 'SPECIFIC_DAYS' && Array.isArray(habit.specific_days)) {
-        const currentDay = fromDate.getDay();
-        const specificDays = [...habit.specific_days].sort();
-
-        // Find the next day in the cycle
-        const nextDayIndex = specificDays.findIndex(day => day > currentDay);
-
-        if (nextDayIndex !== -1) {
-            // Found a day later in the week
-            const daysToAdd = specificDays[nextDayIndex] - currentDay;
-            const nextDate = new Date(fromDate);
-            nextDate.setDate(fromDate.getDate() + daysToAdd);
-            return nextDate;
-        } else {
-            // Wrap around to the first day next week
-            const daysToAdd = 7 - currentDay + specificDays[0];
-            const nextDate = new Date(fromDate);
-            nextDate.setDate(fromDate.getDate() + daysToAdd);
-            return nextDate;
-        }
-    }
-
-    // For interval-based habits
-    if (habit.frequency_type === 'INTERVAL') {
-        const nextDate = new Date(fromDate);
-        nextDate.setDate(fromDate.getDate() + habit.frequency_interval);
-        return nextDate;
-    }
-
-    // For other types, default to next day
-    const nextDate = new Date(fromDate);
-    nextDate.setDate(fromDate.getDate() + 1);
-    return nextDate;
-}
-
-/**
- * Handle skipped habit logic
- */
-async function handleSkippedHabit(habit, userId, skipDate, reason, isVacation) {
-    try {
-        const streak = await prisma.habitStreak.findFirst({
-            where: {
-                habit_id: habit.habit_id,
-                user_id: userId
-            }
-        });
-
-        if (!streak) {
-            return;
-        }
-
-        // Vacation skips and skip_on_vacation don't affect streak
-        if (isVacation || habit.skip_on_vacation) {
-            // Just update the last skip reason, don't change streak
-            await prisma.habitStreak.update({
-                where: { streak_id: streak.streak_id },
-                data: {
-                    last_reset_reason: `SKIPPED_${isVacation ? 'VACATION' : 'USER'}`
-                }
-            });
-
-            return;
-        }
-
-        // For regular skips, reset the streak
-        await prisma.habitReset.create({
-            data: {
-                habit_id: habit.habit_id,
-                user_id: userId,
-                reset_date: new Date(),
-                previous_streak: streak.current_streak,
-                reason: 'USER_RESET',
-                user_initiated: true,
-                notes: reason || 'User skipped habit'
-            }
-        });
-
-        // Reset the streak
-        await prisma.habitStreak.update({
-            where: { streak_id: streak.streak_id },
-            data: {
-                current_streak: 0,
-                last_reset_reason: 'USER_SKIPPED',
-                grace_period_used: false
-            }
-        });
-    } catch (error) {
-        console.error('Error handling skipped habit:', error);
-    }
-}
-
-/**
- * Recalculate a habit's streak from scratch based on completion history
- */
-async function recalculateHabitStreak(habitId, userId) {
-    try {
-        // Get all completed logs for this habit
-        const completedLogs = await prisma.habitLog.findMany({
-            where: {
-                habit_id: habitId,
-                user_id: userId,
-                completed: true,
-                skipped: false
-            },
-            orderBy: { completed_at: 'asc' }
-        });
-
-        // Get the habit data for frequency info
-        const habit = await prisma.habit.findUnique({
-            where: { habit_id: habitId },
-            include: { streak: true }
-        });
-
-        if (!habit || completedLogs.length === 0) {
-            // Reset to 0 if no completions
-            if (habit?.streak?.length > 0) {
-                await prisma.habitStreak.update({
-                    where: { streak_id: habit.streak[0].streak_id },
-                    data: {
-                        current_streak: 0,
-                        last_completed: null,
-                        start_date: null,
-                        grace_period_used: false
-                    }
-                });
-            }
-            return;
-        }
-
-        // Process logs to find the current streak
-        let currentStreak = 1;
-        let longestStreak = 1;
-        let streakStart = new Date(completedLogs[0].completed_at);
-        let lastCompleted = new Date(completedLogs[0].completed_at);
-
-        for (let i = 1; i < completedLogs.length; i++) {
-            const currentLogDate = new Date(completedLogs[i].completed_at);
-            currentLogDate.setHours(0, 0, 0, 0);
-
-            const previousLogDate = new Date(completedLogs[i-1].completed_at);
-            previousLogDate.setHours(0, 0, 0, 0);
-
-            // Check if this log continues the streak based on habit frequency
-            const nextExpectedDate = getNextScheduledDate(habit, previousLogDate);
-
-            if (currentLogDate <= nextExpectedDate) {
-                // This log continues the streak
-                currentStreak++;
-                if (currentStreak > longestStreak) {
-                    longestStreak = currentStreak;
-                }
-            } else {
-                // Streak is broken, start a new one
-                currentStreak = 1;
-                streakStart = currentLogDate;
-            }
-
-            lastCompleted = currentLogDate;
-        }
-
-        // Update the streak record
-        if (habit.streak && habit.streak.length > 0) {
-            await prisma.habitStreak.update({
-                where: { streak_id: habit.streak[0].streak_id },
-                data: {
-                    current_streak: currentStreak,
-                    longest_streak: Math.max(longestStreak, habit.streak[0].longest_streak),
-                    last_completed: lastCompleted,
-                    start_date: streakStart,
-                    grace_period_used: false
-                }
-            });
-        } else {
-            // Create a new streak record if none exists
-            await prisma.habitStreak.create({
-                data: {
-                    habit_id: habitId,
-                    user_id: userId,
-                    current_streak: currentStreak,
-                    longest_streak: longestStreak,
-                    last_completed: lastCompleted,
-                    start_date: streakStart,
-                    missed_days_count: 0,
-                    grace_period_used: false
-                }
-            });
-        }
-    } catch (error) {
-        console.error('Error recalculating habit streak:', error);
-    }
-}
-
-/**
  * Update an existing habit
  */
 const updateHabit = async (req, res) => {
     try {
         const { habitId } = req.params;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
         const habitData = req.body;
 
         // Validate habit exists and belongs to user
@@ -1937,6 +1836,18 @@ const updateHabit = async (req, res) => {
                 success: false,
                 message: 'Habit not found or you do not have permission to update it'
             });
+        }
+
+        // Process tags if they exist
+        let processedTags = habitData.tags;
+        if (habitData.tags && typeof habitData.tags === 'string') {
+            try {
+                JSON.parse(habitData.tags);
+            } catch (error) {
+                processedTags = JSON.stringify(habitData.tags.split(',').map(tag => tag.trim()));
+            }
+        } else if (Array.isArray(habitData.tags)) {
+            processedTags = JSON.stringify(habitData.tags);
         }
 
         // Update the habit
@@ -1969,58 +1880,35 @@ const updateHabit = async (req, res) => {
                 skip_on_vacation: habitData.skip_on_vacation !== undefined ?
                     habitData.skip_on_vacation : existingHabit.skip_on_vacation,
                 require_evidence: habitData.require_evidence !== undefined ?
-                    habitData.require_evidence : existingHabit.require_evidence,
+                    habitData.require_evidence : existingHabit.require_evidence,location_based: habitData.location_based !== undefined ?
+                    habitData.location_based : existingHabit.location_based,
+                location_name: habitData.location_name !== undefined ?
+                    habitData.location_name : existingHabit.location_name,
+                location_lat: habitData.location_lat !== undefined ?
+                    parseFloat(habitData.location_lat) : existingHabit.location_lat,
+                location_lng: habitData.location_lng !== undefined ?
+                    parseFloat(habitData.location_lng) : existingHabit.location_lng,
+                location_radius: habitData.location_radius !== undefined ?
+                    parseInt(habitData.location_radius, 10) : existingHabit.location_radius,
                 motivation_quote: habitData.motivation_quote !== undefined ?
                     habitData.motivation_quote : existingHabit.motivation_quote,
                 external_resource_url: habitData.external_resource_url !== undefined ?
                     habitData.external_resource_url : existingHabit.external_resource_url,
-                tags: habitData.tags !== undefined ?
-                    (typeof habitData.tags === 'string' ? habitData.tags : JSON.stringify(habitData.tags)) : existingHabit.tags,
+                tags: processedTags !== undefined ? processedTags : existingHabit.tags,
                 cue: habitData.cue !== undefined ? habitData.cue : existingHabit.cue,
                 reward: habitData.reward !== undefined ? habitData.reward : existingHabit.reward,
                 difficulty: habitData.difficulty || existingHabit.difficulty,
-                domain_id: habitData.domain_id ? parseInt(habitData.domain_id, 10) : existingHabit.domain_id,
+                domain_id: habitData.domain_id ?
+                    parseInt(habitData.domain_id, 10) : existingHabit.domain_id,
                 grace_period_enabled: habitData.grace_period_enabled !== undefined ?
                     habitData.grace_period_enabled : existingHabit.grace_period_enabled,
-                grace_period_hours: habitData.grace_period_hours ?
-                    parseInt(habitData.grace_period_hours, 10) : existingHabit.grace_period_hours
+                grace_period_hours: habitData.grace_period_hours !== undefined ?
+                    parseInt(habitData.grace_period_hours, 10) : existingHabit.grace_period_hours,
+                points_per_completion: habitData.points_per_completion !== undefined ?
+                    parseInt(habitData.points_per_completion, 10) : existingHabit.points_per_completion,
+                bonus_points_streak: habitData.bonus_points_streak !== undefined ?
+                    parseInt(habitData.bonus_points_streak, 10) : existingHabit.bonus_points_streak
             },
-            include: {
-                domain: true,
-                streak: true
-            }
-        });
-
-        // Update reminders if provided
-        if (habitData.reminders && Array.isArray(habitData.reminders)) {
-            // Delete existing reminders first
-            await prisma.habitReminder.deleteMany({
-                where: { habit_id: parseInt(habitId, 10) }
-            });
-
-            // Add new reminders
-            if (habitData.reminders.length > 0) {
-                const reminderData = habitData.reminders.map(reminder => ({
-                    habit_id: parseInt(habitId, 10),
-                    user_id: userId,
-                    reminder_time: new Date(reminder.time),
-                    repeat: reminder.repeat || 'DAILY',
-                    notification_message: reminder.message || `Time to complete your ${updatedHabit.name} habit!`,
-                    is_enabled: true,
-                    pre_notification_minutes: reminder.pre_notification_minutes || 10,
-                    follow_up_enabled: reminder.follow_up_enabled !== undefined ? reminder.follow_up_enabled : true,
-                    follow_up_minutes: reminder.follow_up_minutes || 30
-                }));
-
-                await prisma.habitReminder.createMany({
-                    data: reminderData
-                });
-            }
-        }
-
-        // Get the habit with all related data (including new reminders)
-        const habitWithRelations = await prisma.habit.findUnique({
-            where: { habit_id: parseInt(habitId, 10) },
             include: {
                 domain: true,
                 reminders: true,
@@ -2028,10 +1916,56 @@ const updateHabit = async (req, res) => {
             }
         });
 
+        // Handle reminders update if provided
+        if (habitData.reminders && Array.isArray(habitData.reminders)) {
+            // First delete existing reminders
+            await prisma.habitReminder.deleteMany({
+                where: {
+                    habit_id: parseInt(habitId, 10),
+                    user_id: userId
+                }
+            });
+
+            // Then create new reminders
+            const reminderData = habitData.reminders.map(reminder => ({
+                habit_id: parseInt(habitId, 10),
+                user_id: userId,
+                reminder_time: new Date(reminder.time),
+                repeat: reminder.repeat || 'DAILY',
+                notification_message: reminder.message || `Time to complete your habit: ${updatedHabit.name}`,
+                is_enabled: reminder.is_enabled !== undefined ? reminder.is_enabled : true,
+                pre_notification_minutes: reminder.pre_notification_minutes || 10,
+                follow_up_enabled: reminder.follow_up_enabled !== undefined ? reminder.follow_up_enabled : true,
+                follow_up_minutes: reminder.follow_up_minutes || 30
+            }));
+
+            if (reminderData.length > 0) {
+                await prisma.habitReminder.createMany({
+                    data: reminderData
+                });
+            }
+
+            // Fetch updated habit with new reminders
+            const habitWithReminders = await prisma.habit.findUnique({
+                where: { habit_id: parseInt(habitId, 10) },
+                include: {
+                    domain: true,
+                    reminders: true,
+                    streak: true
+                }
+            });
+
+            return res.status(200).json({
+                success: true,
+                message: 'Habit updated successfully with new reminders',
+                data: habitWithReminders
+            });
+        }
+
         return res.status(200).json({
             success: true,
             message: 'Habit updated successfully',
-            data: habitWithRelations
+            data: updatedHabit
         });
     } catch (error) {
         console.error('Error updating habit:', error);
@@ -2044,9 +1978,391 @@ const updateHabit = async (req, res) => {
 };
 
 /**
- * Toggle a habit's favorite status
+ * Delete a habit
  */
-const toggleFavorite = async (req, res) => {
+const deleteHabit = async (req, res) => {
+    try {
+        const { habitId } = req.params;
+        const userId = parseInt(req.user);
+
+        // Validate habit exists and belongs to user
+        const habit = await prisma.habit.findFirst({
+            where: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId
+            }
+        });
+
+        if (!habit) {
+            return res.status(404).json({
+                success: false,
+                message: 'Habit not found or you do not have permission to delete it'
+            });
+        }
+
+        // Delete related entities first to avoid foreign key constraints
+        // Delete reminders
+        await prisma.habitReminder.deleteMany({
+            where: {
+                habit_id: parseInt(habitId, 10)
+            }
+        });
+
+        // Delete daily statuses
+        await prisma.habitDailyStatus.deleteMany({
+            where: {
+                habit_id: parseInt(habitId, 10)
+            }
+        });
+
+        // Delete streak data
+        await prisma.habitStreak.deleteMany({
+            where: {
+                habit_id: parseInt(habitId, 10)
+            }
+        });
+
+        // Delete streak resets
+        await prisma.habitReset.deleteMany({
+            where: {
+                habit_id: parseInt(habitId, 10)
+            }
+        });
+
+        // Delete logs
+        await prisma.habitLog.deleteMany({
+            where: {
+                habit_id: parseInt(habitId, 10)
+            }
+        });
+
+        // Finally delete the habit
+        await prisma.habit.delete({
+            where: {
+                habit_id: parseInt(habitId, 10)
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Habit and all related data deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting habit:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to delete habit',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Archive a habit (mark as inactive)
+ */
+const archiveHabit = async (req, res) => {
+    try {
+        const { habitId } = req.params;
+        const userId = parseInt(req.user);
+
+        // Validate habit exists and belongs to user
+        const habit = await prisma.habit.findFirst({
+            where: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId
+            }
+        });
+
+        if (!habit) {
+            return res.status(404).json({
+                success: false,
+                message: 'Habit not found or you do not have permission to archive it'
+            });
+        }
+
+        // Update habit to inactive
+        const updatedHabit = await prisma.habit.update({
+            where: {
+                habit_id: parseInt(habitId, 10)
+            },
+            data: {
+                is_active: false
+            },
+            include: {
+                domain: true,
+                streak: true
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Habit archived successfully',
+            data: updatedHabit
+        });
+    } catch (error) {
+        console.error('Error archiving habit:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to archive habit',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Restore an archived habit (mark as active)
+ */
+const restoreHabit = async (req, res) => {
+    try {
+        const { habitId } = req.params;
+        const userId = parseInt(req.user);
+
+        // Validate habit exists and belongs to user
+        const habit = await prisma.habit.findFirst({
+            where: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId
+            }
+        });
+
+        if (!habit) {
+            return res.status(404).json({
+                success: false,
+                message: 'Habit not found or you do not have permission to restore it'
+            });
+        }
+
+        // Update habit to active
+        const updatedHabit = await prisma.habit.update({
+            where: {
+                habit_id: parseInt(habitId, 10)
+            },
+            data: {
+                is_active: true
+            },
+            include: {
+                domain: true,
+                streak: true
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Habit restored successfully',
+            data: updatedHabit
+        });
+    } catch (error) {
+        console.error('Error restoring habit:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to restore habit',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get the next scheduled occurrence of a habit after a given date
+ */
+const getNextOccurrence = async (habit, startDate = new Date()) => {
+    try {
+        // Create a copy of the start date to avoid modifying the original
+        let currentDate = new Date(startDate);
+        currentDate.setHours(0, 0, 0, 0);
+
+        // Check the next 30 days at most
+        for (let i = 1; i <= 30; i++) {
+            // Move to the next day
+            currentDate.setDate(currentDate.getDate() + 1);
+
+            // Check if the habit is scheduled for this date
+            const isScheduled = await isHabitScheduledForDate(habit, currentDate);
+
+            if (isScheduled) {
+                return currentDate;
+            }
+        }
+
+        // If no occurrence found in the next 30 days, return null
+        return null;
+    } catch (error) {
+        console.error('Error getting next occurrence:', error);
+        return null;
+    }
+};
+
+/**
+ * Reset a habit streak manually
+ */
+const resetHabitStreak = async (req, res) => {
+    try {
+        const { habitId } = req.params;
+        const userId = parseInt(req.user);
+        const { reason, notes } = req.body;
+
+        // Validate habit exists and belongs to user
+        const habit = await prisma.habit.findFirst({
+            where: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId
+            },
+            include: {
+                streak: true
+            }
+        });
+
+        if (!habit) {
+            return res.status(404).json({
+                success: false,
+                message: 'Habit not found or you do not have permission to reset its streak'
+            });
+        }
+
+        if (!habit.streak || habit.streak.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No streak record found for this habit'
+            });
+        }
+
+        const currentStreak = habit.streak[0].current_streak;
+
+        // Create reset record
+        await prisma.habitReset.create({
+            data: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId,
+                reset_date: new Date(),
+                previous_streak: currentStreak,
+                reason: reason || 'USER_INITIATED',
+                user_initiated: true,
+                notes: notes || 'Manually reset by user.'
+            }
+        });
+
+        // Reset the streak
+        const updatedStreak = await prisma.habitStreak.update({
+            where: { streak_id: habit.streak[0].streak_id },
+            data: {
+                current_streak: 0,
+                last_reset_reason: reason || 'USER_INITIATED',
+                grace_period_used: false
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Habit streak reset successfully',
+            data: {
+                habit_id: parseInt(habitId, 10),
+                previous_streak: currentStreak,
+                new_streak: 0,
+                reset_reason: reason || 'USER_INITIATED',
+                reset_date: new Date()
+            }
+        });
+    } catch (error) {
+        console.error('Error resetting habit streak:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to reset habit streak',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Set a custom streak for a habit
+ */
+const setHabitStreak = async (req, res) => {
+    try {
+        const { habitId } = req.params;
+        const userId = parseInt(req.user);
+        const { streak, reason } = req.body;
+
+        if (streak === undefined || isNaN(parseInt(streak, 10))) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid streak value is required'
+            });
+        }
+
+        // Validate habit exists and belongs to user
+        const habit = await prisma.habit.findFirst({
+            where: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId
+            },
+            include: {
+                streak: true
+            }
+        });
+
+        if (!habit) {
+            return res.status(404).json({
+                success: false,
+                message: 'Habit not found or you do not have permission to update its streak'
+            });
+        }
+
+        if (!habit.streak || habit.streak.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No streak record found for this habit'
+            });
+        }
+
+        const newStreakValue = parseInt(streak, 10);
+        const currentStreak = habit.streak[0].current_streak;
+
+        // Create an adjustment record
+        await prisma.habitReset.create({
+            data: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId,
+                reset_date: new Date(),
+                previous_streak: currentStreak,
+                reason: 'MANUAL_ADJUSTMENT',
+                user_initiated: true,
+                notes: reason || `Manually adjusted streak from ${currentStreak} to ${newStreakValue}.`
+            }
+        });
+
+        // Update the streak
+        const updatedStreak = await prisma.habitStreak.update({
+            where: { streak_id: habit.streak[0].streak_id },
+            data: {
+                current_streak: newStreakValue,
+                longest_streak: Math.max(newStreakValue, habit.streak[0].longest_streak),
+                last_reset_reason: 'MANUAL_ADJUSTMENT'
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Habit streak updated successfully',
+            data: {
+                habit_id: parseInt(habitId, 10),
+                previous_streak: currentStreak,
+                new_streak: newStreakValue,
+                longest_streak: updatedStreak.longest_streak,
+                adjustment_reason: reason || 'Manual adjustment by user'
+            }
+        });
+    } catch (error) {
+        console.error('Error setting habit streak:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to set habit streak',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Toggle a habit as favorite/unfavorite
+ */
+const toggleFavoriteHabit = async (req, res) => {
     try {
         const { habitId } = req.params;
         const userId = parseInt(req.user);
@@ -2068,32 +2384,420 @@ const toggleFavorite = async (req, res) => {
 
         // Toggle the favorite status
         const updatedHabit = await prisma.habit.update({
-            where: { habit_id: parseInt(habitId, 10) },
-            data: { is_favorite: !habit.is_favorite }
+            where: {
+                habit_id: parseInt(habitId, 10)
+            },
+            data: {
+                is_favorite: !habit.is_favorite
+            }
         });
 
         return res.status(200).json({
             success: true,
-            message: `Habit ${updatedHabit.is_favorite ? 'added to' : 'removed from'} favorites`,
-            data: { is_favorite: updatedHabit.is_favorite }
+            message: updatedHabit.is_favorite ? 'Habit marked as favorite' : 'Habit removed from favorites',
+            data: {
+                habit_id: parseInt(habitId, 10),
+                is_favorite: updatedHabit.is_favorite
+            }
         });
     } catch (error) {
         console.error('Error toggling favorite status:', error);
         return res.status(500).json({
             success: false,
-            message: 'Failed to update favorite status',
+            message: 'Failed to toggle favorite status',
             error: error.message
         });
     }
 };
 
 /**
- * Toggle a habit's active status
+ * Helper function to update habit streak after completion
  */
-const toggleActive = async (req, res) => {
+const updateHabitStreak = async (habit, userId, completionDate) => {
+    try {
+        if (!habit.streak || habit.streak.length === 0) {
+            // Create streak record if it doesn't exist
+            const newStreak = await prisma.habitStreak.create({
+                data: {
+                    habit_id: habit.habit_id,
+                    user_id: userId,
+                    current_streak: 1,
+                    longest_streak: 1,
+                    start_date: completionDate,
+                    missed_days_count: 0
+                }
+            });
+
+            return {
+                previousStreak: 0,
+                newStreak: 1,
+                longestStreak: 1
+            };
+        }
+
+        const streakRecord = habit.streak[0];
+        let { current_streak, longest_streak } = streakRecord;
+
+        // Get previous completion for this habit
+        const previousCompletion = await prisma.habitDailyStatus.findFirst({
+            where: {
+                habit_id: habit.habit_id,
+                user_id: userId,
+                is_completed: true,
+                date: {
+                    lt: completionDate
+                }
+            },
+            orderBy: {
+                date: 'desc'
+            }
+        });
+
+        // Calculate if this is a streak continuation
+        let isStreakContinuation = false;
+        let daysSinceLastCompletion = 0;
+
+        if (previousCompletion) {
+            const previousDate = new Date(previousCompletion.date);
+            previousDate.setHours(0, 0, 0, 0);
+
+            // Calculate days between completions
+            daysSinceLastCompletion = Math.round(
+                (completionDate.getTime() - previousDate.getTime()) / (24 * 60 * 60 * 1000)
+            );
+
+            // Streak continues if completed the next day or same day
+            if (daysSinceLastCompletion <= 1) {
+                isStreakContinuation = true;
+            }
+            // Check grace period if enabled
+            else if (habit.grace_period_enabled && daysSinceLastCompletion <= (habit.grace_period_hours / 24 + 1)) {
+                isStreakContinuation = true;
+
+                // Update streak to indicate grace period was used
+                await prisma.habitStreak.update({
+                    where: { streak_id: streakRecord.streak_id },
+                    data: { grace_period_used: true }
+                });
+            }
+        } else {
+            // First completion ever, start streak at 1
+            isStreakContinuation = true;
+        }
+
+        let previousStreak = current_streak;
+
+        if (isStreakContinuation) {
+            // Only increment streak if this isn't a duplicate completion for the same day
+            if (daysSinceLastCompletion > 0) {
+                current_streak += 1;
+
+                // Update longest streak if needed
+                longest_streak = Math.max(current_streak, longest_streak);
+            }
+        } else {
+            // Streak was broken, reset to 1
+            current_streak = 1;
+        }
+
+        // Update the streak record
+        await prisma.habitStreak.update({
+            where: {
+                streak_id: streakRecord.streak_id
+            },
+            data: {
+                current_streak,
+                longest_streak,
+                last_completed: completionDate
+            }
+        });
+
+        return {
+            previousStreak,
+            newStreak: current_streak,
+            longestStreak: longest_streak,
+            isStreakContinuation
+        };
+    } catch (error) {
+        console.error('Error updating habit streak:', error);
+        throw error;
+    }
+};
+
+/**
+ * Helper function to handle skipped habits with streak maintenance
+ */
+const handleSkippedHabit = async (habit, userId, skipDate, skipReason, maintainStreak = false) => {
+    try {
+        // If this skip shouldn't affect streak, just return current streak
+        if (maintainStreak) {
+            // Get current streak
+            const streakRecord = await prisma.habitStreak.findFirst({
+                where: {
+                    habit_id: habit.habit_id,
+                    user_id: userId
+                }
+            });
+
+            if (!streakRecord) {
+                return { currentStreak: 0 };
+            }
+
+            return { currentStreak: streakRecord.current_streak };
+        }
+
+        // Otherwise reset streak to 0
+        const streakRecord = await prisma.habitStreak.findFirst({
+            where: {
+                habit_id: habit.habit_id,
+                user_id: userId
+            }
+        });
+
+        if (!streakRecord) {
+            return { currentStreak: 0 };
+        }
+
+        const currentStreak = streakRecord.current_streak;
+
+        // Only create reset record if there was a streak to lose
+        if (currentStreak > 0) {
+            // Create reset record
+            await prisma.habitReset.create({
+                data: {
+                    habit_id: habit.habit_id,
+                    user_id: userId,
+                    reset_date: new Date(),
+                    previous_streak: currentStreak,
+                    reason: 'USER_SKIPPED',
+                    user_initiated: true,
+                    notes: skipReason || 'User skipped this habit.'
+                }
+            });
+
+            // Reset streak
+            await prisma.habitStreak.update({
+                where: { streak_id: streakRecord.streak_id },
+                data: {
+                    current_streak: 0,
+                    missed_days_count: streakRecord.missed_days_count + 1,
+                    last_reset_reason: 'USER_SKIPPED'
+                }
+            });
+
+            // Notify about significant streak loss
+            if (currentStreak >= 7) {
+                await prisma.notification.create({
+                    data: {
+                        user_id: userId,
+                        title: 'Streak Reset',
+                        content: `Your ${currentStreak}-day streak for "${habit.name}" was reset because you skipped today's completion.`,
+                        type: 'STREAK_MILESTONE',
+                        related_id: habit.habit_id
+                    }
+                });
+            }
+        }
+
+        return { currentStreak: 0, previousStreak: currentStreak };
+    } catch (error) {
+        console.error('Error handling skipped habit:', error);
+        throw error;
+    }
+};
+
+/**
+ * Helper function to recalculate a habit streak from all completion records
+ */
+const recalculateHabitStreak = async (habitId, userId) => {
+    try {
+        // Get all completed daily statuses, ordered by date
+        const completions = await prisma.habitDailyStatus.findMany({
+            where: {
+                habit_id: habitId,
+                user_id: userId,
+                is_completed: true
+            },
+            orderBy: {
+                date: 'asc'
+            }
+        });
+
+        if (completions.length === 0) {
+            // No completions, reset streak to 0
+            return await prisma.habitStreak.update({
+                where: {
+                    habit_id_user_id: {
+                        habit_id: habitId,
+                        user_id: userId
+                    }
+                },
+                data: {
+                    current_streak: 0,
+                    longest_streak: 0
+                }
+            });
+        }
+
+        // Get the habit with grace period settings
+        const habit = await prisma.habit.findUnique({
+            where: { habit_id: habitId }
+        });
+
+        // Calculate current streak
+        let currentStreak = 1; // Start with 1 for the first completion
+        let longestStreak = 1;
+        let previousDate = new Date(completions[0].date);
+
+        // Skip the first entry since we've already counted it
+        for (let i = 1; i < completions.length; i++) {
+            const currentDate = new Date(completions[i].date);
+
+            // Calculate days between completions
+            const daysBetween = Math.round(
+                (currentDate.getTime() - previousDate.getTime()) / (24 * 60 * 60 * 1000)
+            );
+
+            // Check if this is a continuation (1 day apart or within grace period)
+            if (daysBetween === 1 ||
+                (habit.grace_period_enabled && daysBetween <= (habit.grace_period_hours / 24 + 1))) {
+                // This is a continuation
+                currentStreak++;
+            } else if (daysBetween === 0) {
+                // Same day, don't count
+                continue;
+            } else {
+                // The streak was broken
+                currentStreak = 1;
+            }
+
+            // Update longest streak if needed
+            longestStreak = Math.max(currentStreak, longestStreak);
+
+            // Update previous date
+            previousDate = currentDate;
+        }
+
+        // Check if streak is still active
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const lastCompletionDate = new Date(completions[completions.length - 1].date);
+        lastCompletionDate.setHours(0, 0, 0, 0);
+
+        const daysSinceLastCompletion = Math.round(
+            (today.getTime() - lastCompletionDate.getTime()) / (24 * 60 * 60 * 1000)
+        );
+
+        // If it's been more than the grace period since the last completion, reset current streak
+        if (daysSinceLastCompletion > 1 &&
+            !(habit.grace_period_enabled && daysSinceLastCompletion <= (habit.grace_period_hours / 24 + 1))) {
+            currentStreak = 0;
+        }
+
+        // Update streak record
+        return await prisma.habitStreak.update({
+            where: {
+                habit_id_user_id: {
+                    habit_id: habitId,
+                    user_id: userId
+                }
+            },
+            data: {
+                current_streak: currentStreak,
+                longest_streak: longestStreak,
+                last_completion_date: completions[completions.length - 1].date
+            }
+        });
+    } catch (error) {
+        console.error('Error recalculating habit streak:', error);
+        throw error;
+    }
+};
+
+/**
+ * Helper function to check for streak milestones and award bonus points
+ */
+const checkAndAwardStreakMilestone = async (habit, userId, streakLength) => {
+    try {
+        // Check if this streak length is a milestone
+        const milestones = [7, 14, 30, 60, 90, 180, 365];
+
+        if (!milestones.includes(streakLength)) {
+            return null;
+        }
+
+        // Calculate bonus points based on milestone
+        let bonusPoints = 0;
+
+        if (streakLength >= 365) {
+            bonusPoints = 300;
+        } else if (streakLength >= 180) {
+            bonusPoints = 150;
+        } else if (streakLength >= 90) {
+            bonusPoints = 75;
+        } else if (streakLength >= 60) {
+            bonusPoints = 50;
+        } else if (streakLength >= 30) {
+            bonusPoints = 30;
+        } else if (streakLength >= 14) {
+            bonusPoints = 15;
+        } else if (streakLength >= 7) {
+            bonusPoints = 10;
+        }
+
+        if (bonusPoints > 0) {
+            // Create points log entry for milestone
+            await prisma.pointsLog.create({
+                data: {
+                    user_id: userId,
+                    points: bonusPoints,
+                    reason: `Streak Milestone: ${streakLength} Days`,
+                    description: `You've maintained "${habit.name}" for ${streakLength} days in a row!`,
+                    source_type: 'STREAK_MILESTONE',
+                    source_id: habit.habit_id
+                }
+            });
+
+            // Update user's total points
+            await prisma.user.update({
+                where: { user_id: userId },
+                data: {
+                    points_gained: { increment: bonusPoints }
+                }
+            });
+
+            // Create notification
+            await prisma.notification.create({
+                data: {
+                    user_id: userId,
+                    title: `${streakLength}-Day Streak Achieved!`,
+                    content: `Congratulations! You've kept up your habit "${habit.name}" for ${streakLength} days and earned ${bonusPoints} bonus points!`,
+                    type: 'STREAK_MILESTONE',
+                    related_id: habit.habit_id
+                }
+            });
+
+            return {
+                milestone: streakLength,
+                bonusPoints
+            };
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Error checking streak milestone:', error);
+        return null;
+    }
+};
+
+/**
+ * Get habit streak history with detailed analysis
+ */
+const getHabitStreakHistory = async (req, res) => {
     try {
         const { habitId } = req.params;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         // Validate habit exists and belongs to user
         const habit = await prisma.habit.findFirst({
@@ -2106,283 +2810,1158 @@ const toggleActive = async (req, res) => {
         if (!habit) {
             return res.status(404).json({
                 success: false,
-                message: 'Habit not found or you do not have permission to update it'
+                message: 'Habit not found or you do not have permission to view its streak history'
             });
         }
 
-        // Toggle the active status
-        const updatedHabit = await prisma.habit.update({
-            where: { habit_id: parseInt(habitId, 10) },
-            data: { is_active: !habit.is_active }
-        });
-
-        return res.status(200).json({
-            success: true,
-            message: `Habit ${updatedHabit.is_active ? 'activated' : 'paused'}`,
-            data: { is_active: updatedHabit.is_active }
-        });
-    } catch (error) {
-        console.error('Error toggling active status:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to update active status',
-            error: error.message
-        });
-    }
-};
-
-/**
- * Delete a habit
- */
-const deleteHabit = async (req, res) => {
-    try {
-        const { habitId } = req.params;
-        const userId = req.user.user_id;
-
-        // Validate habit exists and belongs to user
-        const habit = await prisma.habit.findFirst({
+        // Get current streak
+        const streak = await prisma.habitStreak.findFirst({
             where: {
                 habit_id: parseInt(habitId, 10),
                 user_id: userId
             }
         });
 
-        if (!habit) {
-            return res.status(404).json({
-                success: false,
-                message: 'Habit not found or you do not have permission to delete it'
-            });
-        }
-
-        // Delete habit and related records will cascade delete
-        await prisma.habit.delete({
-            where: { habit_id: parseInt(habitId, 10) }
-        });
-
-        // Update user's total habits created
-        await prisma.user.update({
-            where: { user_id: userId },
-            data: { totalHabitsCreated: { decrement: 1 } }
-        });
-
-        return res.status(200).json({
-            success: true,
-            message: 'Habit deleted successfully'
-        });
-    } catch (error) {
-        console.error('Error deleting habit:', error);
-        return res.status(500).json({
-            success: false,
-            message: 'Failed to delete habit',
-            error: error.message
-        });
-    }
-};
-
-/**
- * Copy/clone an existing habit
- */
-const copyHabit = async (req, res) => {
-    try {
-        const { habitId } = req.params;
-        const userId = req.user.user_id;
-        const { newName } = req.body;
-
-        // Validate habit exists and belongs to user
-        const sourceHabit = await prisma.habit.findFirst({
+        // Get streak reset history
+        const resets = await prisma.habitReset.findMany({
             where: {
                 habit_id: parseInt(habitId, 10),
                 user_id: userId
             },
-            include: {
-                reminders: true
-            }
+            orderBy: {
+                reset_date: 'desc'
+            },
+            take: 10
         });
 
-        if (!sourceHabit) {
-            return res.status(404).json({
-                success: false,
-                message: 'Habit not found or you do not have permission to copy it'
-            });
+        // Get completion history for analysis
+        const completions = await prisma.habitDailyStatus.findMany({
+            where: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId,
+                is_completed: true
+            },
+            orderBy: {
+                date: 'desc'
+            },
+            take: 90 // Get last 90 days of completions for analysis
+        });
+
+        // Analyze completion patterns
+        const completionDates = completions.map(c => new Date(c.date));
+
+        // Calculate current active streak
+        let currentStreak = streak?.current_streak || 0;
+
+        // Calculate longest ever streak
+        let longestStreak = streak?.longest_streak || 0;
+
+        // Calculate streak reliability (percentage of days kept in the habit)
+        let streakReliability = 0;
+
+        if (completions.length > 0) {
+            // Get date range
+            const oldestCompletion = new Date(Math.min(...completionDates.map(d => d.getTime())));
+            const latestCompletion = new Date(Math.max(...completionDates.map(d => d.getTime())));
+
+            // Calculate total days in range
+            const totalDaysInRange = Math.round(
+                (latestCompletion.getTime() - oldestCompletion.getTime()) / (24 * 60 * 60 * 1000)
+            ) + 1;
+
+            // Calculate reliability
+            streakReliability = totalDaysInRange > 0
+                ? (completions.length / totalDaysInRange) * 100
+                : 0;
         }
 
-        // Create new habit with data from source habit
-        const { habit_id, user_id, createdAt, updatedAt, ...habitData } = sourceHabit;
-
-        const newHabit = await prisma.habit.create({
-            data: {
-                ...habitData,
-                name: newName || `Copy of ${sourceHabit.name}`,
-                user_id: userId,
-                start_date: new Date(),
-                is_active: true,
-                reminders: undefined // We'll create reminders separately
+        // Get total resets
+        const totalResetCount = await prisma.habitReset.count({
+            where: {
+                habit_id: parseInt(habitId, 10),
+                user_id: userId
             }
         });
 
-        // Create streak record for the new habit
-        await prisma.habitStreak.create({
+        // Get missed days count
+        const missedDaysCount = streak?.missed_days_count || 0;
+
+        // Calculate completion rate by day of week to find patterns
+        const completionsByDayOfWeek = [0, 0, 0, 0, 0, 0, 0]; // Sun, Mon, ..., Sat
+
+        completionDates.forEach(date => {
+            const dayOfWeek = date.getDay();
+            completionsByDayOfWeek[dayOfWeek]++;
+        });
+
+        // Find strongest and weakest days
+        let strongestDay = 0;
+        let weakestDay = 0;
+        let maxCompletions = completionsByDayOfWeek[0];
+        let minCompletions = completionsByDayOfWeek[0];
+
+        for (let i = 1; i < 7; i++) {
+            if (completionsByDayOfWeek[i] > maxCompletions) {
+                maxCompletions = completionsByDayOfWeek[i];
+                strongestDay = i;
+            }
+
+            if (completionsByDayOfWeek[i] < minCompletions) {
+                minCompletions = completionsByDayOfWeek[i];
+                weakestDay = i;
+            }
+        }
+
+        // Calculate streak trends (improving or declining)
+        let streakTrend = 'stable';
+
+        if (resets.length >= 2) {
+            // Calculate average streak length before last few resets
+            const avgLastFewStreaks = resets.slice(0, Math.min(5, resets.length))
+                .reduce((sum, reset) => sum + reset.previous_streak, 0) / Math.min(5, resets.length);
+
+            if (currentStreak > avgLastFewStreaks * 1.5) {
+                streakTrend = 'improving';
+            } else if (currentStreak < avgLastFewStreaks * 0.5) {
+                streakTrend = 'declining';
+            }
+        }
+
+        // Get days of the week as strings
+        const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+        return res.status(200).json({
+            success: true,
             data: {
-                habit_id: newHabit.habit_id,
-                user_id: userId,
+                habit_id: parseInt(habitId, 10),
+                name: habit.name,
+                current_streak: currentStreak,
+                longest_streak: longestStreak,
+                resets: resets,
+                total_completions: completions.length,
+                streak_reliability: Math.round(streakReliability * 10) / 10,
+                total_reset_count: totalResetCount,
+                missed_days_count: missedDaysCount,
+                completions_by_day: daysOfWeek.map((day, index) => ({
+                    day,
+                    count: completionsByDayOfWeek[index]
+                })),
+                strongest_day: daysOfWeek[strongestDay],
+                weakest_day: daysOfWeek[weakestDay],
+                streak_trend: streakTrend,
+                grace_period_enabled: habit.grace_period_enabled,
+                grace_period_hours: habit.grace_period_hours
+            }
+        });
+    } catch (error) {
+        console.error('Error getting habit streak history:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve habit streak history',
+            error: error.message
+        });
+    }
+};
+
+/**
+ * Get habit analytics for a specific time period
+ */
+/**
+ * Get comprehensive habit analytics with enhanced metrics and insights
+ * Provides detailed analysis for habits with various tracking types
+ */
+// More robust date handling for getHabitAnalytics
+    const getHabitAnalytics = async (req, res) => {
+        try {
+            const { habitId } = req.params;
+            const userId = parseInt(req.user);
+            const {
+                period = 'month',
+                start_date,
+                end_date,
+                include_logs = 'true',
+                max_logs = 50,
+                compare_to_previous = 'false'
+            } = req.query;
+    
+            // Validate habit exists and belongs to user
+            const habit = await prisma.habit.findFirst({
+                where: {
+                    habit_id: parseInt(habitId, 10),
+                    user_id: userId
+                },
+                include: {
+                    streak: true,
+                    domain: true
+                }
+            });
+    
+            if (!habit) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Habit not found or you do not have permission to view its analytics'
+                });
+            }
+    
+            // Set default end date to now
+            const endDate = new Date();
+            endDate.setHours(23, 59, 59, 999);
+    
+            // Calculate start date based on period
+            let startDate = new Date(endDate);
+    
+            switch (period) {
+                case 'week':
+                    // Last 7 days
+                    startDate.setDate(startDate.getDate() - 7);
+                    break;
+                case 'month':
+                    // Last 30 days
+                    startDate.setDate(startDate.getDate() - 30);
+                    break;
+                case 'quarter':
+                    // Last 90 days
+                    startDate.setDate(startDate.getDate() - 90);
+                    break;
+                case 'year':
+                    // Last 365 days
+                    startDate.setDate(startDate.getDate() - 365);
+                    break;
+                default:
+                    // Default to last 30 days
+                    startDate.setDate(startDate.getDate() - 30);
+            }
+    
+            // Set start date to beginning of day
+            startDate.setHours(0, 0, 0, 0);
+    
+            // Calculate previous period (for comparison)
+            const previousPeriodStartDate = new Date(startDate);
+            const previousPeriodEndDate = new Date(endDate);
+            const periodDuration = endDate.getTime() - startDate.getTime();
+            previousPeriodStartDate.setTime(previousPeriodStartDate.getTime() - periodDuration);
+            previousPeriodEndDate.setTime(previousPeriodEndDate.getTime() - periodDuration);
+    
+            // Get daily statuses for the period
+            const dailyStatuses = await prisma.habitDailyStatus.findMany({
+                where: {
+                    habit_id: parseInt(habitId, 10),
+                    user_id: userId,
+                    date: {
+                        gte: startDate,
+                        lte: endDate
+                    }
+                },
+                orderBy: {
+                    date: 'asc'
+                }
+            });
+    
+            // Get logs for the period with additional data
+            const logs = await prisma.habitLog.findMany({
+                where: {
+                    habit_id: parseInt(habitId, 10),
+                    user_id: userId,
+                    completed_at: {
+                        gte: startDate,
+                        lte: endDate
+                    }
+                },
+                orderBy: {
+                    completed_at: 'desc'
+                },
+                take: parseInt(max_logs, 10) || 50
+            });
+    
+            // Get previous period data for comparison if requested
+            let previousPeriodStats = null;
+            if (compare_to_previous === 'true') {
+                try {
+                    const previousDailyStatuses = await prisma.habitDailyStatus.findMany({
+                        where: {
+                            habit_id: parseInt(habitId, 10),
+                            user_id: userId,
+                            date: {
+                                gte: previousPeriodStartDate,
+                                lte: previousPeriodEndDate
+                            }
+                        }
+                    });
+    
+                    const previousScheduled = previousDailyStatuses.filter(s => s.is_scheduled).length;
+                    const previousCompleted = previousDailyStatuses.filter(s => s.is_completed).length;
+                    const previousSkipped = previousDailyStatuses.filter(s => s.is_skipped).length;
+                    const previousMissed = previousDailyStatuses.filter(s => s.is_scheduled && !s.is_completed && !s.is_skipped).length;
+                    const previousCompletionRate = previousScheduled > 0 ? (previousCompleted / previousScheduled) * 100 : 0;
+    
+                    previousPeriodStats = {
+                        scheduled_days: previousScheduled,
+                        completed_days: previousCompleted,
+                        skipped_days: previousSkipped,
+                        missed_days: previousMissed,
+                        completion_rate: Math.round(previousCompletionRate * 10) / 10
+                    };
+                } catch (error) {
+                    console.error('Error fetching previous period stats:', error);
+                    // Continue without previous period stats
+                }
+            }
+    
+            // Process data for analysis
+            const scheduled = dailyStatuses.filter(s => s.is_scheduled).length;
+            const completed = dailyStatuses.filter(s => s.is_completed).length;
+            const skipped = dailyStatuses.filter(s => s.is_skipped).length;
+            const missed = dailyStatuses.filter(s => s.is_scheduled && !s.is_completed && !s.is_skipped).length;
+    
+            // Calculate completion rate
+            const completionRate = scheduled > 0 ? (completed / scheduled) * 100 : 0;
+    
+            // Group completions by day of week
+            const completionsByDay = [0, 0, 0, 0, 0, 0, 0]; // Sun to Sat
+            const totalScheduledByDay = [0, 0, 0, 0, 0, 0, 0]; // Track total scheduled per day for rates
+    
+            dailyStatuses.forEach(status => {
+                const date = new Date(status.date);
+                if (!isNaN(date.getTime())) {
+                    const dayOfWeek = date.getDay();
+    
+                    if (status.is_scheduled) {
+                        totalScheduledByDay[dayOfWeek]++;
+                    }
+    
+                    if (status.is_completed) {
+                        completionsByDay[dayOfWeek]++;
+                    }
+                }
+            });
+    
+            // Calculate completion rate by day of week
+            const completionRateByDay = totalScheduledByDay.map((total, index) => {
+                return total > 0 ? Math.round((completionsByDay[index] / total) * 100) : 0;
+            });
+    
+            // Generate streak data over time
+            let streakChanges = [];
+            let currentStreak = 0;
+    
+            // Get the starting streak value if needed
+            if (habit.streak && habit.streak.length > 0) {
+                try {
+                    // Find the streak value at the start of our period
+                    const streakBeforePeriod = await prisma.habitReset.findFirst({
+                        where: {
+                            habit_id: parseInt(habitId, 10),
+                            user_id: userId,
+                            reset_date: {
+                                lt: startDate
+                            }
+                        },
+                        orderBy: {
+                            reset_date: 'desc'
+                        }
+                    });
+    
+                    if (streakBeforePeriod) {
+                        currentStreak = 0; // Reset happened before our period
+                    } else {
+                        // No reset, so find completions before start date
+                        const completionsBeforeStart = await prisma.habitDailyStatus.findMany({
+                            where: {
+                                habit_id: parseInt(habitId, 10),
+                                user_id: userId,
+                                is_completed: true,
+                                date: {
+                                    lt: startDate
+                                }
+                            },
+                            orderBy: {
+                                date: 'desc'
+                            },
+                            take: 30 // Look back a reasonable amount to compute streak
+                        });
+    
+                        if (completionsBeforeStart.length > 0) {
+                            let lastDate = new Date(completionsBeforeStart[0].date);
+                            let streakCount = 1;
+    
+                            for (let i = 1; i < completionsBeforeStart.length; i++) {
+                                const currentDate = new Date(completionsBeforeStart[i].date);
+                                if (!isNaN(currentDate.getTime()) && !isNaN(lastDate.getTime())) {
+                                    const dayDiff = Math.round((lastDate - currentDate) / (24 * 60 * 60 * 1000));
+    
+                                    if (dayDiff === 1 || (habit.grace_period_enabled && dayDiff <= habit.grace_period_hours / 24 + 1)) {
+                                        streakCount++;
+                                        lastDate = currentDate;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+    
+                            currentStreak = streakCount;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error calculating initial streak:', error);
+                    // Continue with currentStreak = 0
+                }
+            }
+    
+            // Process streak changes within our period
+            try {
+                let sortedStatuses = [...dailyStatuses].sort((a, b) =>
+                    new Date(a.date).getTime() - new Date(b.date).getTime()
+                );
+    
+                let lastCompletionDate = null;
+    
+                for (let i = 0; i < sortedStatuses.length; i++) {
+                    const status = sortedStatuses[i];
+                    const statusDate = new Date(status.date);
+    
+                    if (!isNaN(statusDate.getTime()) && status.is_scheduled) {
+                        if (status.is_completed) {
+                            // Check if this is a streak continuation
+                            if (lastCompletionDate) {
+                                const dayDiff = Math.round((statusDate - lastCompletionDate) / (24 * 60 * 60 * 1000));
+    
+                                if (dayDiff > 1 && !(habit.grace_period_enabled && dayDiff <= habit.grace_period_hours / 24 + 1)) {
+                                    // Streak broken
+                                    currentStreak = 1;
+                                } else {
+                                    // Streak continues
+                                    currentStreak++;
+                                }
+                            } else {
+                                // First completion in our dataset
+                                currentStreak = Math.max(1, currentStreak);
+                            }
+    
+                            lastCompletionDate = statusDate;
+    
+                            streakChanges.push({
+                                date: status.date,
+                                streak: currentStreak
+                            });
+                        } else if (!status.is_skipped) {
+                            // Missed completion, reset streak
+                            if (currentStreak > 0) {
+                                streakChanges.push({
+                                    date: status.date,
+                                    streak: 0
+                                });
+                            }
+                            currentStreak = 0;
+                            lastCompletionDate = null;
+                        }
+                        // Skipped days don't affect streak
+                    }
+                }
+            } catch (error) {
+                console.error('Error calculating streak changes:', error);
+                // Continue with empty streak changes
+            }
+    
+            // Calculate points earned for the period
+            let totalPointsEarned = 0;
+            try {
+                const pointsLogs = await prisma.pointsLog.findMany({
+                    where: {
+                        user_id: userId,
+                        source_type: 'HABIT_COMPLETION',
+                        source_id: parseInt(habitId, 10),
+                        createdAt: {
+                            gte: startDate,
+                            lte: endDate
+                        }
+                    }
+                });
+    
+                totalPointsEarned = pointsLogs.reduce((sum, log) => sum + log.points, 0);
+            } catch (error) {
+                console.error('Error calculating points earned:', error);
+                // Continue with zero points
+            }
+    
+            // Calculate time of day patterns
+            let timeOfDayPatterns = [];
+    
+            if (logs.length > 0) {
+                try {
+                    const timeSegments = [
+                        { name: 'Early Morning (5am-8am)', count: 0, rate: 0 },
+                        { name: 'Morning (8am-12pm)', count: 0, rate: 0 },
+                        { name: 'Afternoon (12pm-5pm)', count: 0, rate: 0 },
+                        { name: 'Evening (5pm-9pm)', count: 0, rate: 0 },
+                        { name: 'Night (9pm-12am)', count: 0, rate: 0 },
+                        { name: 'Late Night (12am-5am)', count: 0, rate: 0 }
+                    ];
+    
+                    logs.forEach(log => {
+                        if (log.completed) {
+                            const date = new Date(log.completed_at);
+                            if (!isNaN(date.getTime())) {
+                                const hour = date.getHours();
+    
+                                if (hour >= 5 && hour < 8) {
+                                    timeSegments[0].count++;
+                                } else if (hour >= 8 && hour < 12) {
+                                    timeSegments[1].count++;
+                                } else if (hour >= 12 && hour < 17) {
+                                    timeSegments[2].count++;
+                                } else if (hour >= 17 && hour < 21) {
+                                    timeSegments[3].count++;
+                                } else if (hour >= 21 && hour < 24) {
+                                    timeSegments[4].count++;
+                                } else {
+                                    timeSegments[5].count++;
+                                }
+                            }
+                        }
+                    });
+    
+                    // Calculate rates
+                    const totalCompletions = timeSegments.reduce((sum, segment) => sum + segment.count, 0);
+                    if (totalCompletions > 0) {
+                        timeSegments.forEach(segment => {
+                            segment.rate = Math.round((segment.count / totalCompletions) * 100);
+                        });
+                    }
+    
+                    timeOfDayPatterns = timeSegments;
+                } catch (error) {
+                    console.error('Error calculating time patterns:', error);
+                    // Continue with empty time patterns
+                }
+            }
+    
+            // Calculate monthly distribution (heatmap data)
+            let monthlyDistribution = [];
+    
+            try {
+                if (dailyStatuses.length > 0) {
+                    // Create a map of dates for quick lookup
+                    const dateMap = {};
+                    dailyStatuses.forEach(status => {
+                        try {
+                            const dateStr = new Date(status.date).toISOString().split('T')[0];
+                            dateMap[dateStr] = {
+                                scheduled: status.is_scheduled,
+                                completed: status.is_completed,
+                                skipped: status.is_skipped
+                            };
+                        } catch (e) {
+                            // Skip invalid dates
+                        }
+                    });
+    
+                    // Generate a complete date range
+                    const rangeStart = new Date(startDate);
+                    const rangeEnd = new Date(endDate);
+    
+                    for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
+                        const dateStr = d.toISOString().split('T')[0];
+                        const status = dateMap[dateStr] || { scheduled: false, completed: false, skipped: false };
+    
+                        monthlyDistribution.push({
+                            date: dateStr,
+                            day_of_week: d.getDay(),
+                            scheduled: status.scheduled,
+                            completed: status.completed,
+                            skipped: status.skipped,
+                            value: status.completed ? 2 : (status.skipped ? 1 : (status.scheduled ? 0 : -1))
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('Error calculating monthly distribution:', error);
+                // Continue with empty monthly distribution
+            }
+    
+            // Calculate tracking-type specific metrics
+            let trackingMetrics = {};
+    
+            try {
+                if (habit.tracking_type === 'DURATION' && logs.length > 0) {
+                    const durationsCompleted = logs
+                        .filter(log => log.completed && log.duration_completed)
+                        .map(log => log.duration_completed);
+    
+                    if (durationsCompleted.length > 0) {
+                        const avgDuration = durationsCompleted.reduce((sum, dur) => sum + dur, 0) / durationsCompleted.length;
+                        const maxDuration = Math.max(...durationsCompleted);
+                        const minDuration = Math.min(...durationsCompleted);
+                        const totalDuration = durationsCompleted.reduce((sum, dur) => sum + dur, 0);
+    
+                        // Calculate goal achievement rate
+                        const goalAchievementRate = habit.duration_goal ?
+                            Math.round((totalDuration / (habit.duration_goal * durationsCompleted.length)) * 100) : 0;
+    
+                        // Calculate progression trend (are durations increasing or decreasing?)
+                        let trend = 'stable';
+                        if (durationsCompleted.length >= 3) {
+                            const firstHalf = durationsCompleted.slice(Math.ceil(durationsCompleted.length / 2));
+                            const secondHalf = durationsCompleted.slice(0, Math.floor(durationsCompleted.length / 2));
+    
+                            const firstHalfAvg = firstHalf.reduce((sum, dur) => sum + dur, 0) / firstHalf.length;
+                            const secondHalfAvg = secondHalf.reduce((sum, dur) => sum + dur, 0) / secondHalf.length;
+    
+                            const percentChange = firstHalfAvg !== 0 ? ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100 : 0;
+    
+                            if (percentChange >= 10) {
+                                trend = 'increasing';
+                            } else if (percentChange <= -10) {
+                                trend = 'decreasing';
+                            }
+                        }
+    
+                        trackingMetrics = {
+                            avg_duration: Math.round(avgDuration),
+                            max_duration: maxDuration,
+                            min_duration: minDuration,
+                            goal_duration: habit.duration_goal,
+                            total_duration: totalDuration,
+                            goal_achievement_rate: goalAchievementRate,
+                            trend: trend
+                        };
+                    }
+                } else if (habit.tracking_type === 'COUNT' && logs.length > 0) {
+                    const countsCompleted = logs
+                        .filter(log => log.completed && log.count_completed)
+                        .map(log => log.count_completed);
+    
+                    if (countsCompleted.length > 0) {
+                        const avgCount = countsCompleted.reduce((sum, count) => sum + count, 0) / countsCompleted.length;
+                        const maxCount = Math.max(...countsCompleted);
+                        const minCount = Math.min(...countsCompleted);
+                        const totalCount = countsCompleted.reduce((sum, count) => sum + count, 0);
+    
+                        // Calculate goal achievement rate
+                        const goalAchievementRate = habit.count_goal ?
+                            Math.round((totalCount / (habit.count_goal * countsCompleted.length)) * 100) : 0;
+    
+                        // Calculate progression trend
+                        let trend = 'stable';
+                        if (countsCompleted.length >= 3) {
+                            const firstHalf = countsCompleted.slice(Math.ceil(countsCompleted.length / 2));
+                            const secondHalf = countsCompleted.slice(0, Math.floor(countsCompleted.length / 2));
+    
+                            const firstHalfAvg = firstHalf.reduce((sum, count) => sum + count, 0) / firstHalf.length;
+                            const secondHalfAvg = secondHalf.reduce((sum, count) => sum + count, 0) / secondHalf.length;
+    
+                            const percentChange = firstHalfAvg !== 0 ? ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100 : 0;
+    
+                            if (percentChange >= 10) {
+                                trend = 'increasing';
+                            } else if (percentChange <= -10) {
+                                trend = 'decreasing';
+                            }
+                        }
+    
+                        trackingMetrics = {
+                            avg_count: Math.round(avgCount * 10) / 10,
+                            max_count: maxCount,
+                            min_count: minCount,
+                            goal_count: habit.count_goal,
+                            total_count: totalCount,
+                            goal_achievement_rate: goalAchievementRate,
+                            trend: trend
+                        };
+                    }
+                } else if (habit.tracking_type === 'NUMERIC' && logs.length > 0) {
+                    const numericValues = logs
+                        .filter(log => log.completed && log.numeric_completed !== null)
+                        .map(log => log.numeric_completed);
+    
+                    if (numericValues.length > 0) {
+                        const avgValue = numericValues.reduce((sum, val) => sum + val, 0) / numericValues.length;
+                        const maxValue = Math.max(...numericValues);
+                        const minValue = Math.min(...numericValues);
+                        const totalValue = numericValues.reduce((sum, val) => sum + val, 0);
+    
+                        // Calculate goal achievement rate
+                        const goalAchievementRate = habit.numeric_goal ?
+                            Math.round((totalValue / (habit.numeric_goal * numericValues.length)) * 100) : 0;
+    
+                        // Calculate standard deviation
+                        const variance = numericValues.reduce((sum, val) => sum + Math.pow(val - avgValue, 2), 0) / numericValues.length;
+                        const stdDev = Math.sqrt(variance);
+    
+                        // Calculate progression trend
+                        let trend = 'stable';
+                        if (numericValues.length >= 3) {
+                            const firstHalf = numericValues.slice(Math.ceil(numericValues.length / 2));
+                            const secondHalf = numericValues.slice(0, Math.floor(numericValues.length / 2));
+    
+                            const firstHalfAvg = firstHalf.reduce((sum, val) => sum + val, 0) / firstHalf.length;
+                            const secondHalfAvg = secondHalf.reduce((sum, val) => sum + val, 0) / secondHalf.length;
+    
+                            const percentChange = firstHalfAvg !== 0 ? ((secondHalfAvg - firstHalfAvg) / firstHalfAvg) * 100 : 0;
+    
+                            if (percentChange >= 10) {
+                                trend = 'increasing';
+                            } else if (percentChange <= -10) {
+                                trend = 'decreasing';
+                            }
+                        }
+    
+                        trackingMetrics = {
+                            avg_value: Math.round(avgValue * 100) / 100,
+                            max_value: maxValue,
+                            min_value: minValue,
+                            goal_value: habit.numeric_goal,
+                            total_value: totalValue,
+                            std_deviation: Math.round(stdDev * 100) / 100,
+                            goal_achievement_rate: goalAchievementRate,
+                            trend: trend,
+                            units: habit.units
+                        };
+                    }
+                }
+            } catch (error) {
+                console.error('Error calculating tracking metrics:', error);
+                // Continue with empty tracking metrics
+            }
+    
+            // Calculate consistency score (weighted metric of overall reliability)
+            let consistencyScore = 0;
+            try {
+                if (scheduled > 0) {
+                    // Base on completion rate (70% weight)
+                    const completionRateScore = completionRate * 0.7;
+    
+                    // Try/catch for streak stability calculation since it might have errors
+                    let streakScore = 0;
+                    try {
+                        // Factor in streak stability (20% weight)
+                        if (streakChanges.length > 1) {
+                            const streakStability = streakChanges
+                                .reduce((sum, change, index, arr) => {
+                                    if (index === 0) return sum;
+                                    return sum + Math.abs(change.streak - arr[index - 1].streak);
+                                }, 0) / Math.max(1, streakChanges.length - 1);
+                            streakScore = (20 - Math.min(streakStability, 10)) * 2;
+                        }
+                    } catch (e) {
+                        console.error('Error calculating streak stability:', e);
+                    }
+    
+                    // Try/catch for day distribution calculation
+                    let dayDistributionScore = 0;
+                    try {
+                        // Factor in distribution across days (10% weight)
+                        // Standard deviation calculation
+                        const avgCompletions = completionsByDay.reduce((sum, val) => sum + val, 0) / 7;
+                        const varianceByDay = completionsByDay.reduce((sum, val) => sum + Math.pow(val - avgCompletions, 2), 0) / 7;
+                        const stdDevByDay = Math.sqrt(varianceByDay);
+    
+                        dayDistributionScore = (10 - Math.min(stdDevByDay, 10)) * 1;
+                    } catch (e) {
+                        console.error('Error calculating day distribution:', e);
+                    }
+    
+                    consistencyScore = Math.round(completionRateScore + streakScore + dayDistributionScore);
+                }
+            } catch (error) {
+                console.error('Error calculating consistency score:', error);
+                // Continue with zero consistency score
+            }
+    
+            // Get days of the week as strings
+            const daysOfWeek = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    
+            // Format logs for response (if requested)
+            const formattedLogs = include_logs === 'true' ? logs.map(log => ({
+                log_id: log.log_id,
+                date: new Date(log.completed_at).toISOString().split('T')[0],
+                time: new Date(log.completed_at).toLocaleTimeString(),
+                completed: log.completed,
+                skipped: log.skipped,
+                points: log.points_earned,
+                tracking_value: log.duration_completed || log.count_completed || log.numeric_completed || null,
+                mood: log.mood,
+                notes: log.completion_notes,
+                evidence_image: log.evidence_image,
+                logged_late: log.logged_late
+            })) : [];
+    
+            // Calculate success rate changes and trends
+            let trends = {
+                completion_rate_change: 0,
+                streak_change: 0,
+                points_change: 0
+            };
+    
+            if (previousPeriodStats) {
+                trends.completion_rate_change = Math.round((completionRate - previousPeriodStats.completion_rate) * 10) / 10;
+                trends.completed_days_change = completed - previousPeriodStats.completed_days;
+                trends.missed_days_change = missed - previousPeriodStats.missed_days;
+            }
+    
+            // Get current and longest streak
+            const streakData = habit.streak && habit.streak.length > 0 ? {
+                current_streak: habit.streak[0].current_streak,
+                longest_streak: habit.streak[0].longest_streak,
+                last_completed: habit.streak[0].last_completed
+            } : {
                 current_streak: 0,
                 longest_streak: 0,
-                start_date: new Date(),
-                missed_days_count: 0,
-                grace_period_used: false
+                last_completed: null
+            };
+    
+            return res.status(200).json({
+                success: true,
+                data: {
+                    habit_id: parseInt(habitId, 10),
+                    name: habit.name,
+                    domain: habit.domain ? {
+                        domain_id: habit.domain.domain_id,
+                        name: habit.domain.name,
+                        color: habit.domain.color
+                    } : null,
+                    period: period,
+                    date_range: {
+                        start: startDate,
+                        end: endDate
+                    },
+                    stats: {
+                        scheduled_days: scheduled,
+                        completed_days: completed,
+                        skipped_days: skipped,
+                        missed_days: missed,
+                        completion_rate: Math.round(completionRate * 10) / 10,
+                        points_earned: totalPointsEarned,
+                        consistency_score: consistencyScore
+                    },
+                    streaks: streakData,
+                    day_analysis: daysOfWeek.map((day, index) => ({
+                        day,
+                        completions: completionsByDay[index],
+                        scheduled: totalScheduledByDay[index],
+                        completion_rate: completionRateByDay[index]
+                    })),
+                    streak_progression: streakChanges,
+                    time_patterns: timeOfDayPatterns,
+                    tracking_metrics: trackingMetrics,
+                    trends: trends,
+                    previous_period: previousPeriodStats,
+                    monthly_distribution: monthlyDistribution,
+                    logs: formattedLogs
+                }
+            });
+        } catch (error) {
+            console.error('Error getting habit analytics:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to retrieve habit analytics',
+                error: error.message
+            });
+        }
+    };
+
+/**
+ * Get user's habit domains with statistics
+ */
+const getHabitDomains = async (req, res) => {
+    try {
+        const userId = parseInt(req.user);
+
+        // Get all domains
+        const domains = await prisma.habitDomain.findMany({
+            where: {
+                OR: [
+                    { is_default: true }
+                ]
+            },
+            orderBy: {
+                name: 'asc'
             }
         });
 
-        // Initialize daily status for today
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        // Get counts of habits in each domain
+        const domainStats = await Promise.all(domains.map(async (domain) => {
+            // Count total habits in this domain
+            const totalHabits = await prisma.habit.count({
+                where: {
+                    domain_id: domain.domain_id,
+                    user_id: userId
+                }
+            });
 
-        await prisma.habitDailyStatus.create({
-            data: {
-                habit_id: newHabit.habit_id,
-                user_id: userId,
-                date: today,
-                is_scheduled: isHabitScheduledForDate(newHabit, today),
-                is_completed: false,
-                is_skipped: false
-            }
+            // Count active habits in this domain
+            const activeHabits = await prisma.habit.count({
+                where: {
+                    domain_id: domain.domain_id,
+                    user_id: userId,
+                    is_active: true
+                }
+            });
+
+            // Get today's date
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+
+            // Count habits scheduled for today
+            const habitsScheduledToday = await prisma.habitDailyStatus.count({
+                where: {
+                    user_id: userId,
+                    date: today,
+                    is_scheduled: true,
+                    habit: {
+                        domain_id: domain.domain_id
+                    }
+                }
+            });
+
+            // Count habits completed today
+            const habitsCompletedToday = await prisma.habitDailyStatus.count({
+                where: {
+                    user_id: userId,
+                    date: today,
+                    is_completed: true,
+                    habit: {
+                        domain_id: domain.domain_id
+                    }
+                }
+            });
+
+            // Calculate average streak for habits in this domain
+            const habitWithStreaks = await prisma.habit.findMany({
+                where: {
+                    domain_id: domain.domain_id,
+                    user_id: userId,
+                    is_active: true
+                },
+                include: {
+                    streak: true
+                }
+            });
+
+            const totalStreak = habitWithStreaks.reduce((sum, habit) => {
+                return sum + (habit.streak[0]?.current_streak || 0);
+            }, 0);
+
+            const avgStreak = habitWithStreaks.length > 0
+                ? Math.round(totalStreak / habitWithStreaks.length * 10) / 10
+                : 0;
+
+            // Get total points earned from habits in this domain
+            const pointsData = await prisma.pointsLog.aggregate({
+                where: {
+                    user_id: userId,
+                    source_type: 'HABIT_COMPLETION',
+                    source_id: {
+                        in: habitWithStreaks.map(h => h.habit_id)
+                    }
+                },
+                _sum: {
+                    points: true
+                }
+            });
+
+            return {
+                ...domain,
+                stats: {
+                    total_habits: totalHabits,
+                    active_habits: activeHabits,
+                    scheduled_today: habitsScheduledToday,
+                    completed_today: habitsCompletedToday,
+                    avg_streak: avgStreak,
+                    total_points: pointsData._sum?.points || 0
+                }
+            };
+        }));
+
+        return res.status(200).json({
+            success: true,
+            data: domainStats
         });
+    } catch (error) {
+        console.error('Error getting habit domains:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve habit domains',
+            error: error.message
+        });
+    }
+};
 
-        // Copy reminders if they exist
-        if (sourceHabit.reminders && sourceHabit.reminders.length > 0) {
-            const reminderData = sourceHabit.reminders.map(reminder => ({
-                habit_id: newHabit.habit_id,
-                user_id: userId,
-                reminder_time: reminder.reminder_time,
-                repeat: reminder.repeat,
-                notification_message: reminder.notification_message?.replace(sourceHabit.name, newHabit.name) ||
-                    `Time to complete your ${newHabit.name} habit!`,
-                is_enabled: true,
-                pre_notification_minutes: reminder.pre_notification_minutes || 10,
-                follow_up_enabled: reminder.follow_up_enabled !== undefined ? reminder.follow_up_enabled : true,
-                follow_up_minutes: reminder.follow_up_minutes || 30
-            }));
+/**
+ * Add a new habit domain
+ */
+const addHabitDomain = async (req, res) => {
+    try {
+        const userId = parseInt(req.user);
+        const { name, description, icon, color } = req.body;
 
-            await prisma.habitReminder.createMany({
-                data: reminderData
+        if (!name) {
+            return res.status(400).json({
+                success: false,
+                message: 'Domain name is required'
             });
         }
 
-        // Update user's total habits created
-        await prisma.user.update({
-            where: { user_id: userId },
-            data: { totalHabitsCreated: { increment: 1 } }
-        });
-
-        // Return the new habit with related data
-        const habitWithRelations = await prisma.habit.findUnique({
-            where: { habit_id: newHabit.habit_id },
-            include: {
-                domain: true,
-                reminders: true,
-                streak: true
+        // Create the new domain
+        const newDomain = await prisma.habitDomain.create({
+            data: {
+                name,
+                description: description || null,
+                icon: icon || null,
+                color: color || null,
+                is_default: false,
+                user_id: userId
             }
         });
 
         return res.status(201).json({
             success: true,
-            message: 'Habit copied successfully',
-            data: habitWithRelations
+            message: 'Habit domain created successfully',
+            data: newDomain
         });
     } catch (error) {
-        console.error('Error copying habit:', error);
+        console.error('Error adding habit domain:', error);
         return res.status(500).json({
             success: false,
-            message: 'Failed to copy habit',
+            message: 'Failed to create habit domain',
             error: error.message
         });
     }
 };
 
 /**
- * Delete a reminder
+ * Update a habit domain
  */
-const deleteReminder = async (req, res) => {
+const updateHabitDomain = async (req, res) => {
     try {
-        const { reminderId } = req.params;
-        const userId = req.user.user_id;
+        const { domainId } = req.params;
+        const userId = parseInt(req.user);
+        const { name, description, icon, color } = req.body;
 
-        // Validate reminder exists and belongs to user
-        const reminder = await prisma.habitReminder.findFirst({
+        // Check if domain exists and belongs to user
+        const domain = await prisma.habitDomain.findFirst({
             where: {
-                reminder_id: parseInt(reminderId, 10),
-                user_id: userId
+                domain_id: parseInt(domainId, 10),
+                user_id: userId,
+                is_default: false // Can't modify default domains
             }
         });
 
-        if (!reminder) {
+        if (!domain) {
             return res.status(404).json({
                 success: false,
-                message: 'Reminder not found or you do not have permission to delete it'
+                message: 'Domain not found or you do not have permission to update it'
             });
         }
 
-        // Delete the reminder
-        await prisma.habitReminder.delete({
-            where: { reminder_id: parseInt(reminderId, 10) }
+        // Update the domain
+        const updatedDomain = await prisma.habitDomain.update({
+            where: {
+                domain_id: parseInt(domainId, 10)
+            },
+            data: {
+                name: name || domain.name,
+                description: description !== undefined ? description : domain.description,
+                icon: icon !== undefined ? icon : domain.icon,
+                color: color !== undefined ? color : domain.color
+            }
         });
 
         return res.status(200).json({
             success: true,
-            message: 'Reminder deleted successfully'
+            message: 'Habit domain updated successfully',
+            data: updatedDomain
         });
     } catch (error) {
-        console.error('Error deleting reminder:', error);
+        console.error('Error updating habit domain:', error);
         return res.status(500).json({
             success: false,
-            message: 'Failed to delete reminder',
+            message: 'Failed to update habit domain',
             error: error.message
         });
     }
 };
 
 /**
- * Get next occurrence for a habit
+ * Delete a habit domain
  */
-function getNextOccurrence(habit) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+const deleteHabitDomain = async (req, res) => {
+    try {
+        const { domainId } = req.params;
+        const userId = parseInt(req.user);
 
-    let nextDate = today;
-    let daysToAdd = 1;
+        // Check if domain exists and belongs to user
+        const domain = await prisma.habitDomain.findFirst({
+            where: {
+                domain_id: parseInt(domainId, 10),
+                user_id: userId,
+                is_default: false // Can't delete default domains
+            }
+        });
 
-    while (daysToAdd <= 30) {  // Limit to next 30 days
-        nextDate = new Date(today);
-        nextDate.setDate(today.getDate() + daysToAdd);
-
-        if (isHabitScheduledForDate(habit, nextDate)) {
-            return {
-                date: nextDate.toISOString().split('T')[0],
-                daysAway: daysToAdd
-            };
+        if (!domain) {
+            return res.status(404).json({
+                success: false,
+                message: 'Domain not found or you do not have permission to delete it'
+            });
         }
 
-        daysToAdd++;
+        // Check if there are habits using this domain
+        const habitCount = await prisma.habit.count({
+            where: {
+                domain_id: parseInt(domainId, 10)
+            }
+        });
+
+        if (habitCount > 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'Cannot delete domain that contains habits. Please move or delete the habits first.'
+            });
+        }
+
+        // Delete the domain
+        await prisma.habitDomain.delete({
+            where: {
+                domain_id: parseInt(domainId, 10)
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Habit domain deleted successfully'
+        });
+    } catch (error) {
+        console.error('Error deleting habit domain:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to delete habit domain',
+            error: error.message
+        });
     }
+};
 
-    return null;  // No occurrence found in the next 30 days
-}
-
+// Export controllers
 module.exports = {
     addHabit,
     getHabitById,
     getUserHabits,
     getHabitsByDate,
     getHabitsByDomain,
-    updateHabit,
-    toggleFavorite,
-    toggleActive,
     logHabitCompletion,
     skipHabit,
     processHabitDailyReset,
     deleteHabitLog,
+    updateHabit,
     deleteHabit,
-    copyHabit,
-    addReminder,
-    deleteReminder
+    archiveHabit,
+    restoreHabit,
+    resetHabitStreak,
+    setHabitStreak,
+    toggleFavoriteHabit,
+    getHabitStreakHistory,
+    getHabitAnalytics,
+    getHabitDomains,
+    addHabitDomain,
+    updateHabitDomain,
+    deleteHabitDomain
 };

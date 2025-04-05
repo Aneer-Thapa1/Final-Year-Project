@@ -14,19 +14,29 @@ router.get('/getHabitsByDomain/:domainId', validateToken, habitController.getHab
 
 // Habit management
 router.put('/updateHabit/:habitId', validateToken, habitController.updateHabit);
-router.put('/toggleFavorite/:habitId', validateToken, habitController.toggleFavorite);
-router.patch('/toggleActive/:habitId', validateToken, habitController.toggleActive);
 router.delete('/deleteHabit/:habitId', validateToken, habitController.deleteHabit);
-router.post('/copyHabit/:habitId', validateToken, habitController.copyHabit);
+router.patch('/archiveHabit/:habitId', validateToken, habitController.archiveHabit);
+router.patch('/restoreHabit/:habitId', validateToken, habitController.restoreHabit);
+router.patch('/toggleFavorite/:habitId', validateToken, habitController.toggleFavoriteHabit);
 
 // Habit logging and tracking
 router.post('/logHabitCompletion/:habitId', validateToken, habitController.logHabitCompletion);
 router.post('/skipHabit/:habitId', validateToken, habitController.skipHabit);
 router.delete('/deleteLog/:logId', validateToken, habitController.deleteHabitLog);
 
-// Reminder management
-router.post('/addReminder/:habitId', validateToken, habitController.addReminder);
-router.delete('/deleteReminder/:reminderId', validateToken, habitController.deleteReminder);
+// Streak management
+router.post('/resetStreak/:habitId', validateToken, habitController.resetHabitStreak);
+router.post('/setStreak/:habitId', validateToken, habitController.setHabitStreak);
+router.get('/streakHistory/:habitId', validateToken, habitController.getHabitStreakHistory);
+
+// Analytics
+router.get('/analytics/:habitId', validateToken, habitController.getHabitAnalytics);
+
+// Domain management
+router.get('/domains', validateToken, habitController.getHabitDomains);
+router.post('/domains', validateToken, habitController.addHabitDomain);
+router.put('/domains/:domainId', validateToken, habitController.updateHabitDomain);
+router.delete('/domains/:domainId', validateToken, habitController.deleteHabitDomain);
 
 // System functions
 router.post('/processHabitDailyReset', validateToken, habitController.processHabitDailyReset);
