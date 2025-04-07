@@ -1,6 +1,6 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
-const { ReminderService } = require('../services/reminderService');
+const { ReminderService } = require('../services/reminderService ');
 const moment = require('moment-timezone');
 
 /**

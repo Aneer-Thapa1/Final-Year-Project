@@ -15,9 +15,7 @@ const profileController = {
     getUserProfile: async (req, res) => {
         try {
             const userId  = req.params.userId;
-            console.log(userId);
             const requesterId = req.user; // Current authenticated user
-            console.log(requesterId);
             const targetUserId = parseInt(userId);
 
             // Check if user exists

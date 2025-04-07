@@ -68,8 +68,7 @@ export const addBlog = async (blogData) => {
             formData.append('is_featured', blogData.is_featured.toString());
         }
 
-        // Debug log
-        console.log('Blog data before image:', blogData);
+
 
         // Add image if it exists
         if (blogData.image) {

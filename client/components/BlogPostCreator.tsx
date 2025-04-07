@@ -5,16 +5,17 @@ import {
     TextInput,
     TouchableOpacity,
     Image,
-    ScrollView,
+    FlatList,
     KeyboardAvoidingView,
     Platform,
     Modal,
     StatusBar,
     SafeAreaView,
     Alert,
-    ActivityIndicator
+    ActivityIndicator,
+    ScrollView
 } from 'react-native';
-import { Camera, Image as ImageIcon, X, ChevronDown, Tag, Users, Send, Clock } from 'lucide-react-native';
+import { Camera, Image as ImageIcon, X, ChevronDown, Tag, Users, Send, Clock, CheckCircle } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { useColorScheme } from 'nativewind';
@@ -24,11 +25,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCategories } from '../services/blogService';
 
 const BlogPostCreator = ({
-                                  visible,
-                                  onClose,
-                                  onPost,
-                                  loading = false
-                              }) => {
+                             visible,
+                             onClose,
+                             onPost,
+                             loading = false,
+                             initialData = null,
+                             isEditMode = false
+                         }) => {
     const { colorScheme } = useColorScheme();
     const isDark = colorScheme === 'dark';
     const insets = useSafeAreaInsets();
@@ -80,6 +83,16 @@ const BlogPostCreator = ({
         success: isDark ? '#4ADE80' : '#22C55E'
     };
 
+    // Initialize form with initial data if in edit mode
+    useEffect(() => {
+        if (initialData && visible) {
+            setTitle(initialData.title || '');
+            setContent(initialData.content || '');
+            setSelectedImages(initialData.images || []);
+            setIsPublic(initialData.is_public !== false);
+        }
+    }, [initialData, visible]);
+
     // Fetch categories when component mounts
     useEffect(() => {
         if (visible) {
@@ -94,14 +107,16 @@ const BlogPostCreator = ({
         }
     }, [visible]);
 
-    // Reset form when modal opens
+    // Reset form when modal closes
     useEffect(() => {
-        if (visible) {
-            setTitle('');
-            setContent('');
-            setSelectedImages([]);
-            setSelectedCategory(null);
-            setIsPublic(true);
+        if (!visible) {
+            if (!initialData) {
+                setTitle('');
+                setContent('');
+                setSelectedImages([]);
+                setSelectedCategory(null);
+                setIsPublic(true);
+            }
         }
     }, [visible]);
 
@@ -112,24 +127,52 @@ const BlogPostCreator = ({
 
             if (response && response.success && response.data) {
                 setCategories(response.data);
+
+                // If we have initialData with category_id, find and select the matching category
+                if (initialData && initialData.category_id) {
+                    const category = response.data.find(cat => cat.category_id === initialData.category_id);
+                    if (category) {
+                        setSelectedCategory(category);
+                    }
+                }
             } else {
                 // Fallback to static categories if API fails
-                setCategories([
+                const fallbackCategories = [
                     { category_id: 1, category_name: 'Meditation', icon: '🧘', color: '#8B5CF6' },
                     { category_id: 2, category_name: 'Exercise', icon: '🏃', color: '#F43F5E' },
                     { category_id: 3, category_name: 'Reading', icon: '📚', color: '#F59E0B' },
                     { category_id: 4, category_name: 'Coding', icon: '💻', color: '#3B82F6' },
-                ]);
+                ];
+
+                setCategories(fallbackCategories);
+
+                // If we have initialData with category_id, find and select the matching category
+                if (initialData && initialData.category_id) {
+                    const category = fallbackCategories.find(cat => cat.category_id === initialData.category_id);
+                    if (category) {
+                        setSelectedCategory(category);
+                    }
+                }
             }
         } catch (error) {
             console.error('Error fetching categories:', error);
             // Fallback to static categories
-            setCategories([
+            const fallbackCategories = [
                 { category_id: 1, category_name: 'Meditation', icon: '🧘', color: '#8B5CF6' },
                 { category_id: 2, category_name: 'Exercise', icon: '🏃', color: '#F43F5E' },
                 { category_id: 3, category_name: 'Reading', icon: '📚', color: '#F59E0B' },
                 { category_id: 4, category_name: 'Coding', icon: '💻', color: '#3B82F6' },
-            ]);
+            ];
+
+            setCategories(fallbackCategories);
+
+            // If we have initialData with category_id, find and select the matching category
+            if (initialData && initialData.category_id) {
+                const category = fallbackCategories.find(cat => cat.category_id === initialData.category_id);
+                if (category) {
+                    setSelectedCategory(category);
+                }
+            }
         } finally {
             setLoadingCategories(false);
         }
@@ -227,7 +270,7 @@ const BlogPostCreator = ({
 
         // Create post data
         const postData = {
-            title: title.trim() ? title : 'My Progress Update',
+            title: title.trim() ? title : isEditMode ? "Updated Post" : 'My Progress Update',
             content: content.trim(),
             images: selectedImages,
             category_id: selectedCategory.category_id,
@@ -242,7 +285,14 @@ const BlogPostCreator = ({
 
     // Clean close (no confirmation if no changes)
     const handleClose = () => {
-        if (title || content || selectedImages.length > 0 || selectedCategory) {
+        const hasNoChanges = isEditMode &&
+            title === (initialData?.title || '') &&
+            content === (initialData?.content || '') &&
+            JSON.stringify(selectedImages) === JSON.stringify(initialData?.images || []) &&
+            selectedCategory?.category_id === initialData?.category_id &&
+            isPublic === (initialData?.is_public !== false);
+
+        if (!hasNoChanges && (title || content || selectedImages.length > 0 || selectedCategory)) {
             Alert.alert(
                 "Discard Changes?",
                 "You have unsaved changes. Are you sure you want to discard them?",
@@ -258,6 +308,117 @@ const BlogPostCreator = ({
 
     const isPostButtonEnabled = (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory;
 
+    // Render category item for FlatList
+    const renderCategoryItem = ({ item, index }) => (
+        <TouchableOpacity
+            key={item.category_id}
+            onPress={() => selectCategory(item)}
+            style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: 12,
+                borderBottomWidth: index < categories.length - 1 ? 1 : 0,
+                borderBottomColor: colors.border,
+                backgroundColor: selectedCategory?.category_id === item.category_id
+                    ? colors.primaryBg
+                    : 'transparent',
+            }}
+        >
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={{ fontSize: 18, marginRight: 8 }}>{item.icon}</Text>
+                <Text
+                    style={{
+                        fontFamily: 'montserrat-medium',
+                        fontSize: 15,
+                        color: colors.textPrimary,
+                    }}
+                >
+                    {item.category_name}
+                </Text>
+            </View>
+            {selectedCategory?.category_id === item.category_id && (
+                <CheckCircle size={18} color={colors.primary} />
+            )}
+        </TouchableOpacity>
+    );
+
+    // Render image item for the horizontal image list
+    const renderImageItem = ({ item, index }) => (
+        <View
+            key={index}
+            style={{
+                marginRight: 12,
+                borderRadius: 12,
+                overflow: 'hidden',
+                position: 'relative',
+                borderWidth: 1,
+                borderColor: colors.border,
+                width: 100,
+                height: 100,
+            }}
+        >
+            <Image
+                source={{ uri: item }}
+                style={{
+                    width: '100%',
+                    height: '100%',
+                    borderRadius: 8,
+                }}
+            />
+            <TouchableOpacity
+                onPress={() => removeImage(index)}
+                style={{
+                    position: 'absolute',
+                    top: 4,
+                    right: 4,
+                    backgroundColor: 'rgba(0,0,0,0.6)',
+                    borderRadius: 12,
+                    width: 24,
+                    height: 24,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                }}
+            >
+                <X size={16} color="white" />
+            </TouchableOpacity>
+        </View>
+    );
+
+    // Render add more button for image list
+    const renderAddMoreButton = () => {
+        if (selectedImages.length >= 4) return null;
+
+        return (
+            <TouchableOpacity
+                onPress={pickImage}
+                style={{
+                    width: 100,
+                    height: 100,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderStyle: 'dashed',
+                    borderColor: colors.border,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginRight: 12,
+                }}
+            >
+                <ImageIcon size={24} color={colors.textMuted} />
+                <Text
+                    style={{
+                        marginTop: 8,
+                        fontSize: 12,
+                        fontFamily: 'montserrat',
+                        color: colors.textMuted,
+                    }}
+                >
+                    Add More
+                </Text>
+            </TouchableOpacity>
+        );
+    };
+
     return (
         <Modal
             visible={visible}
@@ -266,89 +427,83 @@ const BlogPostCreator = ({
             onRequestClose={handleClose}
         >
             <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-            <View style={{ flex: 1, backgroundColor: colors.background }}>
-                <SafeAreaView style={{ flex: 1 }}>
-                    {/* Header */}
-                    <View
+            <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+                {/* Header */}
+                <View
+                    style={{
+                        paddingVertical: 16,
+                        paddingHorizontal: 16,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        backgroundColor: colors.card,
+                        borderBottomWidth: 1,
+                        borderBottomColor: colors.border,
+                    }}
+                >
+                    <TouchableOpacity
+                        onPress={handleClose}
                         style={{
-                            paddingVertical: 16,
-                            paddingHorizontal: 16,
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            backgroundColor: colors.card,
-                            borderBottomWidth: 1,
-                            borderBottomColor: colors.border,
-                            shadowColor: "#000",
-                            shadowOffset: {
-                                width: 0,
-                                height: 1,
-                            },
-                            shadowOpacity: 0.1,
-                            shadowRadius: 1.41,
-                            elevation: 2,
+                            padding: 8,
+                            borderRadius: 8,
+                            backgroundColor: isDark ? colors.surface : '#f3f4f6',
+                            hitSlop: { top: 10, bottom: 10, left: 10, right: 10 }
                         }}
                     >
-                        <TouchableOpacity
-                            onPress={handleClose}
-                            style={{
-                                padding: 8,
-                                borderRadius: 8,
-                                backgroundColor: isDark ? colors.surface : '#f3f4f6',
-                            }}
-                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        >
-                            <X size={22} color={colors.textSecondary} />
-                        </TouchableOpacity>
+                        <X size={22} color={colors.textSecondary} />
+                    </TouchableOpacity>
 
-                        <Text
-                            style={{
-                                fontSize: 18,
-                                fontWeight: 'bold',
-                                fontFamily: 'montserrat-bold',
-                                color: colors.textPrimary,
-                            }}
-                        >
-                            Create Blog Post
-                        </Text>
-
-                        <TouchableOpacity
-                            onPress={handlePost}
-                            disabled={loading || !isPostButtonEnabled}
-                            style={{
-                                padding: 8,
-                                borderRadius: 8,
-                                backgroundColor: isPostButtonEnabled ? colors.primary : isDark ? colors.surface : '#f3f4f6',
-                                opacity: loading ? 0.5 : 1,
-                            }}
-                        >
-                            {loading ? (
-                                <ActivityIndicator size="small" color="white" />
-                            ) : (
-                                <Text
-                                    style={{
-                                        fontWeight: '600',
-                                        fontFamily: 'montserrat-semibold',
-                                        color: isPostButtonEnabled ? '#ffffff' : colors.textMuted,
-                                    }}
-                                >
-                                    Post
-                                </Text>
-                            )}
-                        </TouchableOpacity>
-                    </View>
-
-                    <KeyboardAvoidingView
-                        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                        style={{ flex: 1 }}
-                        keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+                    <Text
+                        style={{
+                            fontSize: 18,
+                            fontWeight: 'bold',
+                            fontFamily: 'montserrat-bold',
+                            color: colors.textPrimary,
+                        }}
                     >
-                        <ScrollView
-                            ref={scrollViewRef}
-                            style={{ flex: 1 }}
-                            contentContainerStyle={{ padding: 16 }}
-                            showsVerticalScrollIndicator={false}
-                        >
+                        {isEditMode ? 'Edit Blog Post' : 'Create Blog Post'}
+                    </Text>
+
+                    <TouchableOpacity
+                        onPress={handlePost}
+                        disabled={loading || !isPostButtonEnabled}
+                        style={{
+                            padding: 8,
+                            borderRadius: 8,
+                            backgroundColor: isPostButtonEnabled ? colors.primary : isDark ? colors.surface : '#f3f4f6',
+                            opacity: loading ? 0.5 : 1,
+                        }}
+                    >
+                        {loading ? (
+                            <ActivityIndicator size="small" color="white" />
+                        ) : (
+                            <Text
+                                style={{
+                                    fontWeight: '600',
+                                    fontFamily: 'montserrat-semibold',
+                                    color: isPostButtonEnabled ? '#ffffff' : colors.textMuted,
+                                }}
+                            >
+                                {isEditMode ? 'Update' : 'Post'}
+                            </Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+
+                <KeyboardAvoidingView
+                    behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                    style={{ flex: 1 }}
+                    keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+                >
+                    <ScrollView
+                        style={{ flex: 1 }}
+                        contentContainerStyle={{ padding: 16 }}
+                        ref={scrollViewRef}
+                        showsVerticalScrollIndicator={false}
+                        keyboardShouldPersistTaps="handled"
+                    >
+                        {/* Main Form Content */}
+                        <View style={{ flex: 1 }}>
                             {/* Blog Title */}
                             <View style={{ marginBottom: 16 }}>
                                 <Text
@@ -359,7 +514,7 @@ const BlogPostCreator = ({
                                         color: colors.textPrimary,
                                     }}
                                 >
-                                    Post Title (Optional)
+                                    Post Title {isEditMode ? '' : '(Optional)'}
                                 </Text>
                                 <TextInput
                                     ref={titleInputRef}
@@ -501,54 +656,15 @@ const BlogPostCreator = ({
                                                 </Text>
                                             </View>
                                         ) : (
-                                            <ScrollView
-                                                nestedScrollEnabled
+                                            <FlatList
+                                                data={categories}
+                                                renderItem={renderCategoryItem}
+                                                keyExtractor={(item) => item.category_id.toString()}
                                                 style={{ maxHeight: 200 }}
                                                 showsVerticalScrollIndicator={false}
-                                            >
-                                                {categories.map((category, index) => (
-                                                    <TouchableOpacity
-                                                        key={category.category_id}
-                                                        onPress={() => selectCategory(category)}
-                                                        style={{
-                                                            flexDirection: 'row',
-                                                            alignItems: 'center',
-                                                            justifyContent: 'space-between',
-                                                            padding: 12,
-                                                            borderBottomWidth: index < categories.length - 1 ? 1 : 0,
-                                                            borderBottomColor: colors.border,
-                                                            backgroundColor: selectedCategory?.category_id === category.category_id
-                                                                ? colors.primaryBg
-                                                                : 'transparent',
-                                                        }}
-                                                    >
-                                                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                                                            <Text style={{ fontSize: 18, marginRight: 8 }}>{category.icon}</Text>
-                                                            <Text
-                                                                style={{
-                                                                    fontFamily: 'montserrat-medium',
-                                                                    fontSize: 15,
-                                                                    color: colors.textPrimary,
-                                                                }}
-                                                            >
-                                                                {category.category_name}
-                                                            </Text>
-                                                        </View>
-                                                        {selectedCategory?.category_id === category.category_id && (
-                                                            <View style={{
-                                                                backgroundColor: colors.primary,
-                                                                borderRadius: 10,
-                                                                width: 20,
-                                                                height: 20,
-                                                                alignItems: 'center',
-                                                                justifyContent: 'center',
-                                                            }}>
-                                                                <Text style={{ color: 'white', fontSize: 12 }}>✓</Text>
-                                                            </View>
-                                                        )}
-                                                    </TouchableOpacity>
-                                                ))}
-                                            </ScrollView>
+                                                scrollEnabled={true}
+                                                nestedScrollEnabled={true}
+                                            />
                                         )}
                                     </View>
                                 )}
@@ -564,85 +680,24 @@ const BlogPostCreator = ({
                                         color: colors.textPrimary,
                                     }}
                                 >
-                                    Images (Optional)
+                                    Images {isEditMode ? '' : '(Optional)'}
                                 </Text>
 
                                 {/* Selected Images */}
                                 {selectedImages.length > 0 && (
-                                    <ScrollView
-                                        horizontal
-                                        showsHorizontalScrollIndicator={false}
-                                        style={{ marginBottom: 16 }}
-                                        contentContainerStyle={{ paddingRight: 8 }}
-                                    >
-                                        {selectedImages.map((uri, index) => (
-                                            <View
-                                                key={index}
-                                                style={{
-                                                    marginRight: 12,
-                                                    borderRadius: 12,
-                                                    overflow: 'hidden',
-                                                    position: 'relative',
-                                                    borderWidth: 1,
-                                                    borderColor: colors.border,
-                                                }}
-                                            >
-                                                <Image
-                                                    source={{ uri }}
-                                                    style={{
-                                                        width: 100,
-                                                        height: 100,
-                                                        borderRadius: 8,
-                                                    }}
-                                                />
-                                                <TouchableOpacity
-                                                    onPress={() => removeImage(index)}
-                                                    style={{
-                                                        position: 'absolute',
-                                                        top: 4,
-                                                        right: 4,
-                                                        backgroundColor: 'rgba(0,0,0,0.6)',
-                                                        borderRadius: 12,
-                                                        width: 24,
-                                                        height: 24,
-                                                        alignItems: 'center',
-                                                        justifyContent: 'center',
-                                                    }}
-                                                >
-                                                    <X size={16} color="white" />
-                                                </TouchableOpacity>
-                                            </View>
-                                        ))}
-
-                                        {/* Add more button */}
-                                        {selectedImages.length < 4 && (
-                                            <TouchableOpacity
-                                                onPress={pickImage}
-                                                style={{
-                                                    width: 100,
-                                                    height: 100,
-                                                    borderRadius: 12,
-                                                    borderWidth: 1,
-                                                    borderStyle: 'dashed',
-                                                    borderColor: colors.border,
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center',
-                                                }}
-                                            >
-                                                <ImageIcon size={24} color={colors.textMuted} />
-                                                <Text
-                                                    style={{
-                                                        marginTop: 8,
-                                                        fontSize: 12,
-                                                        fontFamily: 'montserrat',
-                                                        color: colors.textMuted,
-                                                    }}
-                                                >
-                                                    Add More
-                                                </Text>
-                                            </TouchableOpacity>
-                                        )}
-                                    </ScrollView>
+                                    <View style={{ marginBottom: 16, height: 100 }}>
+                                        <FlatList
+                                            horizontal
+                                            data={selectedImages}
+                                            renderItem={renderImageItem}
+                                            keyExtractor={(item, index) => index.toString()}
+                                            showsHorizontalScrollIndicator={false}
+                                            contentContainerStyle={{ paddingRight: 8 }}
+                                            ListFooterComponent={renderAddMoreButton}
+                                            scrollEnabled={true}
+                                            nestedScrollEnabled={true}
+                                        />
+                                    </View>
                                 )}
 
                                 {/* Image action buttons */}
@@ -766,8 +821,8 @@ const BlogPostCreator = ({
                                     </View>
                                 </TouchableOpacity>
                             </View>
-                        </ScrollView>
-                    </KeyboardAvoidingView>
+                        </View>
+                    </ScrollView>
 
                     {/* Bottom Action Buttons */}
                     <View
@@ -831,15 +886,15 @@ const BlogPostCreator = ({
                                                 fontSize: 15,
                                             }}
                                         >
-                                            Post Blog
+                                            {isEditMode ? 'Update Post' : 'Post Blog'}
                                         </Text>
                                     </View>
                                 )}
                             </TouchableOpacity>
                         </View>
                     </View>
-                </SafeAreaView>
-            </View>
+                </KeyboardAvoidingView>
+            </SafeAreaView>
         </Modal>
     );
 };
