@@ -9,7 +9,7 @@ const routes = require("./app/routes/route.js");
 const cors = require("cors");
 const path = require('path');
 const fs = require('fs');
-
+require('./app/scheduler')
 // Initialize express app
 const app = express();
 
