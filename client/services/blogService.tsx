@@ -1,4 +1,4 @@
-import { fetchData, postData, updateData, deleteData, uploadImage } from './api';
+import { fetchData, postData, updateData, deleteData, postImageData } from './api';
 
 // Blog interfaces
 export interface Blog {
@@ -68,8 +68,6 @@ export const addBlog = async (blogData) => {
             formData.append('is_featured', blogData.is_featured.toString());
         }
 
-
-
         // Add image if it exists
         if (blogData.image) {
             // Get the file extension
@@ -77,18 +75,18 @@ export const addBlog = async (blogData) => {
             const fileType = uriParts[uriParts.length - 1];
 
             // Create file object with the correct format for React Native
-            const imageFile = {
+            const fileInfo = {
                 uri: blogData.image,
                 name: `photo.${fileType}`,
                 type: `image/${fileType === 'jpg' ? 'jpeg' : fileType}`
             };
 
-            console.log('Appending image:', imageFile);
-            formData.append('image', imageFile);
+            // Append the file with the field name your backend expects
+            formData.append('image', fileInfo);
         }
 
-        // Use the postFormData function to send multipart/form-data
-        return await postData('/api/blog/addBlog', formData);
+        // Use postImageData instead of uploadImage
+        return await postImageData('/api/blog/addBlog', formData);
     } catch (error) {
         console.error('Error in addBlog:', error);
         throw error.response?.data?.error || error.message || 'Failed to add blog';

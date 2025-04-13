@@ -17,6 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useColorScheme } from 'nativewind';
 import { router } from "expo-router";
 import * as Haptics from 'expo-haptics';
+import { API_BASE_URL } from '../../services/api';
 
 // Import components
 import CreateGroupModal from '../../components/GroupModal';
@@ -413,30 +414,50 @@ export default function ChatScreen() {
         </View>
     );
 
+
     // Helper functions
     const getRoomDisplayName = (room) => {
-        // Use displayName property if it exists (from backend)
-        if (room.displayName) {
-            return room.displayName;
-        }
 
-        // Fall back to original logic if displayName isn't provided
         if (room.type === 'DM') {
             // Find the other user in the chat (not the current user)
-            return otherParticipant?.user_name || 'User';
+            const currentUserId = userDetails.user.user.user_id; // Get current user's ID from Redux state
+            const otherParticipant = room.participants?.find(p => p.user_id !== currentUserId);
+            return otherParticipant?.user?.user_name || 'User';
         }
         return room.name || 'Group';
     };
 
     const getRoomAvatar = (room) => {
+        // If avatar exists, generate full URL
+
         if (room.avatar) {
-            return room.avatar;
+            // Check if it's already a full URL
+            if (room.avatar.startsWith('http://') || room.avatar.startsWith('https://')) {
+                return room.avatar;
+            }
+
+            // Generate full URL using API base URL
+            return `${API_BASE_URL}${room.avatar}`;
         }
 
+        // For direct messages, try to get participant avatar
         if (room.type === 'DM') {
             const otherParticipant = room.participants?.find(p => p.user_id !== 1);
-            return otherParticipant?.user?.avatar;
+
+            // If other participant has an avatar, generate full URL
+            if (otherParticipant?.user?.avatar) {
+                const participantAvatar = otherParticipant.user.avatar;
+
+                // Check if it's already a full URL
+                if (participantAvatar.startsWith('http://') || participantAvatar.startsWith('https://')) {
+                    return participantAvatar;
+                }
+
+                // Generate full URL using API base URL
+                return `${API_BASE_URL}${participantAvatar}`;
+            }
         }
+
         return null;
     };
 

@@ -316,3 +316,59 @@ export const useSettings = () => {
         exportUserData
     };
 };
+
+// Language Options (Aligned with User model default 'en')
+export const LANGUAGE_OPTIONS = [
+    { value: 'en', label: 'English' },
+    { value: 'es', label: 'Spanish' },
+    { value: 'fr', label: 'French' },
+    { value: 'de', label: 'German' },
+    { value: 'zh', label: 'Chinese' },
+    { value: 'ja', label: 'Japanese' },
+    { value: 'ko', label: 'Korean' },
+    { value: 'ru', label: 'Russian' }
+];
+
+// Timezone Options (Aligned with User model default 'UTC')
+export const TIMEZONE_OPTIONS = [
+    { value: 'UTC', label: 'Coordinated Universal Time (UTC)' },
+    { value: 'America/New_York', label: 'Eastern Time (UTC-5)' },
+    { value: 'America/Chicago', label: 'Central Time (UTC-6)' },
+    { value: 'America/Denver', label: 'Mountain Time (UTC-7)' },
+    { value: 'America/Los_Angeles', label: 'Pacific Time (UTC-8)' },
+    { value: 'Europe/London', label: 'British Time (UTC+0)' },
+    { value: 'Europe/Paris', label: 'Central European Time (UTC+1)' },
+    { value: 'Europe/Moscow', label: 'Moscow Time (UTC+3)' },
+    { value: 'Asia/Tokyo', label: 'Japan Standard Time (UTC+9)' },
+    { value: 'Australia/Sydney', label: 'Australian Eastern Time (UTC+10)' }
+];
+
+// Theme Preference Options (Aligned with User model theme_preference)
+export const THEME_OPTIONS = [
+    { value: 'auto', label: 'System Default' },
+    { value: 'light', label: 'Light Mode' },
+    { value: 'dark', label: 'Dark Mode' }
+];
+
+// Gender Options (Made optional as in the schema)
+export const GENDER_OPTIONS = [
+    { value: 'male', label: 'Male' },
+    { value: 'female', label: 'Female' },
+    { value: null, label: 'Prefer Not to Say' }
+];
+
+// Reminder Sound Options (Custom addition for app functionality)
+export const REMINDER_SOUND_OPTIONS = [
+    { value: 'default', label: 'Default System Sound' },
+    { value: 'gentle_chime', label: 'Gentle Chime' },
+    { value: 'soft_bell', label: 'Soft Bell' },
+    { value: 'electronic_ping', label: 'Electronic Ping' },
+    { value: 'silent', label: 'Silent' }
+];
+
+// Device Type Options (for UserDevice model)
+export const DEVICE_TYPE_OPTIONS = [
+    { value: 'IOS', label: 'iOS' },
+    { value: 'ANDROID', label: 'Android' },
+    { value: 'WEB', label: 'Web' }
+];

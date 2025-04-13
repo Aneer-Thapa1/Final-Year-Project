@@ -12,6 +12,7 @@ const profileRoute = require('./profileRoute');
 const commentRoute = require('./commentRoute');
 const notificationRoute = require('./notificationRoute');
 const settingsRoute = require('./settingsRoute');
+const analyticsRoute = require('./analyticsRoute');
 
 const router = express.Router();
 
@@ -51,7 +52,10 @@ router.use('/comments', commentRoute)
 // routes related to notification (/api/notification)
 router.use('/notifications', notificationRoute)
 
-// routes related to notification (/api/notification)
+// routes related to settings (/api/settings)
 router.use('/settings', settingsRoute)
+
+// routes related to analytics (/api/analytics)
+router.use('/analytics', analyticsRoute)
 
 module.exports = router;

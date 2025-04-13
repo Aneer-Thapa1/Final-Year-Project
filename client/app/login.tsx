@@ -307,7 +307,7 @@ const Login = () => {
 
     const handleForgotPassword = debounce(() => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push('/forgot-password');
+        router.push('/forgotPassword');
     }, 300, { leading: true, trailing: false });
 
     const togglePasswordVisibility = () => {

@@ -1,10 +1,9 @@
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
-import { Platform } from 'react-native';
 import * as mime from 'react-native-mime-types';
 
-export const API_BASE_URL = 'https://725d-2400-74e0-10-31cd-38f2-d835-d76b-31e7.ngrok-free.app';
+export const API_BASE_URL = 'https://dbe9-2400-74e0-10-31cd-8def-8c40-96cf-23d2.ngrok-free.app';
 
 // Set up a basic configuration for making API requests
 const api = axios.create({
@@ -89,6 +88,7 @@ export const fetchData = async (endpoint: string) => {
  */
 export const postImageData = async (endpoint: string, formData: FormData) => {
     try {
+
         // Create custom config for formData
         const config = {
             headers: {
@@ -227,7 +227,7 @@ const getFileInfo = async (uri: string) => {
 };
 
 /**
- * Enhanced function to upload an image with better error handling and file type detection
+ *  function to upload an image with better error handling and file type detection
  * @param {string} imageUri - The URI of the image to upload
  * @param {Object} options - Additional options for the upload
  * @returns {Promise<string>} The URL of the uploaded image

@@ -226,7 +226,7 @@ const Profile = () => {
                                         </Text>
                                     </View>
                                     <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
-                                        Level
+                                        Daily Goal
                                     </Text>
                                 </View>
                             </MotiView>

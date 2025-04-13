@@ -5,7 +5,6 @@ import {
     TextInput,
     TouchableOpacity,
     Image,
-    FlatList,
     KeyboardAvoidingView,
     Platform,
     Modal,
@@ -308,8 +307,8 @@ const BlogPostCreator = ({
 
     const isPostButtonEnabled = (title.trim() || content.trim() || selectedImages.length > 0) && selectedCategory;
 
-    // Render category item for FlatList
-    const renderCategoryItem = ({ item, index }) => (
+    // Render category item for mapping
+    const renderCategoryItem = (item, index) => (
         <TouchableOpacity
             key={item.category_id}
             onPress={() => selectCategory(item)}
@@ -344,7 +343,7 @@ const BlogPostCreator = ({
     );
 
     // Render image item for the horizontal image list
-    const renderImageItem = ({ item, index }) => (
+    const renderImageItem = (item, index) => (
         <View
             key={index}
             style={{
@@ -635,7 +634,7 @@ const BlogPostCreator = ({
                                     />
                                 </TouchableOpacity>
 
-                                {/* Categories Dropdown */}
+                                {/* Categories Dropdown - FIXED: Replaced FlatList with ScrollView */}
                                 {isCategorySelectorVisible && (
                                     <View
                                         style={{
@@ -656,15 +655,13 @@ const BlogPostCreator = ({
                                                 </Text>
                                             </View>
                                         ) : (
-                                            <FlatList
-                                                data={categories}
-                                                renderItem={renderCategoryItem}
-                                                keyExtractor={(item) => item.category_id.toString()}
+                                            <ScrollView
                                                 style={{ maxHeight: 200 }}
                                                 showsVerticalScrollIndicator={false}
-                                                scrollEnabled={true}
                                                 nestedScrollEnabled={true}
-                                            />
+                                            >
+                                                {categories.map((item, index) => renderCategoryItem(item, index))}
+                                            </ScrollView>
                                         )}
                                     </View>
                                 )}
@@ -683,20 +680,19 @@ const BlogPostCreator = ({
                                     Images {isEditMode ? '' : '(Optional)'}
                                 </Text>
 
-                                {/* Selected Images */}
+                                {/* Selected Images - FIXED: Replaced horizontal FlatList with ScrollView */}
                                 {selectedImages.length > 0 && (
                                     <View style={{ marginBottom: 16, height: 100 }}>
-                                        <FlatList
+                                        <ScrollView
                                             horizontal
-                                            data={selectedImages}
-                                            renderItem={renderImageItem}
-                                            keyExtractor={(item, index) => index.toString()}
                                             showsHorizontalScrollIndicator={false}
                                             contentContainerStyle={{ paddingRight: 8 }}
-                                            ListFooterComponent={renderAddMoreButton}
                                             scrollEnabled={true}
                                             nestedScrollEnabled={true}
-                                        />
+                                        >
+                                            {selectedImages.map((item, index) => renderImageItem(item, index))}
+                                            {renderAddMoreButton()}
+                                        </ScrollView>
                                     </View>
                                 )}
 

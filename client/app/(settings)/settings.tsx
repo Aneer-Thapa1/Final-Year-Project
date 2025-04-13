@@ -12,7 +12,8 @@ import {
     Modal,
     Platform,
     StatusBar,
-    SafeAreaView
+    SafeAreaView,
+    Image
 } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
 import {
@@ -32,12 +33,13 @@ import {
     Calendar,
     Save,
     X,
-    ChevronLeft
+    ChevronLeft,
+    Camera,
+    Upload
 } from 'lucide-react-native';
 import ModalSelector from 'react-native-modal-selector';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-// Import settings service actions
+import * as ImagePicker from 'expo-image-picker';
 import {
     getUserSettings,
     updateProfile,
@@ -55,6 +57,8 @@ import {
 
 // Import navigation
 import { useNavigation } from '@react-navigation/native';
+import { router } from "expo-router";
+import images from "../../constants/images";
 
 export default function SettingsScreen() {
     const dispatch = useDispatch();
@@ -78,7 +82,7 @@ export default function SettingsScreen() {
         dailyGoal,
         weeklyGoal,
         onVacation
-    } = userState?.user.user || {};
+    } = userState?.user?.user || {};
 
     // Loading state for actions
     const [loading, setLoading] = useState({
@@ -89,19 +93,22 @@ export default function SettingsScreen() {
         notifications: false,
         password: false,
         profile: false,
-        goals: false
+        goals: false,
+        avatar: false
     });
 
     // Form states for editing
     const [passwordModalVisible, setPasswordModalVisible] = useState(false);
     const [profileModalVisible, setProfileModalVisible] = useState(false);
     const [goalsModalVisible, setGoalsModalVisible] = useState(false);
+    const [avatarModalVisible, setAvatarModalVisible] = useState(false);
 
     // Password change form
     const [passwordForm, setPasswordForm] = useState({
         currentPassword: '',
         newPassword: '',
-        confirmPassword: ''
+        confirmPassword: '',
+        isForDeletion: false
     });
 
     // Profile form
@@ -117,6 +124,18 @@ export default function SettingsScreen() {
         weeklyGoal: weeklyGoal || 15,
         onVacation: onVacation || false
     });
+
+    // Avatar state
+    const [selectedAvatar, setSelectedAvatar] = useState(avatar);
+
+    // Format data for dropdown selectors
+    const formatOptions = (options) => {
+        return options.map((option, index) => ({
+            key: option.value,
+            label: option.label,
+            component: <Text>{option.label}</Text>
+        }));
+    };
 
     // Handle system theme changes
     useEffect(() => {
@@ -138,96 +157,55 @@ export default function SettingsScreen() {
             weeklyGoal: weeklyGoal || 15,
             onVacation: onVacation || false
         });
-    }, [user_name, user_email, gender, dailyGoal, weeklyGoal, onVacation]);
+
+        setSelectedAvatar(avatar);
+    }, [user_name, user_email, gender, dailyGoal, weeklyGoal, onVacation, avatar]);
 
     // Determine if dark mode is active based on either preference or system
     const isDark = theme_preference === 'dark' ||
         (theme_preference === 'auto' && systemColorScheme === 'dark');
 
-    // Available languages
-    const languages = LANGUAGE_OPTIONS || [];
+    // Format options for selectors
+    const languages = formatOptions(LANGUAGE_OPTIONS || []);
+    const themeOptions = formatOptions([
+        { value: 'light', label: 'Light Theme' },
+        { value: 'dark', label: 'Dark Theme' },
+        { value: 'auto', label: 'System Default' }
+    ]);
+    const genderOptions = formatOptions(GENDER_OPTIONS || []);
+    const timezones = formatOptions(TIMEZONE_OPTIONS || []);
+    const reminderSounds = formatOptions(REMINDER_SOUND_OPTIONS || []);
 
-    // Theme options
-    const themeOptions = [
-        { key: 'light', label: 'Light Theme' },
-        { key: 'dark', label: 'Dark Theme' },
-        { key: 'auto', label: 'System Default' }
-    ];
-
-    // Gender options
-    const genderOptions = GENDER_OPTIONS || [];
-
-    // Time zones (simplified list)
-    const timezones = TIMEZONE_OPTIONS || [];
-
-    // Reminder sound options
-    const reminderSounds = REMINDER_SOUND_OPTIONS || [];
-
-    // Helper functions that don't use find method
-    // Get current language name from language code
+    // Helper functions to get current settings values
     const getCurrentLanguage = () => {
-        if (!language || !languages || !Array.isArray(languages)) {
-            return 'English'; // Default fallback
-        }
-
-        // Manual find implementation
-        for (let i = 0; i < languages.length; i++) {
-            if (languages[i].key === language) {
-                return languages[i].label;
-            }
-        }
-        return 'English'; // Fallback if not found
+        const found = LANGUAGE_OPTIONS.find(item => item.value === language);
+        return found ? found.label : 'English';
     };
 
-    // Get current theme name
     const getCurrentTheme = () => {
-        if (!theme_preference || !themeOptions || !Array.isArray(themeOptions)) {
-            return 'System Default'; // Default fallback
-        }
-
-        // Manual find implementation
-        for (let i = 0; i < themeOptions.length; i++) {
-            if (themeOptions[i].key === theme_preference) {
-                return themeOptions[i].label;
-            }
-        }
-        return 'System Default'; // Fallback if not found
+        if (theme_preference === 'light') return 'Light Theme';
+        if (theme_preference === 'dark') return 'Dark Theme';
+        return 'System Default';
     };
 
-    // Get current reminder sound name
     const getCurrentReminderSound = () => {
-        if (!reminder_sound || !reminderSounds || !Array.isArray(reminderSounds)) {
-            return 'Gentle Chime'; // Default fallback
-        }
-
-        // Manual find implementation
-        for (let i = 0; i < reminderSounds.length; i++) {
-            if (reminderSounds[i].key === reminder_sound) {
-                return reminderSounds[i].label;
-            }
-        }
-        return 'Gentle Chime'; // Fallback if not found
+        const found = REMINDER_SOUND_OPTIONS.find(item => item.value === reminder_sound);
+        return found ? found.label : 'Default System Sound';
     };
 
-    // Get current gender display name
     const getCurrentGender = () => {
-        if (!gender || !genderOptions || !Array.isArray(genderOptions)) {
-            return 'Not specified'; // Default fallback
-        }
-
-        // Manual find implementation
-        for (let i = 0; i < genderOptions.length; i++) {
-            if (genderOptions[i].key === gender) {
-                return genderOptions[i].label;
-            }
-        }
-        return 'Not specified'; // Fallback if not found
+        const found = GENDER_OPTIONS.find(item => item.value === gender);
+        return found ? found.label : 'Prefer Not to Say';
     };
 
-    // Custom Redux action dispatchers to prevent undefined errors
+    const getCurrentTimezone = () => {
+        const found = TIMEZONE_OPTIONS.find(item => item.value === timezone);
+        return found ? found.label : 'Coordinated Universal Time (UTC)';
+    };
+
+    // Custom Redux action dispatchers
     const updateUserProfile = (data) => {
         try {
-            // Check if the profile action exists in userSlice
             if (dispatch && typeof dispatch === 'function') {
                 dispatch({ type: 'user/updateProfile', payload: data });
             }
@@ -263,6 +241,79 @@ export default function SettingsScreen() {
             }
         } catch (error) {
             console.error("Error dispatching updatePassword:", error);
+        }
+    };
+
+    // Handle avatar selection
+    const handlePickAvatar = async (source) => {
+        try {
+            let result;
+
+            if (source === 'camera') {
+                // Ask for camera permission
+                const { status } = await ImagePicker.requestCameraPermissionsAsync();
+                if (status !== 'granted') {
+                    Alert.alert('Permission Denied', 'We need camera permissions to take a photo');
+                    return;
+                }
+
+                result = await ImagePicker.launchCameraAsync({
+                    allowsEditing: true,
+                    aspect: [1, 1],
+                    quality: 0.5,
+                });
+            } else {
+                // Ask for media library permission
+                const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (status !== 'granted') {
+                    Alert.alert('Permission Denied', 'We need media library permissions to select a photo');
+                    return;
+                }
+
+                result = await ImagePicker.launchImageLibraryAsync({
+                    mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                    allowsEditing: true,
+                    aspect: [1, 1],
+                    quality: 0.5,
+                });
+            }
+
+            if (!result.canceled) {
+                setSelectedAvatar(result.assets[0].uri);
+                handleUpdateAvatar(result.assets[0].uri);
+                setAvatarModalVisible(false);
+            }
+        } catch (error) {
+            console.error('Error picking image:', error);
+            Alert.alert('Error', 'Failed to select image. Please try again.');
+        }
+    };
+
+    // Handle avatar update
+    const handleUpdateAvatar = async (avatarUri) => {
+        try {
+            setLoading(prev => ({ ...prev, avatar: true }));
+
+            // Create a form data object to upload the image
+            const formData = new FormData();
+            formData.append('avatar', {
+                uri: avatarUri,
+                type: 'image/jpeg',
+                name: 'profile-picture.jpg',
+            });
+
+            // Call API to update profile picture
+            const response = await updateProfile({ avatar: avatarUri });
+
+            // Update Redux state
+            updateUserProfile({ avatar: avatarUri });
+
+            Alert.alert('Success', 'Profile picture updated successfully');
+        } catch (error) {
+            console.error('Error updating avatar:', error);
+            Alert.alert('Error', 'Failed to update profile picture. Please try again.');
+        } finally {
+            setLoading(prev => ({ ...prev, avatar: false }));
         }
     };
 
@@ -304,7 +355,7 @@ export default function SettingsScreen() {
                 passwordForm.confirmPassword
             );
 
-            // Update Redux if needed (safely)
+            // Update Redux if needed
             updateUserPassword({
                 success: true,
                 message: response?.message || 'Password updated successfully'
@@ -317,7 +368,8 @@ export default function SettingsScreen() {
             setPasswordForm({
                 currentPassword: '',
                 newPassword: '',
-                confirmPassword: ''
+                confirmPassword: '',
+                isForDeletion: false
             });
             setPasswordModalVisible(false);
         } catch (error) {
@@ -352,7 +404,7 @@ export default function SettingsScreen() {
                 gender: profileForm.gender
             });
 
-            // Update Redux safely
+            // Update Redux
             updateUserProfile({
                 user_name: profileForm.user_name,
                 user_email: profileForm.user_email,
@@ -402,7 +454,7 @@ export default function SettingsScreen() {
                 });
             }
 
-            // Update Redux safely
+            // Update Redux
             updateUserGoals({
                 dailyGoal: dailyGoalNum,
                 weeklyGoal: weeklyGoalNum,
@@ -429,7 +481,7 @@ export default function SettingsScreen() {
             // Call the service function
             await updatePreferences({ theme_preference: option.key });
 
-            // Update Redux safely
+            // Update Redux
             updateUserPreferences({ theme_preference: option.key });
 
             // Success message
@@ -449,7 +501,7 @@ export default function SettingsScreen() {
             // Call the service function
             await updateProfile({ language: option.key });
 
-            // Update Redux safely
+            // Update Redux
             updateUserProfile({ language: option.key });
 
             // Success message
@@ -469,11 +521,11 @@ export default function SettingsScreen() {
             // Call the service function
             await updateProfile({ timezone: option.key });
 
-            // Update Redux safely
+            // Update Redux
             updateUserProfile({ timezone: option.key });
 
             // Success message
-            Alert.alert('Success', `Timezone updated to ${option.key}`);
+            Alert.alert('Success', `Timezone updated to ${option.label}`);
         } catch (error) {
             Alert.alert('Error', 'Failed to update timezone setting');
         } finally {
@@ -489,7 +541,7 @@ export default function SettingsScreen() {
             // Call the service function
             await updatePreferences({ notifications_enabled: value });
 
-            // Update Redux safely
+            // Update Redux
             updateUserPreferences({ notifications_enabled: value });
 
             // Success message
@@ -507,7 +559,7 @@ export default function SettingsScreen() {
             // Call the service function
             await updatePreferences({ reminder_sound: option.key });
 
-            // Update Redux safely
+            // Update Redux
             updateUserPreferences({ reminder_sound: option.key });
 
             // Success message
@@ -522,23 +574,33 @@ export default function SettingsScreen() {
         try {
             setLoading(prev => ({ ...prev, logout: true }));
 
-            // Clear local storage and logout
-            await logoutUser();
+            // Clear all AsyncStorage data
+            await AsyncStorage.clear();
 
-            // Dispatch logout action safely
+            // Call the logout service
+            try {
+                await logoutUser();
+            } catch (logoutError) {
+                console.warn("Error during logout API call:", logoutError);
+                // Continue with local logout even if API call fails
+            }
+
+            // Clear Redux state
             if (dispatch && typeof dispatch === 'function') {
                 dispatch({ type: 'user/logout' });
+
+                // Clear other state slices if needed
+                dispatch({ type: 'habits/resetState' });
+                dispatch({ type: 'statistics/resetState' });
+                dispatch({ type: 'notifications/resetState' });
             }
 
-            // Navigate to login screen (if using react-navigation)
-            if (navigation && navigation.navigate) {
-                navigation.reset({
-                    index: 0,
-                    routes: [{ name: 'Login' }]
-                });
-            }
+            // Navigate to login screen
+            router.push('/login');
         } catch (error) {
-            Alert.alert('Error', 'Failed to log out. Please try again.');
+            console.error('Error during logout:', error);
+            Alert.alert('Error', 'Failed to log out completely. Please try again.');
+        } finally {
             setLoading(prev => ({ ...prev, logout: false }));
         }
     };
@@ -591,7 +653,9 @@ export default function SettingsScreen() {
                                 // Show password modal for Android
                                 setPasswordModalVisible(true);
                                 setPasswordForm({
-                                    ...passwordForm,
+                                    currentPassword: '',
+                                    newPassword: '',
+                                    confirmPassword: '',
                                     isForDeletion: true
                                 });
                             }
@@ -615,22 +679,32 @@ export default function SettingsScreen() {
             // Call the service function
             await deleteAccount(password);
 
-            // Logout after deletion
-            await logoutUser();
+            // Clear all AsyncStorage data
+            await AsyncStorage.clear();
+
+            // Clear Redux state
             if (dispatch && typeof dispatch === 'function') {
                 dispatch({ type: 'user/logout' });
+                dispatch({ type: 'habits/resetState' });
+                dispatch({ type: 'statistics/resetState' });
+                dispatch({ type: 'notifications/resetState' });
             }
 
             // Navigate to login screen
-            if (navigation && navigation.navigate) {
-                navigation.reset({
-                    index: 0,
-                    routes: [{ name: 'Login' }]
-                });
-            }
+            router.push('/login');
         } catch (error) {
             Alert.alert('Error', error?.message || 'Failed to delete account');
         }
+    };
+
+    // Get fallback avatar based on gender
+    const getFallbackAvatar = () => {
+        if (gender === 'male') {
+            return images.maleProfile;
+        } else if (gender === 'female') {
+            return images.femaleProfile || images.blogImage;
+        }
+        return images.blogImage;
     };
 
     // Theme-based styles
@@ -684,13 +758,34 @@ export default function SettingsScreen() {
                 {/* User Info Bar */}
                 <View className={`${styles.cardBg} px-4 py-5 mt-4 mb-4 rounded-xl shadow-sm`}>
                     <View className="flex-row justify-between items-center">
-                        <View>
-                            <Text className={`text-lg font-montserrat-bold ${styles.text}`}>
-                                {user_name || 'User'}
-                            </Text>
-                            <Text className={`font-montserrat-medium ${styles.textMuted}`}>
-                                {user_email || 'email@example.com'}
-                            </Text>
+                        <View className="flex-row items-center">
+                            <TouchableOpacity
+                                onPress={() => setAvatarModalVisible(true)}
+                                className="mr-3 relative"
+                            >
+                                <Image
+                                    source={selectedAvatar ? { uri: selectedAvatar } : getFallbackAvatar()}
+                                    className="w-14 h-14 rounded-full"
+                                />
+                                <View className="absolute bottom-0 right-0 bg-primary-500 rounded-full p-1">
+                                    <Camera size={12} color="#FFFFFF" />
+                                </View>
+
+                                {loading.avatar && (
+                                    <View className="absolute inset-0 bg-black/30 rounded-full items-center justify-center">
+                                        <ActivityIndicator size="small" color="#FFFFFF" />
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+
+                            <View>
+                                <Text className={`text-lg font-montserrat-bold ${styles.text}`}>
+                                    {user_name || 'User'}
+                                </Text>
+                                <Text className={`font-montserrat-medium ${styles.textMuted}`}>
+                                    {user_email || 'email@example.com'}
+                                </Text>
+                            </View>
                         </View>
 
                         {premium_status ? (
@@ -917,7 +1012,10 @@ export default function SettingsScreen() {
                         Support & Legal
                     </Text>
 
-                    <TouchableOpacity className="flex-row justify-between items-center px-4 py-4">
+                    <TouchableOpacity
+                        className="flex-row justify-between items-center px-4 py-4"
+                        onPress={() => router.push('/help')}
+                    >
                         <View className="flex-row items-center">
                             <HelpCircle size={20} color={styles.iconColor} />
                             <Text className={`ml-3 font-montserrat-medium ${styles.text}`}>Help & Support</Text>
@@ -927,7 +1025,10 @@ export default function SettingsScreen() {
 
                     <View className={`h-px ${styles.separator}`} />
 
-                    <TouchableOpacity className="flex-row justify-between items-center px-4 py-4">
+                    <TouchableOpacity
+                        className="flex-row justify-between items-center px-4 py-4"
+                        onPress={() => router.push('/terms')}
+                    >
                         <View className="flex-row items-center">
                             <FileText size={20} color={styles.iconColor} />
                             <Text className={`ml-3 font-montserrat-medium ${styles.text}`}>Terms of Service</Text>
@@ -937,7 +1038,10 @@ export default function SettingsScreen() {
 
                     <View className={`h-px ${styles.separator}`} />
 
-                    <TouchableOpacity className="flex-row justify-between items-center px-4 py-4">
+                    <TouchableOpacity
+                        className="flex-row justify-between items-center px-4 py-4"
+                        onPress={() => router.push('/privacy')}
+                    >
                         <View className="flex-row items-center">
                             <FileText size={20} color={styles.iconColor} />
                             <Text className={`ml-3 font-montserrat-medium ${styles.text}`}>Privacy Policy</Text>
@@ -1280,6 +1384,57 @@ export default function SettingsScreen() {
                                         <Text className={`ml-2 font-montserrat-medium ${styles.buttonText.primary}`}>Save</Text>
                                     </>
                                 )}
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            {/* Avatar Selection Modal */}
+            <Modal
+                animationType="fade"
+                transparent={true}
+                visible={avatarModalVisible}
+                onRequestClose={() => setAvatarModalVisible(false)}
+            >
+                <View className={`flex-1 justify-center items-center ${styles.modalOverlay}`}>
+                    <View className={`${styles.modalBg} rounded-lg p-6 w-11/12 max-w-md shadow-lg`}>
+                        <View className="flex-row justify-between items-center mb-4">
+                            <Text className={`text-lg font-montserrat-bold ${styles.text}`}>Update Profile Picture</Text>
+                            <TouchableOpacity onPress={() => setAvatarModalVisible(false)}>
+                                <X size={20} color={styles.iconColor} />
+                            </TouchableOpacity>
+                        </View>
+
+                        <View className="items-center mb-6">
+                            <Image
+                                source={selectedAvatar ? { uri: selectedAvatar } : getFallbackAvatar()}
+                                className="w-24 h-24 rounded-full mb-4"
+                            />
+                        </View>
+
+                        <View className="space-y-3">
+                            <TouchableOpacity
+                                className={`${styles.button.primary} py-3 rounded-lg flex-row justify-center items-center`}
+                                onPress={() => handlePickAvatar('camera')}
+                            >
+                                <Camera size={20} color="#FFFFFF" />
+                                <Text className={`ml-2 font-montserrat-medium ${styles.buttonText.primary}`}>Take Photo</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                className={`${styles.button.secondary} py-3 rounded-lg flex-row justify-center items-center`}
+                                onPress={() => handlePickAvatar('gallery')}
+                            >
+                                <Upload size={20} color={isDark ? "#FFFFFF" : "#374151"} />
+                                <Text className={`ml-2 font-montserrat-medium ${styles.buttonText.secondary}`}>Choose from Gallery</Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                                className="py-3 rounded-lg flex-row justify-center items-center"
+                                onPress={() => setAvatarModalVisible(false)}
+                            >
+                                <Text className={`font-montserrat-medium ${styles.text}`}>Cancel</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
