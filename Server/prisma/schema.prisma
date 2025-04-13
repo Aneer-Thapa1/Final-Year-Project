@@ -47,19 +47,18 @@ model User {
   createdChatRooms   ChatRoom[]        @relation("CreatedChatRooms")
 
   // Habit Tracking Relationships
-  habits         Habit[]
-  habitLogs      HabitLog[]
-  habitStreaks   HabitStreak[]
-  habitReminders HabitReminder[]
-  habitResets    HabitReset[]
-  achievements   UserAchievement[]
-  challenges     UserChallenge[]
-  dailyStatuses  HabitDailyStatus[]
+  habits              Habit[]
+  habitLogs           HabitLog[]
+  habitStreaks        HabitStreak[]
+  habitReminders      HabitReminder[]
+  habitResets         HabitReset[]
+  achievements        UserAchievement[]
+  achievementProgress AchievementProgress[]
+  dailyStatuses       HabitDailyStatus[]
 
   // Reminder System Relationships
-  scheduledReminders      ScheduledReminder[]
-  notificationPreferences UserNotificationPreference[]
-  devices                 UserDevice[]
+  scheduledReminders ScheduledReminder[]
+  devices            UserDevice[]
 
   // Points System
   pointsLogs PointsLog[]
@@ -106,6 +105,7 @@ enum PointsSourceType {
   SOCIAL_ACTIVITY
   SYSTEM_BONUS
   ADMIN_ADJUSTMENT
+  SYSTEM_DEDUCTION
 }
 
 // 🔹 ScheduledReminder - For Individual Reminder Instances
@@ -136,23 +136,6 @@ model ScheduledReminder {
   @@index([is_sent, scheduled_time])
 }
 
-// Advanced settings for notifications
-model UserNotificationPreference {
-  preference_id Int      @id @default(autoincrement())
-  user_id       Int
-  type          String // 'REMINDER', 'STREAK', 'QUIET_HOURS', etc.
-  channel       String? // 'EMAIL', 'PUSH', null for general settings
-  enabled       Boolean  @default(true)
-  settings      Json? // Flexible JSON field for different settings
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // Relationship
-  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-
-  @@index([user_id, type, channel])
-}
-
 // For push notifications
 model UserDevice {
   device_id      Int       @id @default(autoincrement())
@@ -174,20 +157,6 @@ model UserDevice {
 
   @@index([user_id])
   @@index([token])
-}
-
-// 🔹 Leaderboard Cache - For optimizing leaderboard queries
-model LeaderboardCache {
-  id          Int      @id @default(autoincrement())
-  period_type String // 'WEEKLY', 'MONTHLY', 'ALL_TIME'
-  period_key  String // 'YYYY-WW' for weeks, 'YYYY-MM' for months
-  data        Json // Cached leaderboard results
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  expiresAt   DateTime
-
-  @@unique([period_type, period_key])
-  @@index([period_type, expiresAt])
 }
 
 // 🔹 Friend Request - For Social Connection Features
@@ -373,7 +342,6 @@ model Habit {
   habitLogs          HabitLog[]
   streak             HabitStreak[]
   reminders          HabitReminder[]
-  challenges         HabitChallenge[]
   resets             HabitReset[]
   dailyStatuses      HabitDailyStatus[]
   scheduledReminders ScheduledReminder[]
@@ -540,7 +508,8 @@ model Achievement {
   is_hidden      Boolean         @default(false)
 
   // Relationships
-  userAchievements UserAchievement[]
+  userAchievements    UserAchievement[]
+  achievementProgress AchievementProgress[]
 }
 
 // User-Achievement join table
@@ -566,52 +535,6 @@ enum AchievementType {
   HABIT_DIVERSITY
   DOMAIN_MASTERY
   SOCIAL_ENGAGEMENT
-}
-
-// 🔹 Challenge - For Social Challenges
-model Challenge {
-  challenge_id  Int      @id @default(autoincrement())
-  name          String
-  description   String
-  start_date    DateTime
-  end_date      DateTime
-  created_by    Int
-  is_public     Boolean  @default(false)
-  image         String?
-  points_reward Int      @default(50) // Points awarded for completing challenge
-
-  // Relationships
-  habitChallenges HabitChallenge[]
-  userChallenges  UserChallenge[]
-}
-
-// Challenge-Habit join table
-model HabitChallenge {
-  challenge_id Int
-  habit_id     Int
-
-  // Relationships
-  challenge Challenge @relation(fields: [challenge_id], references: [challenge_id], onDelete: Cascade)
-  habit     Habit     @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
-
-  @@id([challenge_id, habit_id])
-}
-
-// User-Challenge join table
-model UserChallenge {
-  user_id        Int
-  challenge_id   Int
-  joined_at      DateTime  @default(now())
-  progress       Float     @default(0)
-  completed      Boolean   @default(false)
-  completed_at   DateTime?
-  points_awarded Int       @default(0) // Track points awarded for completion
-
-  // Relationships
-  user      User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-  challenge Challenge @relation(fields: [challenge_id], references: [challenge_id], onDelete: Cascade)
-
-  @@id([user_id, challenge_id])
 }
 
 // 🔹 Blog - For Social Sharing and Progress Updates
@@ -708,19 +631,6 @@ enum NotificationType {
   POINTS_AWARDED
 }
 
-// 🔹 UserStats - For Analytics Dashboard
-model UserStats {
-  stat_id Int      @id @default(autoincrement())
-  user_id Int      @unique
-  date    DateTime @default(now())
-
-  // Daily stats
-  total_habits_completed Int     @default(0)
-  total_duration_tracked Int     @default(0)
-  streak_maintained      Boolean @default(false)
-  points_earned_today    Int     @default(0)
-}
-
 // 🔹 HabitReset - Tracks When and Why Streaks Reset
 model HabitReset {
   reset_id        Int         @id @default(autoincrement())
@@ -767,4 +677,25 @@ model HabitDailyStatus {
   @@unique([habit_id, date]) // Only one status per habit per day
   @@index([habit_id, date])
   @@index([user_id, date]) // For querying all habits for a user on a specific day
+}
+
+// 🔹 Achievement Progress - Tracks user progress toward achievements
+model AchievementProgress {
+  id               Int      @id @default(autoincrement())
+  user_id          Int
+  achievement_id   Int
+  current_value    Float    @default(0)
+  target_value     Float
+  percent_complete Int      @default(0)
+  last_updated     DateTime @default(now())
+  created_at       DateTime @default(now())
+
+  // Relationships
+  user        User        @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievement_id], references: [achievement_id], onDelete: Cascade)
+
+  @@unique([user_id, achievement_id], name: "user_id_achievement_id")
+  @@index([user_id])
+  @@index([achievement_id])
+  @@index([last_updated])
 }

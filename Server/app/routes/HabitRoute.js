@@ -29,9 +29,6 @@ router.post('/resetStreak/:habitId', validateToken, habitController.resetHabitSt
 router.post('/setStreak/:habitId', validateToken, habitController.setHabitStreak);
 router.get('/streakHistory/:habitId', validateToken, habitController.getHabitStreakHistory);
 
-// Analytics
-router.get('/analytics/:habitId', validateToken, habitController.getHabitAnalytics);
-
 // Domain management
 router.get('/domains', validateToken, habitController.getHabitDomains);
 router.post('/domains', validateToken, habitController.addHabitDomain);

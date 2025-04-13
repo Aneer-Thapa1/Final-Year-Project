@@ -83,13 +83,39 @@ export const createGroupChat = async (chatData: {
     is_private?: boolean;
 }) => {
     try {
-        console.log(chatData);
         // Validate required fields
         if (!chatData.name || !chatData.participants || chatData.participants.length < 2) {
             throw new Error('Group name and at least 2 participants are required');
         }
 
-        return await postImageData<ApiResponse<ChatRoom>>('/api/chat/rooms/group', chatData);
+        // Create a FormData object for mixed content (text + file)
+        const formData = new FormData();
+
+        // Add text fields
+        formData.append('name', chatData.name);
+        if (chatData.description) formData.append('description', chatData.description);
+
+        // Convert participants array to JSON string and append
+        formData.append('participants', JSON.stringify(chatData.participants));
+
+
+        // Add avatar if it exists
+        if (chatData.avatar) {
+            // Get file extension
+            const uriParts = chatData.avatar.split('.');
+            const fileType = uriParts[uriParts.length - 1];
+
+            // Create file object
+            const fileInfo = {
+                uri: chatData.avatar,
+                name: `avatar.${fileType}`,
+                type: `image/${fileType === 'jpg' ? 'jpeg' : fileType}`
+            };
+
+            formData.append('avatar', fileInfo);
+        }
+
+        return await postImageData('/api/chat/rooms/group', formData);
     } catch (error: any) {
         console.error('Error in createGroupChat:', error);
         throw error.response?.data?.error || error.message || 'Failed to create group chat';

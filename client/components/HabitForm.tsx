@@ -355,10 +355,7 @@ const HabitForm = ({ existingHabit, onSubmitSuccess, onCancel, isEditMode = fals
         updatedReminders.splice(index, 1);
         setHabitData(prev => ({ ...prev, reminders: updatedReminders }));
     };
-    const dismissKeyboard = () => {
-        // Only log, don't actually dismiss
-        console.log('[DEBUG] dismissKeyboard explicitly called - PREVENTED');
-    };
+
 
     // Toggle day selection for weekly habits
     const toggleDaySelection = (dayIndex) => {

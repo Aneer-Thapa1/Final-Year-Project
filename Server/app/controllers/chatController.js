@@ -497,7 +497,7 @@ const getChatMessages = async (req, res) => {
 
         res.json({
             success: true,
-            data: messages.reverse(), // Reverse to get chronological order
+            data: messages, // Reverse to get chronological order
             hasMore: messages.length === parseInt(limit)
         });
     } catch (error) {
@@ -849,7 +849,6 @@ const sendMessage = async (req, res) => {
         const { roomId } = req.params;
         const { content, message_type = 'TEXT', reply_to_id, media_url, media_type, media_size, media_width, media_height, media_duration } = req.body;
         const userId = parseInt(req.user);
-console.log("body", req.body);
         if (!content || content.trim() === '') {
             return res.status(400).json({
                 success: false,
@@ -1765,100 +1764,157 @@ const getFriendIds = async (userId) => {
 
 // Create a new group chat
 const createGroupChat = async (req, res) => {
-    try {
-        const {
-            name,
-            description,
-            participants = [],
-            avatar,
-            is_private = false
-        } = req.body;
-console.log(req.body)
-        console.log(name,  name,
-            description,
-            participants,
-            avatar,)
-        const userId = parseInt(req.user);
+    const {
+        name,
+        description,
+        participants,
+        is_private = false
+    } = req.body;
+    const userId = req.user;
+    const GROUP_CHAT_COST = 20; // Optional: if you want to charge points for creating a group chat
 
-        // Validate input
-        if (!name) {
-            return res.status(400).json({
-                success: false,
-                message: 'Group name is required'
-            });
-        }
-
-        const user = await prisma.user.findFirst({
-            where: {
-                user_id: parseInt(userId)
-            }
+    if (!name || !participants) {
+        return res.status(400).json({
+            error: 'Please enter all required details: name and participants.'
         });
-        // Ensure current user is included in participants
-        const participantSet = new Set([
-            ...participants,
-            parseInt(userId) // Always add the creator
-        ]);
+    }
 
-        // Create the group chat
-        const chatRoom = await prisma.chatRoom.create({
-            data: {
-                name,
-                description,
-                type: 'GROUP',
-                is_private,
-                created_by_id: userId,
-                avatar: avatar || generateDefaultGroupAvatar(name),
-                participants: {
-                    create: Array.from(participantSet).map(participantId => ({
-                        user_id: parseInt(participantId),
-                        isAdmin: parseInt(participantId) === userId
-                    }))
+    try {
+        // Use relative path for avatar
+        const avatarPath = req.file ? `/uploads/${req.file.filename}` : null;
+
+        const result = await prisma.$transaction(async (prisma) => {
+            // Find user
+            const user = await prisma.user.findUnique({
+                where: { user_id: parseInt(userId) }
+            });
+
+            if (!user) throw new Error('User not found');
+
+            // Optional: Point check if implementing point system
+            // if (user.points_gained < GROUP_CHAT_COST) throw new Error("Insufficient points to create group chat!");
+
+            // Normalize participants to an array
+            const participantsArray = Array.isArray(participants)
+                ? participants
+                : typeof participants === 'string'
+                    ? JSON.parse(participants)
+                    : [];
+
+            // Filter out invalid participant IDs
+            const validParticipants = participantsArray
+                .map(id => parseInt(id))
+                .filter(id => !isNaN(id) && id !== parseInt(userId));
+
+            // Ensure current user is included in participants
+            const participantSet = new Set([
+                ...validParticipants,
+                parseInt(userId) // Always add the creator
+            ]);
+
+            // Verify all participants exist
+            const existingParticipants = await prisma.user.findMany({
+                where: {
+                    user_id: {
+                        in: Array.from(participantSet)
+                    }
+                },
+                select: {
+                    user_id: true
                 }
-            },
-            include: {
-                participants: {
-                    include: {
-                        user: {
-                            select: {
-                                user_id: true,
-                                user_name: true,
-                                avatar: true
+            });
+
+            const existingParticipantIds = new Set(
+                existingParticipants.map(p => p.user_id)
+            );
+
+            // Ensure all participants actually exist in the database
+            if (existingParticipantIds.size !== participantSet.size) {
+                throw new Error('One or more participants do not exist');
+            }
+
+            // Optional: Deduct points if implementing point system
+            // const updatedUser = await prisma.user.update({
+            //     where: { user_id: parseInt(userId) },
+            //     data: { points_gained: user.points_gained - GROUP_CHAT_COST }
+            // });
+
+            // Optional: Log points deduction
+            // await prisma.pointsLog.create({
+            //     data: {
+            //         user_id: parseInt(userId),
+            //         points: -GROUP_CHAT_COST,
+            //         reason: "Group Chat Creation",
+            //         description: `Points spent to create group chat: "${name.substring(0, 30)}${name.length > 30 ? '...' : ''}"`,
+            //         source_type: "SYSTEM_DEDUCTION"
+            //     }
+            // });
+
+            // Create the group chat
+            const newGroupChat = await prisma.chatRoom.create({
+                data: {
+                    name,
+                    description,
+                    type: 'GROUP',
+                    is_private,
+                    created_by_id: parseInt(userId),
+                    avatar: avatarPath,
+                    participants: {
+                        create: Array.from(participantSet).map(participantId => ({
+                            user_id: participantId,
+                            isAdmin: participantId === parseInt(userId)
+                        }))
+                    }
+                },
+                include: {
+                    participants: {
+                        include: {
+                            user: {
+                                select: {
+                                    user_id: true,
+                                    user_name: true,
+                                    avatar: true
+                                }
                             }
                         }
                     }
                 }
-            }
+            });
+
+            // Create a system message about group creation
+            await prisma.message.create({
+                data: {
+                    room_id: newGroupChat.room_id,
+                    sender_id: parseInt(userId),
+                    content: `${user.user_name} created this group`,
+                    message_type: 'SYSTEM'
+                }
+            });
+
+            return { newGroupChat };
         });
 
-        // Create a system message about group creation
-        await prisma.message.create({
-            data: {
-                room_id: chatRoom.room_id,
-                sender_id: userId,
-                content: `${user.user_name} created this group`,
-                message_type: 'SYSTEM'
-            }
-        });
-
-        // Notify participants via socket
+        // Optional: Notify participants via socket
         const io = getIO();
-        Array.from(participantSet).forEach(participantId => {
-            io.to(`user:${participantId}`).emit('chatRoom:created', chatRoom);
+        Array.from(result.newGroupChat.participants.map(p => p.user_id)).forEach(participantId => {
+            io.to(`user:${participantId}`).emit('chatRoom:created', result.newGroupChat);
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
-            data: chatRoom
+            message: 'Group chat created successfully',
+            groupChat: result.newGroupChat
         });
+
     } catch (error) {
         console.error('Error creating group chat:', error);
-        res.status(500).json({
+        return res.status(403).json({
             success: false,
-            message: 'Failed to create group chat',
             error: error.message
         });
     }
 };
+
 
 // Add participants to a group chat
 const addGroupChatParticipants = async (req, res) => {
@@ -2433,7 +2489,6 @@ module.exports = {
     createGroupChat,
     addGroupChatParticipants,
     removeGroupChatParticipants,
-    generateDefaultGroupAvatar,
     getGroupChatParticipants,
     searchPotentialParticipants,
     getBlockedContacts,

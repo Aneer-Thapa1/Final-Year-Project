@@ -5,22 +5,34 @@ const router = express.Router();
 const validateToken = require('../middleware/authMiddleware');
 const notificationController = require('../controllers/notificationController');
 
-// Prefix all routes with /api/notifications
+// Get user's notifications
+router.get('/', validateToken, notificationController.getUserNotifications);
 
-// Route to get user's notifications (protected)
-router.get('/getNotification', validateToken, notificationController.getUserNotifications);
-
-// Route to get unread notification count (protected)
+// Get unread notification count
 router.get('/unread-count', validateToken, notificationController.getUnreadNotificationCount);
 
-// Route to mark a specific notification as read (protected)
-router.put('/:notification_id/read', validateToken, notificationController.markNotificationAsRead);
+// Get notification stats
+router.get('/stats', validateToken, notificationController.getNotificationStats);
 
-// Route to mark all notifications as read (protected)
-router.put('/mark-all-read', validateToken, notificationController.markAllNotificationsAsRead);
+// Mark multiple notifications as read
+router.patch('/read', validateToken, notificationController.markNotificationsAsRead);
 
-// Route to delete a specific notification (protected)
+// Mark a single notification as read
+router.patch('/:notification_id/read', validateToken, notificationController.markNotificationAsRead);
+
+// Legacy route - mark all as read
+router.put('/mark-all-read', validateToken, (req, res) => {
+    req.body = { all: true };
+    notificationController.markNotificationsAsRead(req, res);
+});
+
+// Delete multiple notifications
+router.delete('/', validateToken, notificationController.deleteNotifications);
+
+// Delete a single notification
 router.delete('/:notification_id', validateToken, notificationController.deleteNotification);
 
-// Export the router
+// Create a notification (internal use)
+router.post('/', validateToken, notificationController.createNotification);
+
 module.exports = router;

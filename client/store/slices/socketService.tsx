@@ -38,7 +38,7 @@ interface MessageData {
 
 // Singleton socket instance
 let socket: Socket | null = null;
-const SERVER_URL = 'https://725d-2400-74e0-10-31cd-38f2-d835-d76b-31e7.ngrok-free.app';
+const SERVER_URL = 'https://dbe9-2400-74e0-10-31cd-8def-8c40-96cf-23d2.ngrok-free.app';
 
 /**
  * Initialize the socket connection with the server
@@ -58,7 +58,6 @@ export const initializeSocket = async (): Promise<Socket | null> => {
 
         // Get token directly from AsyncStorage
         let token = await AsyncStorage.getItem('token');
-console.log(token);
         if (!token) {
             console.log('❌ No token found in AsyncStorage');
             return null;
@@ -68,7 +67,6 @@ console.log(token);
         try {
             const parsedToken = JSON.parse(token);
             if (typeof parsedToken === 'object') {
-                console.log('📦 Token is stored as an object');
                 // Try common token properties
                 if (parsedToken.token) token = parsedToken.token;
                 else if (parsedToken.accessToken) token = parsedToken.accessToken;

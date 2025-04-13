@@ -3,58 +3,51 @@ const prisma = new PrismaClient();
 
 // Function to add blog
 const addBlog = async (req, res) => {
-    // Getting data from front end
     const { title, content, category_id, is_featured = false } = req.body;
-
-    // Getting user_id extracted from middleware
     const user_id = req.user;
+    const BLOG_COST = 20;
 
-    // Check if all necessary fields are filled
     if (!title || !content || !category_id) {
         return res.status(400).json({ error: 'Please enter all required details: title, content, and category.' });
     }
-console.log(req.file);
+
     try {
-        // Get the image file path if an image was uploaded
         const imagePath = req.file ? `/uploads/${req.file.filename}` : null;
 
-        // Starting transaction query so that points_gained do not change in error
         const result = await prisma.$transaction(async (prisma) => {
             const user = await prisma.user.findUnique({
                 where: { user_id: parseInt(user_id) }
             });
 
-            // Checking if user with that user_id exists or not
-            if (!user) {
-                throw new Error('User not found');
-            }
+            if (!user) throw new Error('User not found');
+            if (user.points_gained < BLOG_COST) throw new Error("You do not meet the requirement to add a blog!");
 
-            // Logic to make sure if user have enough points to add a blog to prevent spam and unwanted blogs
-            if (user.points_gained < 20) {
-                throw new Error("You do not meet the requirement to add a blog!");
-            }
-
-            // Check if the category exists
             const category = await prisma.category.findUnique({
                 where: { category_id: parseInt(category_id) }
             });
 
-            if (!category) {
-                throw new Error("Invalid category selected.");
-            }
+            if (!category) throw new Error("Invalid category selected.");
 
-            // Update user points by deducting 20 points
             const updatedUser = await prisma.user.update({
                 where: { user_id: parseInt(user_id) },
-                data: { points_gained: user.points_gained - 20 }
+                data: { points_gained: user.points_gained - BLOG_COST }
             });
 
-            // Add new blog entry with the image path
+            await prisma.pointsLog.create({
+                data: {
+                    user_id: parseInt(user_id),
+                    points: -BLOG_COST,
+                    reason: "Blog creation",
+                    description: `Points spent to create blog: "${title.substring(0, 30)}${title.length > 30 ? '...' : ''}"`,
+                    source_type: "SYSTEM_DEDUCTION"
+                }
+            });
+
             const newBlog = await prisma.blog.create({
                 data: {
                     title,
                     content,
-                    image: imagePath, // Use the path from multer
+                    image: imagePath,
                     is_featured,
                     user_id: parseInt(user_id),
                     category_id: parseInt(category_id),
@@ -65,7 +58,6 @@ console.log(req.file);
             return { updatedUser, newBlog };
         });
 
-        // If transaction is successful
         return res.status(201).json({
             success: true,
             message: 'Blog added successfully',
@@ -74,7 +66,6 @@ console.log(req.file);
 
     } catch (error) {
         console.error('Error adding blog:', error);
-        // Transaction failed
         return res.status(403).json({ success: false, error: error.message });
     }
 };

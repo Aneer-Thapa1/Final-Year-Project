@@ -148,64 +148,7 @@ async function main() {
     // ====================================================
     // PART 4: CREATE ACHIEVEMENTS
     // ====================================================
-    const achievements = [
-        {
-            name: 'First Step',
-            description: 'Complete your first habit',
-            icon: '🏁',
-            criteria_type: 'TOTAL_COMPLETIONS',
-            criteria_value: 1,
-            xp_value: 10
-        },
-        {
-            name: 'Consistency King',
-            description: 'Maintain a 7-day streak on any habit',
-            icon: '👑',
-            criteria_type: 'STREAK_LENGTH',
-            criteria_value: 7,
-            xp_value: 50
-        },
-        {
-            name: 'Habit Master',
-            description: 'Maintain a 30-day streak on any habit',
-            icon: '🌟',
-            criteria_type: 'STREAK_LENGTH',
-            criteria_value: 30,
-            xp_value: 200
-        },
-        {
-            name: 'Early Bird',
-            description: 'Complete 5 habits before 9 AM',
-            icon: '🌅',
-            criteria_type: 'TOTAL_COMPLETIONS',
-            criteria_value: 5,
-            xp_value: 25
-        },
-        {
-            name: 'Domain Explorer',
-            description: 'Create habits in 3 different domains',
-            icon: '🧭',
-            criteria_type: 'HABIT_DIVERSITY',
-            criteria_value: 3,
-            xp_value: 30
-        }
-    ];
-
-    for (const achievement of achievements) {
-        const existingAchievement = await prisma.achievement.findFirst({
-            where: { name: achievement.name }
-        });
-
-        if (!existingAchievement) {
-            await prisma.achievement.create({
-                data: {
-                    ...achievement,
-                    badge_image: `badges/${achievement.name.toLowerCase().replace(/\s+/g, '_')}.png`,
-                    is_hidden: false
-                }
-            });
-        }
-    }
+    await seedAchievements();
 
     // ====================================================
     // PART 5: CREATE EXAMPLE HABITS
@@ -545,7 +488,372 @@ async function main() {
         }
     }
 
+    // ====================================================
+    // PART 7: ASSIGN SOME ACHIEVEMENTS TO DEMO USERS
+    // ====================================================
+    if (createdUsers.length > 0) {
+        const alexUser = createdUsers[0]; // Alex - our most active user
+
+        // Get a few basic achievements to assign
+        const firstStepsAchievement = await prisma.achievement.findFirst({
+            where: { name: 'First Steps' }
+        });
+
+        const consistencyAchievement = await prisma.achievement.findFirst({
+            where: { name: 'Consistency is Key' }
+        });
+
+        // Assign achievements to Alex with timestamps
+        if (firstStepsAchievement) {
+            const existingUserAchievement = await prisma.userAchievement.findFirst({
+                where: {
+                    user_id: alexUser.user_id,
+                    achievement_id: firstStepsAchievement.achievement_id
+                }
+            });
+
+            if (!existingUserAchievement) {
+                await prisma.userAchievement.create({
+                    data: {
+                        user_id: alexUser.user_id,
+                        achievement_id: firstStepsAchievement.achievement_id,
+                        unlocked_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30), // 30 days ago
+                        points_awarded: firstStepsAchievement.points_reward || 50
+                    }
+                });
+            }
+        }
+
+        if (consistencyAchievement) {
+            const existingUserAchievement = await prisma.userAchievement.findFirst({
+                where: {
+                    user_id: alexUser.user_id,
+                    achievement_id: consistencyAchievement.achievement_id
+                }
+            });
+
+            if (!existingUserAchievement) {
+                await prisma.userAchievement.create({
+                    data: {
+                        user_id: alexUser.user_id,
+                        achievement_id: consistencyAchievement.achievement_id,
+                        unlocked_at: new Date(Date.now() - 1000 * 60 * 60 * 24 * 10), // 10 days ago
+                        points_awarded: consistencyAchievement.points_reward || 100
+                    }
+                });
+            }
+        }
+    }
+
     console.log('✅ Database initialization complete!');
+}
+
+/**
+ * Helper function to seed achievements
+ */
+async function seedAchievements() {
+    console.log('🏆 Seeding achievements...');
+
+    const achievements = [
+        // Milestone achievements
+        {
+            name: 'First Steps',
+            description: 'Complete your first habit',
+            icon: '🏁',
+            badge_image: '/badges/first_steps.png',
+            criteria_type: 'TOTAL_COMPLETIONS',
+            criteria_value: 1,
+            xp_value: 10,
+            points_reward: 50,
+            is_hidden: false
+        },
+        {
+            name: 'Habit Century',
+            description: 'Complete 100 habits in total',
+            icon: '💯',
+            badge_image: '/badges/habit_century.png',
+            criteria_type: 'TOTAL_COMPLETIONS',
+            criteria_value: 100,
+            xp_value: 50,
+            points_reward: 200,
+            is_hidden: false
+        },
+        {
+            name: 'Habit Marathon',
+            description: 'Complete 500 habits in total',
+            icon: '🏃',
+            badge_image: '/badges/habit_marathon.png',
+            criteria_type: 'TOTAL_COMPLETIONS',
+            criteria_value: 500,
+            xp_value: 100,
+            points_reward: 500,
+            is_hidden: false
+        },
+
+        // Streak achievements
+        {
+            name: 'Consistency is Key',
+            description: 'Maintain a 7-day streak on any habit',
+            icon: '🔑',
+            badge_image: '/badges/streak_7.png',
+            criteria_type: 'STREAK_LENGTH',
+            criteria_value: 7,
+            xp_value: 25,
+            points_reward: 100,
+            is_hidden: false
+        },
+        {
+            name: 'Two-Week Triumph',
+            description: 'Maintain a 14-day streak on any habit',
+            icon: '🔥',
+            badge_image: '/badges/streak_14.png',
+            criteria_type: 'STREAK_LENGTH',
+            criteria_value: 14,
+            xp_value: 50,
+            points_reward: 150,
+            is_hidden: false
+        },
+        {
+            name: 'Month Master',
+            description: 'Maintain a 30-day streak on any habit',
+            icon: '📅',
+            badge_image: '/badges/streak_30.png',
+            criteria_type: 'STREAK_LENGTH',
+            criteria_value: 30,
+            xp_value: 75,
+            points_reward: 300,
+            is_hidden: false
+        },
+        {
+            name: 'Quarterly Champion',
+            description: 'Maintain a 90-day streak on any habit',
+            icon: '🏆',
+            badge_image: '/badges/streak_90.png',
+            criteria_type: 'STREAK_LENGTH',
+            criteria_value: 90,
+            xp_value: 150,
+            points_reward: 500,
+            is_hidden: false
+        },
+        {
+            name: 'Half-Year Hero',
+            description: 'Maintain a 180-day streak on any habit',
+            icon: '👑',
+            badge_image: '/badges/streak_180.png',
+            criteria_type: 'STREAK_LENGTH',
+            criteria_value: 180,
+            xp_value: 250,
+            points_reward: 750,
+            is_hidden: false
+        },
+        {
+            name: 'Year of Discipline',
+            description: 'Maintain a 365-day streak on any habit',
+            icon: '🌟',
+            badge_image: '/badges/streak_365.png',
+            criteria_type: 'STREAK_LENGTH',
+            criteria_value: 365,
+            xp_value: 500,
+            points_reward: 1000,
+            is_hidden: false
+        },
+
+        // Consistency achievements
+        {
+            name: 'Perfect Week',
+            description: 'Complete all scheduled habits for an entire week',
+            icon: '✅',
+            badge_image: '/badges/perfect_week.png',
+            criteria_type: 'PERFECT_WEEK',
+            criteria_value: 1,
+            xp_value: 40,
+            points_reward: 150,
+            is_hidden: false
+        },
+        {
+            name: 'Perfect Month',
+            description: 'Complete all scheduled habits for an entire month',
+            icon: '🌠',
+            badge_image: '/badges/perfect_month.png',
+            criteria_type: 'PERFECT_MONTH',
+            criteria_value: 1,
+            xp_value: 100,
+            points_reward: 500,
+            is_hidden: false
+        },
+        {
+            name: 'Daily Dedication',
+            description: 'Log in and complete at least one habit for 10 consecutive days',
+            icon: '📆',
+            badge_image: '/badges/daily_dedication.png',
+            criteria_type: 'CONSECUTIVE_DAYS',
+            criteria_value: 10,
+            xp_value: 30,
+            points_reward: 125,
+            is_hidden: false
+        },
+        {
+            name: 'Monthly Momentum',
+            description: 'Log in and complete at least one habit for 30 consecutive days',
+            icon: '⚡',
+            badge_image: '/badges/monthly_momentum.png',
+            criteria_type: 'CONSECUTIVE_DAYS',
+            criteria_value: 30,
+            xp_value: 75,
+            points_reward: 300,
+            is_hidden: false
+        },
+
+        // Diversity achievements
+        {
+            name: 'Habit Collector',
+            description: 'Create 5 different active habits',
+            icon: '🧩',
+            badge_image: '/badges/habit_collector.png',
+            criteria_type: 'HABIT_DIVERSITY',
+            criteria_value: 5,
+            xp_value: 30,
+            points_reward: 100,
+            is_hidden: false
+        },
+        {
+            name: 'Life Balancer',
+            description: 'Create 10 different active habits',
+            icon: '⚖️',
+            badge_image: '/badges/life_balancer.png',
+            criteria_type: 'HABIT_DIVERSITY',
+            criteria_value: 10,
+            xp_value: 60,
+            points_reward: 250,
+            is_hidden: false
+        },
+
+        // Domain achievements - domain IDs are based on order in the domains array
+        {
+            name: 'Health Enthusiast',
+            description: 'Complete 50 health-related habits',
+            icon: '🏥',
+            badge_image: '/badges/health_enthusiast.png',
+            criteria_type: 'DOMAIN_MASTERY',
+            criteria_value: 50,
+            xp_value: 60,
+            points_reward: 200,
+            is_hidden: false,
+        },
+        {
+            name: 'Fitness Fanatic',
+            description: 'Complete 50 fitness-related habits',
+            icon: '💪',
+            badge_image: '/badges/fitness_fanatic.png',
+            criteria_type: 'DOMAIN_MASTERY',
+            criteria_value: 50,
+            xp_value: 60,
+            points_reward: 200,
+            is_hidden: false,
+        },
+        {
+            name: 'Knowledge Seeker',
+            description: 'Complete 50 education-related habits',
+            icon: '📚',
+            badge_image: '/badges/knowledge_seeker.png',
+            criteria_type: 'DOMAIN_MASTERY',
+            criteria_value: 50,
+            xp_value: 60,
+            points_reward: 200,
+            is_hidden: false,
+        },
+        {
+            name: 'Mindfulness Guru',
+            description: 'Complete 50 mindfulness-related habits',
+            icon: '🧘',
+            badge_image: '/badges/mindfulness_guru.png',
+            criteria_type: 'DOMAIN_MASTERY',
+            criteria_value: 50,
+            xp_value: 60,
+            points_reward: 200,
+            is_hidden: false,
+        },
+
+        // Social achievements
+        {
+            name: 'Social Starter',
+            description: 'Connect with your first friend on HabitPulse',
+            icon: '👋',
+            badge_image: '/badges/social_starter.png',
+            criteria_type: 'SOCIAL_ENGAGEMENT',
+            criteria_value: 1,
+            xp_value: 20,
+            points_reward: 75,
+            is_hidden: false,
+        },
+        {
+            name: 'Social Butterfly',
+            description: 'Connect with 5 friends on HabitPulse',
+            icon: '🦋',
+            badge_image: '/badges/social_butterfly.png',
+            criteria_type: 'SOCIAL_ENGAGEMENT',
+            criteria_value: 5,
+            xp_value: 40,
+            points_reward: 150,
+            is_hidden: false,
+        },
+        {
+            name: 'Content Creator',
+            description: 'Create 5 blog posts to share your journey',
+            icon: '✍️',
+            badge_image: '/badges/content_creator.png',
+            criteria_type: 'SOCIAL_ENGAGEMENT',
+            criteria_value: 5,
+            xp_value: 35,
+            points_reward: 125,
+            is_hidden: false,
+        },
+        {
+            name: 'Community Influencer',
+            description: 'Receive 20 likes on your blog posts',
+            icon: '❤️',
+            badge_image: '/badges/community_influencer.png',
+            criteria_type: 'SOCIAL_ENGAGEMENT',
+            criteria_value: 20,
+            xp_value: 50,
+            points_reward: 200,
+            is_hidden: false,
+
+        }
+    ];
+
+    // Check if achievements already exist
+    const existingCount = await prisma.achievement.count();
+    let createdCount = 0;
+
+    if (existingCount === 0) {
+        // Create all achievements at once
+        await prisma.achievement.createMany({
+            data: achievements
+        });
+        createdCount = achievements.length;
+        console.log(`✅ Created ${achievements.length} achievements`);
+    } else {
+        // Update or insert achievements individually
+        for (const achievement of achievements) {
+            const existing = await prisma.achievement.findFirst({
+                where: { name: achievement.name }
+            });
+
+            if (!existing) {
+                await prisma.achievement.create({
+                    data: achievement
+                });
+                createdCount++;
+            }
+        }
+        console.log(`✅ Created ${createdCount} new achievements, ${existingCount} already existed`);
+    }
+
+    return {
+        total: existingCount + createdCount,
+        created: createdCount
+    };
 }
 
 // Run the setup

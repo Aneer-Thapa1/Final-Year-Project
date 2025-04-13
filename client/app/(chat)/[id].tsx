@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
-    ScrollView,
     TextInput,
     TouchableOpacity,
     Image,
@@ -19,9 +18,9 @@ import {
     ArrowLeft,
     Send,
     Info,
-    MoreVertical,
     Phone,
-    Video
+    Video,
+    ArrowUp
 } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MotiView } from 'moti';
@@ -63,16 +62,13 @@ export default function ChatDetailScreen() {
     const [error, setError] = useState(null);
     const [isTyping, setIsTyping] = useState(false);
     const [typingUsers, setTypingUsers] = useState([]);
-    const [page, setPage] = useState(1);
-    const [hasMore, setHasMore] = useState(true);
-    const [loadingMore, setLoadingMore] = useState(false);
     const [socketConnected, setSocketConnected] = useState(false);
+    const [isLoadingAll, setIsLoadingAll] = useState(false);
 
     // Store the current user ID in component state as a backup
     const [currentUserId, setCurrentUserId] = useState(null);
 
     // References
-    const scrollViewRef = useRef(null);
     const typingTimeoutRef = useRef(null);
     const flatListRef = useRef(null);
     const processedMessageIds = useRef(new Set());
@@ -122,14 +118,14 @@ export default function ChatDetailScreen() {
     useEffect(() => {
         // If currentUser is available from Redux, store the ID in component state
         if (currentUser && currentUser?.user?.user_id) {
-            setCurrentUserId(currentUser?.user?.user_id);
+            setCurrentUserId(currentUser?.user?.user_id || currentUser?.user?.user?.user_id);
         } else {
             // Fallback user ID if not available from Redux
             setCurrentUserId(1); // Default user ID or fetch from another source
         }
 
         fetchRoomDetails();
-        fetchMessages();
+        fetchAllMessages(); // Fetch all messages at once
         // Mark messages as read when the chat is opened
         markAsRead();
 
@@ -154,6 +150,20 @@ export default function ChatDetailScreen() {
             cleanupSocketListeners();
         };
     }, [socketConnected, roomId]);
+
+    // Add useEffect to scroll to bottom when messages change
+    useEffect(() => {
+        // Scroll to bottom when messages change (with a slight delay to ensure rendering completes)
+        if (messages.length > 0) {
+            const timeoutId = setTimeout(() => {
+                if (flatListRef.current) {
+                    flatListRef.current.scrollToEnd({ animated: false });
+                }
+            }, 300);
+
+            return () => clearTimeout(timeoutId);
+        }
+    }, [messages]);
 
     // Set up socket event listeners
     const setupSocketListeners = () => {
@@ -203,24 +213,53 @@ export default function ChatDetailScreen() {
             return;
         }
 
+        // Standardize message_id as string
+        const messageId = String(message.message_id);
+
         // Check if we've already processed this message
-        if (processedMessageIds.current.has(message.message_id)) {
-            console.log('Duplicate message, skipping:', message.message_id);
+        if (processedMessageIds.current.has(messageId)) {
+            console.log('Duplicate message, skipping:', messageId);
             return;
         }
 
         // Add to processed set
-        processedMessageIds.current.add(message.message_id);
+        processedMessageIds.current.add(messageId);
 
-        // For inverted FlatList, add new messages to the beginning of the array
+        // Add new messages to the END of the array
         setMessages(prev => {
-            // Check if message already exists in the array
-            const messageExists = prev.some(msg => msg.message_id === message.message_id);
+            // Check if this message should replace a temporary message
+            const tempIndex = prev.findIndex(msg =>
+                msg.isTemporary &&
+                msg.content === message.content &&
+                String(msg.sender?.user_id) === String(message.sender?.user_id)
+            );
+
+            if (tempIndex !== -1) {
+                // Replace the temporary message
+                const newMessages = [...prev];
+                newMessages[tempIndex] = {
+                    ...message,
+                    message_id: messageId
+                };
+                return newMessages;
+            }
+
+            // Otherwise check if message already exists
+            const messageExists = prev.some(msg => String(msg.message_id) === messageId);
             if (messageExists) {
                 return prev;
             }
-            return [message, ...prev];
+
+            // Add new message to the end of the array
+            return [...prev, { ...message, message_id: messageId }];
         });
+
+        // Scroll to bottom when receiving a new message
+        setTimeout(() => {
+            if (flatListRef.current) {
+                flatListRef.current.scrollToEnd({ animated: true });
+            }
+        }, 100);
 
         // Mark the message as read if it's not from the current user
         if (message.sender?.user_id !== currentUserId) {
@@ -304,54 +343,48 @@ export default function ChatDetailScreen() {
         }
     };
 
-    // Fetch messages
-    const fetchMessages = async (nextPage = 1) => {
+    // Fetch all messages at once with a large limit
+    const fetchAllMessages = async () => {
         try {
-            setLoading(nextPage === 1);
-            if (nextPage > 1) setLoadingMore(true);
+            setLoading(true);
+            setIsLoadingAll(true);
 
-            const response = await getChatMessages(roomId, { page: nextPage, limit: 20 });
+            // Request a large number of messages to get full history
+            // You may need to adjust this number based on your requirements
+            const response = await getChatMessages(roomId, { page: 1, limit: 500 });
 
             if (response && response.success && response.data) {
-                // Convert message IDs to strings to avoid comparison issues
+                // Convert message IDs to strings and mark them as not temporary
                 const messageData = response.data.map(msg => ({
                     ...msg,
-                    message_id: msg.message_id.toString()
+                    message_id: String(msg.message_id),
+                    isTemporary: false
                 }));
 
-                // Backend already returns messages in reverse chronological order
-                // Just need to add to the processed set to avoid duplicates
-                messageData.forEach(msg => {
+                // For non-inverted list, messages should be sorted oldest to newest
+                const sortedMessages = [...messageData].reverse();
+
+                // Add to processed set to avoid duplicates
+                sortedMessages.forEach(msg => {
                     processedMessageIds.current.add(msg.message_id);
                 });
 
-                if (nextPage === 1) {
-                    setMessages(messageData);
-                } else {
-                    // Merge with existing messages, avoiding duplicates
-                    setMessages(prev => {
-                        const existingIds = new Set(prev.map(m => m.message_id));
-                        const newMessages = messageData.filter(msg => !existingIds.has(msg.message_id));
-                        return [...prev, ...newMessages];
-                    });
-                }
+                // Set all messages at once
+                setMessages(sortedMessages);
 
-                setHasMore(response.hasMore);
-                setPage(nextPage);
+                // Scroll to bottom for initial load
+                setTimeout(() => {
+                    if (flatListRef.current) {
+                        flatListRef.current.scrollToEnd({ animated: false });
+                    }
+                }, 300);
             }
         } catch (error) {
-            console.error('Error fetching messages:', error);
-            setError('Failed to load messages');
+            console.error('Error fetching all messages:', error);
+            setError('Failed to load message history');
         } finally {
             setLoading(false);
-            setLoadingMore(false);
-        }
-    };
-
-    // Load more messages when scrolling up
-    const handleLoadMore = () => {
-        if (hasMore && !loadingMore) {
-            fetchMessages(page + 1);
+            setIsLoadingAll(false);
         }
     };
 
@@ -387,11 +420,19 @@ export default function ChatDetailScreen() {
                     avatar: currentUser?.user?.avatar
                 },
                 createdAt: new Date().toISOString(),
-                status: 'sending'
+                status: 'sending',
+                isTemporary: true // Add flag to identify temporary messages
             };
 
-            // Add temporary message to the list for immediate feedback
-            setMessages(prev => [tempMessage, ...prev]);
+            // Add temporary message to the end of the list
+            setMessages(prev => [...prev, tempMessage]);
+
+            // Scroll to bottom to show the new message
+            setTimeout(() => {
+                if (flatListRef.current) {
+                    flatListRef.current.scrollToEnd({ animated: true });
+                }
+            }, 100);
 
             // Add to processed message IDs to avoid duplication
             processedMessageIds.current.add(tempId);
@@ -400,23 +441,24 @@ export default function ChatDetailScreen() {
             const response = await sendMessage(roomId, { content: messageText });
 
             if (response && response.success && response.data) {
+                // Format the server message ID as a string
+                const serverMessageId = response.data.message_id.toString();
+
                 // Add server message ID to processed set
-                processedMessageIds.current.add(response.data.message_id.toString());
+                processedMessageIds.current.add(serverMessageId);
 
                 // Replace temporary message with the real one from the server
                 setMessages(prev =>
                     prev.map(msg =>
                         msg.message_id === tempId ? {
                             ...response.data,
-                            message_id: response.data.message_id.toString()
+                            message_id: serverMessageId
                         } : msg
+                    ).filter((msg, index, self) =>
+                        // Remove any duplicates by message_id (keeping the first occurrence)
+                        index === self.findIndex(m => m.message_id === msg.message_id)
                     )
                 );
-
-                // Scroll to top (since the list is inverted)
-                if (flatListRef.current) {
-                    flatListRef.current.scrollToOffset({ offset: 0, animated: true });
-                }
             }
         } catch (error) {
             console.error('Error sending message:', error);
@@ -528,34 +570,57 @@ export default function ChatDetailScreen() {
         }
 
         return (
-            <MotiView
-                from={{ opacity: 0, translateY: 10 }}
-                animate={{ opacity: 1, translateY: 0 }}
-                transition={{ type: 'timing', duration: 300 }}
-                className={`mx-4 my-1 max-w-[80%] ${isMyMessage ? 'self-end' : 'self-start'}`}
+            <View
+                style={{
+                    alignSelf: isMyMessage ? 'flex-end' : 'flex-start',
+                    maxWidth: '80%',
+                    margin: 4,
+                    marginHorizontal: 16
+                }}
             >
-                <View className={`rounded-2xl p-3 ${
-                    isMyMessage
-                        ? isDark ? 'bg-primary-600' : 'bg-primary-500'
-                        : isDark ? 'bg-gray-700' : 'bg-gray-200'
-                }`}>
-                    <Text className={`${
+                <MotiView
+                    from={{ opacity: 0, translateY: 10 }}
+                    animate={{ opacity: 1, translateY: 0 }}
+                    transition={{ type: 'timing', duration: 300 }}
+                >
+                    <View className={`rounded-2xl p-3 ${
                         isMyMessage
-                            ? 'text-white'
-                            : isDark ? 'text-white' : 'text-gray-800'
-                    } font-montserrat`}>
-                        {item.content}
-                    </Text>
-                </View>
+                            ? isDark ? 'bg-primary-600' : 'bg-primary-500'
+                            : isDark ? 'bg-gray-700' : 'bg-gray-200'
+                    }`}>
+                        <Text className={`${
+                            isMyMessage
+                                ? 'text-white'
+                                : isDark ? 'text-white' : 'text-gray-800'
+                        } font-montserrat`}>
+                            {item.content}
+                        </Text>
+                    </View>
 
-                <View className={`flex-row items-center mt-1 ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
-                    <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} font-montserrat`}>
-                        {formatMessageTime(item.createdAt)}
-                        {item.status === 'sending' && ' • Sending...'}
-                        {item.status === 'error' && ' • Failed to send'}
+                    <View className={`flex-row items-center mt-1 ${isMyMessage ? 'justify-end' : 'justify-start'}`}>
+                        <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} font-montserrat`}>
+                            {formatMessageTime(item.createdAt)}
+                            {item.status === 'sending' && ' • Sending...'}
+                            {item.status === 'error' && ' • Failed to send'}
+                        </Text>
+                    </View>
+                </MotiView>
+            </View>
+        );
+    };
+
+    // Typing indicator component
+    const TypingIndicator = () => {
+        if (typingUsers.length === 0) return null;
+
+        return (
+            <View className={`px-4 py-2`}>
+                <View className={`rounded-lg px-3 py-2 ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
+                    <Text className={`italic text-xs ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
+                        {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
                     </Text>
                 </View>
-            </MotiView>
+            </View>
         );
     };
 
@@ -587,6 +652,31 @@ export default function ChatDetailScreen() {
 
         // Otherwise show date
         return `${messageTime.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${messageTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    };
+
+    // Scroll to top button component - visible when many messages are loaded
+    const ScrollToTopButton = () => {
+        // Only show if we have more than 10 messages
+        if (messages.length <= 10) return null;
+
+        return (
+            <TouchableOpacity
+                onPress={() => {
+                    // Scroll to top with animation
+                    if (flatListRef.current) {
+                        flatListRef.current.scrollToOffset({ offset: 0, animated: true });
+                    }
+                    // Provide haptic feedback when scrolling
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                }}
+                className={`absolute bottom-4 right-4 p-3 rounded-full shadow-lg ${
+                    isDark ? 'bg-gray-800' : 'bg-white'
+                }`}
+                style={{ elevation: 5 }}
+            >
+                <ArrowUp size={20} color={isDark ? "#93C5FD" : "#3B82F6"} />
+            </TouchableOpacity>
+        );
     };
 
     return (
@@ -681,17 +771,6 @@ export default function ChatDetailScreen() {
                 </View>
             </View>
 
-            {/* Typing indicator - Positioned at the top of messages */}
-            {typingUsers.length > 0 && (
-                <View className={`px-4 py-2 ${isDark ? 'bg-gray-900' : 'bg-gray-50'}`}>
-                    <View className={`rounded-lg px-3 py-2 ${isDark ? 'bg-gray-800' : 'bg-gray-200'}`}>
-                        <Text className={`italic text-xs ${isDark ? 'text-gray-300' : 'text-gray-500'}`}>
-                            {typingUsers.join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
-                        </Text>
-                    </View>
-                </View>
-            )}
-
             {/* Message List */}
             {loading ? (
                 <View className="flex-1 justify-center items-center">
@@ -707,30 +786,29 @@ export default function ChatDetailScreen() {
                     </Text>
                     <TouchableOpacity
                         className="bg-primary-500 px-6 py-3 rounded-xl"
-                        onPress={() => fetchMessages()}
+                        onPress={() => fetchAllMessages()}
                     >
                         <Text className="text-white font-montserrat-medium">Retry</Text>
                     </TouchableOpacity>
                 </View>
             ) : (
-                <FlatList
-                    ref={flatListRef}
-                    data={messages}
-                    renderItem={renderMessage}
-                    keyExtractor={(item) => item.message_id?.toString() || Math.random().toString()}
-                    contentContainerStyle={{ paddingVertical: 10 }}
-                    inverted // Display newest messages at the bottom
-                    onEndReached={handleLoadMore}
-                    onEndReachedThreshold={0.3}
-                    ListFooterComponent={loadingMore && (
-                        <View className="py-4 items-center">
-                            <ActivityIndicator size="small" color={isDark ? "#93C5FD" : "#3B82F6"} />
-                            <Text className={`mt-2 ${isDark ? 'text-gray-300' : 'text-gray-600'} text-xs font-montserrat`}>
-                                Loading more...
-                            </Text>
-                        </View>
-                    )}
-                />
+                <View style={{ flex: 1, position: 'relative' }}>
+                    {/* Message List */}
+                    <FlatList
+                        ref={flatListRef}
+                        data={messages}
+                        renderItem={renderMessage}
+                        keyExtractor={(item) => item.message_id?.toString() || Math.random().toString()}
+                        contentContainerStyle={{ paddingVertical: 10 }}
+                        style={{ flex: 1 }}
+                    />
+
+                    {/*/!* Scroll to Top Button *!/*/}
+                    {/*<ScrollToTopButton />*/}
+
+                    {/* Typing Indicator at Bottom */}
+                    {typingUsers.length > 0 && <TypingIndicator />}
+                </View>
             )}
 
             {/* Input Area */}

@@ -241,32 +241,55 @@ const getPointsLeaderboard = async (req, res) => {
  * Get top streaks leaderboard
  * Shows users with longest current streaks
  */
+/**
+ * Controller function to get the streak leaderboard data
+ * Fixed to properly handle user selection and query params
+ */
 const getStreaksLeaderboard = async (req, res) => {
     try {
-        const { limit = 10, friendsOnly = false } = req.query;
-        const userId = parseInt(req.user);
+        // Parse and validate query parameters
+        const limit = req.query.limit ? parseInt(req.query.limit) : 10;
+        // Check if friendsOnly is a string 'true' or boolean true
+        const friendsOnly = req.query.friendsOnly === 'true' || req.query.friendsOnly === true;
 
-        // Determine user selection (all users or just friends)
+        // Ensure user ID is correctly parsed - assuming it comes from auth middleware
+        // If req.user is already an integer, use as is, otherwise parse it
+        const userId = typeof req.user === 'string' ? parseInt(req.user) : req.user;
+
+        console.log('Processing request with params:', { limit, friendsOnly, userId });
+
+        // Validate userId
+        if (!userId || isNaN(userId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid user ID'
+            });
+        }
+
+        // Initialize user selection criteria
         let userSelection = {};
 
-        if (friendsOnly === 'true' || friendsOnly === true) {
-            // Get list of user's friends
+        if (friendsOnly) {
+            console.log('Fetching friends only leaderboard');
+            // Get list of user's friends with ACCEPTED status
             const friendRequests = await prisma.friendRequest.findMany({
                 where: {
                     OR: [
-                        { sender_id: userId },
-                        { receiver_id: userId }
-                    ],
-                    status: 'ACCEPTED'
+                        { sender_id: userId, status: 'ACCEPTED' },
+                        { receiver_id: userId, status: 'ACCEPTED' }
+                    ]
                 }
             });
 
-            // Extract friend IDs
+            // Extract friend IDs correctly
             const friendIds = friendRequests.map(fr =>
                 fr.sender_id === userId ? fr.receiver_id : fr.sender_id
             );
+
             // Add current user to the list
             friendIds.push(userId);
+
+            console.log('Friend IDs:', friendIds);
 
             // Modify user selection to only include friends
             userSelection = {
@@ -274,20 +297,28 @@ const getStreaksLeaderboard = async (req, res) => {
                     in: friendIds
                 }
             };
+        } else {
+            console.log('Fetching global leaderboard');
         }
+
+        // Add the condition to only include users with streaks > 0
+        const whereCondition = {
+            ...userSelection,
+            currentDailyStreak: {
+                gt: 0
+            }
+        };
+
+        console.log('Where condition:', JSON.stringify(whereCondition));
+
         // Get users with top streaks
         const users = await prisma.user.findMany({
-            where: {
-                ...userSelection,
-                currentDailyStreak: {
-                    gt: 0
-                }
-            },
+            where: whereCondition,
             select: {
                 user_id: true,
                 user_name: true,
                 avatar: true,
-                points_gained: true, // Include points for consistency
+                points_gained: true,
                 currentDailyStreak: true,
                 longestDailyStreak: true,
                 totalHabitsCompleted: true
@@ -295,28 +326,30 @@ const getStreaksLeaderboard = async (req, res) => {
             orderBy: {
                 currentDailyStreak: 'desc'
             },
-            take: parseInt(limit)
+            take: limit
         });
+
+        console.log(`Found ${users.length} users for the leaderboard`);
 
         // Format the leaderboard data
-        const leaderboardData = users.map((user, index) => {
-            return {
-                rank: index + 1,
-                user_id: user.user_id,
-                user_name: user.user_name,
-                avatar: user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.user_name)}`,
-                points: user.points_gained,
-                currentStreak: user.currentDailyStreak,
-                longestStreak: user.longestDailyStreak,
-                totalCompletions: user.totalHabitsCompleted,
-                isCurrentUser: user.user_id === userId
-            };
-        });
+        const leaderboardData = users.map((user, index) => ({
+            rank: index + 1,
+            user_id: user.user_id,
+            user_name: user.user_name,
+            avatar: user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.user_name)}`,
+            points: user.points_gained,
+            currentStreak: user.currentDailyStreak,
+            longestStreak: user.longestDailyStreak,
+            totalCompletions: user.totalHabitsCompleted,
+            isCurrentUser: user.user_id === userId
+        }));
 
-        // Get current user's position if not in top results
+        // Check if current user is in the results
         let currentUserData = leaderboardData.find(item => item.user_id === userId);
 
+        // If user not in top results and has a valid userId, fetch their data
         if (!currentUserData && userId) {
+            console.log('Current user not in top results, fetching their data');
             const userData = await prisma.user.findUnique({
                 where: { user_id: userId },
                 select: {

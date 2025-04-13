@@ -1,13 +1,11 @@
 /**
  * File Upload Middleware Configuration
- *
  * This module provides a robust file upload solution using Multer with:
  * - Configurable file types and size limits
  * - Secure filename generation
  * - Comprehensive error handling
  * - Detailed logging
  */
-
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
@@ -15,7 +13,7 @@ const crypto = require('crypto');
 
 // Configuration options (can be moved to environment variables)
 const CONFIG = {
-    maxFileSize: 5 * 1024 * 1024, // 5MB
+    maxFileSize: 30 * 1024 * 1024, // 5MB
     allowedFileTypes: ['image/jpeg', 'image/png', 'image/gif', 'application/pdf'],
     uploadDir: path.join(__dirname, '..', 'uploads'),
     fileRetentionDays: 30 // How long to keep files before cleanup

@@ -7,7 +7,7 @@ const { upload, handleUploadError } = require('../config/multerConfig');
 
 // Chat Room Management Routes
 // Create a new group chat
-router.post('/rooms/group', validateToken, chatController.createGroupChat);
+router.post('/rooms/group', validateToken,  upload.single('avatar'), handleUploadError, chatController.createGroupChat);
 
 // Create a direct message chat or return existing one
 router.post('/direct', validateToken, chatController.createDirectChat);
