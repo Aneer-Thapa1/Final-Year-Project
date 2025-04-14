@@ -1,4 +1,3 @@
-// src/app/(app)/profile/[id].tsx
 import React, { useState } from 'react';
 import {
     View,
@@ -32,6 +31,7 @@ import * as Haptics from 'expo-haptics';
 
 // Import your profile service hooks and functions
 import { useProfile, sendFriendRequest, useUserStats, useUserFriends } from '../../services/profileService';
+import { createDirectChat } from '../../services/chatServices';
 import { useAppSelector } from '../../store/store';
 
 // Import your BlogPost component
@@ -73,9 +73,8 @@ export default function ProfileScreen() {
     const isDark = systemColorScheme === 'dark';
 
     // Get current user from state
-    const currentUser = useAppSelector(state => state.user.user?.user);
+    const currentUser = useAppSelector(state => state?.user);
     const isOwnProfile = currentUser?.user_id.toString() === userId;
-
     // Fetch profile data using custom hook
     const { profile, loading: loadingProfile, error: profileError, refetch: refetchProfile } = useProfile(parseInt(userId));
 
@@ -107,15 +106,28 @@ export default function ProfileScreen() {
     };
 
     // Handle messaging user
-    const handleMessage = () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        router.push({
-            pathname: `/(chat)/direct`,
-            params: {
-                recipientId: userId,
-                name: profile?.user?.user_name || 'Chat'
+    const handleMessage = async () => {
+        try {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+            const response = await createDirectChat(userId);
+            if (response && response.success && response.data) {
+                // Navigate to the chat room
+                router.push({
+                    pathname: `/(chat)/${response.data.room_id}/`,
+                    params: {
+                        name: profile?.user?.user_name || 'Chat'
+                    }
+                });
+            } else {
+                // Handle error
+                console.error('Failed to open chat:', response?.message);
+                Alert.alert('Error', 'Could not open chat. Please try again.');
             }
-        });
+        } catch (error) {
+            console.error('Error in handleMessage:', error);
+            Alert.alert('Error', 'Something went wrong. Please try again.');
+        }
     };
 
     // Navigate to edit profile

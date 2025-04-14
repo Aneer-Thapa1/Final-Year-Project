@@ -1,124 +1,122 @@
-import { View, Text, Image, TouchableOpacity, useColorScheme } from 'react-native'
-import React, { useState, useCallback } from 'react'
+import { View, Text, Image, TouchableOpacity, useColorScheme, ActivityIndicator, ScrollView, RefreshControl } from 'react-native'
+import React, { useState, useCallback, useEffect } from 'react'
 import { MotiView, MotiText, AnimatePresence } from 'moti'
-import { Trophy, Zap, BookOpen, Clock, Target, CheckCircle, Award, TrendingUp, Code, Layers, BarChart } from 'lucide-react-native'
+import { Trophy, Zap, BookOpen, Clock, Target, CheckCircle, Award, TrendingUp, Star, Layers, Shield, HeartPulse, Brain, Coffee, Moon, Users, Calendar } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
+import { getUserAchievements, getUpcomingAchievements, getAchievementStats } from '../services/achievementService'
 
 const AchievementsComponent = ({ isDark }) => {
     // If isDark is not passed as prop, use system setting
     const systemColorScheme = useColorScheme();
     const darkMode = isDark !== undefined ? isDark : systemColorScheme === 'dark';
 
+    // State for achievements data
+    const [achievements, setAchievements] = useState([]);
+    const [upcomingAchievements, setUpcomingAchievements] = useState([]);
+    const [stats, setStats] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [error, setError] = useState(null);
+
     // State for filtering achievements
     const [filter, setFilter] = useState('all'); // 'all', 'completed', 'inProgress'
     const [showDetails, setShowDetails] = useState(null);
 
-    // Achievement data with improved content
-    const achievements = [
-        {
-            id: '1',
-            title: 'Getting Started',
-            description: 'Complete your first week of habit tracking',
-            longDescription: 'You\'ve successfully tracked your habits for a full week, establishing the foundation for lasting positive change in your life.',
-            icon: Zap,
-            progress: 100,
-            completed: true,
-            date: '2023-05-12',
-            points: 100,
-            badgeUrl: { uri: 'https://cdn-icons-png.flaticon.com/512/5219/5219398.png' },
-            category: 'beginner'
-        },
-        {
-            id: '2',
-            title: 'Fitness Enthusiast',
-            description: 'Track fitness habits for 30 days',
-            longDescription: 'You\'ve committed to your health by consistently tracking fitness habits for a full month, building a strong foundation for physical wellbeing.',
-            icon: TrendingUp,
-            progress: 85,
-            completed: false,
-            points: 200,
-            badgeUrl: { uri: 'https://cdn-icons-png.flaticon.com/512/2936/2936886.png' },
-            category: 'health'
-        },
-        {
-            id: '3',
-            title: 'Hydration Hero',
-            description: 'Drink 8 glasses of water daily for 14 days',
-            longDescription: 'Staying properly hydrated is essential for health. You\'ve built the important habit of drinking adequate water consistently for two full weeks.',
-            icon: Clock,
-            progress: 60,
-            completed: false,
-            points: 150,
-            badgeUrl: { uri: 'https://cdn-icons-png.flaticon.com/512/2447/2447774.png' },
-            category: 'health'
-        },
-        {
-            id: '4',
-            title: 'Mindfulness Master',
-            description: 'Meditate for 10 minutes daily for 21 days',
-            longDescription: 'Mental wellbeing is just as important as physical health. You\'ve developed a consistent meditation practice that helps keep your mind clear and focused.',
-            icon: Target,
-            progress: 40,
-            completed: false,
-            points: 300,
-            badgeUrl: { uri: 'https://cdn-icons-png.flaticon.com/512/3075/3075919.png' },
-            category: 'mindfulness'
-        },
-        {
-            id: '5',
-            title: 'Learning Enthusiast',
-            description: 'Read or study for 30 minutes daily for 15 days',
-            longDescription: 'Continuous learning is the key to growth. You\'ve dedicated time to expand your knowledge and skills through regular reading and study sessions.',
-            icon: BookOpen,
-            progress: 25,
-            completed: false,
-            points: 250,
-            badgeUrl: { uri: 'https://cdn-icons-png.flaticon.com/512/2232/2232688.png' },
-            category: 'education'
-        },
-        {
-            id: '6',
-            title: 'Early Bird',
-            description: 'Wake up before 6 AM for 10 consecutive days',
-            longDescription: 'Rising early sets the tone for a productive day. You\'ve established the powerful habit of starting your day before dawn, giving you more time to achieve your goals.',
-            icon: Clock,
-            progress: 100,
-            completed: true,
-            date: '2023-06-20',
-            points: 200,
-            badgeUrl: { uri: 'https://cdn-icons-png.flaticon.com/512/2919/2919610.png' },
-            category: 'lifestyle'
-        },
-        {
-            id: '7',
-            title: 'Nature Explorer',
-            description: 'Spend time outdoors for 15 minutes daily for 14 days',
-            longDescription: 'Connecting with nature refreshes the mind and body. You\'ve made it a habit to step outside and enjoy the natural world around you regularly.',
-            icon: Layers,
-            progress: 100,
-            completed: true,
-            date: '2023-04-05',
-            points: 150,
-            badgeUrl: { uri: 'https://cdn-icons-png.flaticon.com/512/628/628283.png' },
-            category: 'lifestyle'
-        },
-    ];
+    // Icon mapping for achievement types
+    const iconMapping = {
+        'STREAK_LENGTH': Clock,
+        'TOTAL_COMPLETIONS': CheckCircle,
+        'CONSECUTIVE_DAYS': Calendar,
+        'PERFECT_WEEK': Star,
+        'PERFECT_MONTH': Trophy,
+        'HABIT_DIVERSITY': Layers,
+        'DOMAIN_MASTERY': Shield,
+        'SOCIAL_ENGAGEMENT': Users
+    };
+
+    // Domain icon mapping
+    const domainIconMapping = {
+        'fitness': HeartPulse,
+        'nutrition': Coffee,
+        'mindfulness': Brain,
+        'sleep': Moon,
+        'learning': BookOpen,
+        'productivity': Target,
+        'default': Award
+    };
+
+    // Load achievements data
+    const loadAchievements = async () => {
+        try {
+            setLoading(true);
+            setError(null);
+
+            // Call our service to get all achievements
+            const data = await getUserAchievements();
+            if (data) {
+                setAchievements(data.achievements || []);
+
+                // Also fetch upcoming achievements
+                const upcomingData = await getUpcomingAchievements();
+                if (upcomingData) {
+                    setUpcomingAchievements(upcomingData);
+                }
+
+                // Get achievement stats
+                const statsData = await getAchievementStats();
+                if (statsData) {
+                    setStats(statsData);
+                }
+            } else {
+                setError('Failed to load achievements');
+            }
+        } catch (err) {
+            console.error('Error loading achievements:', err);
+            setError(err.toString());
+        } finally {
+            setLoading(false);
+            setRefreshing(false);
+        }
+    };
+
+    // Initial load
+    useEffect(() => {
+        loadAchievements();
+    }, []);
+
+    // Handle refresh
+    const handleRefresh = useCallback(() => {
+        setRefreshing(true);
+        loadAchievements();
+    }, []);
+
+    // Get icon for achievement based on type or domain
+    const getAchievementIcon = (achievement) => {
+        // First check if it's a specific type
+        if (iconMapping[achievement.criteria_type]) {
+            return iconMapping[achievement.criteria_type];
+        }
+
+        // Check if there's a domain-specific icon
+        const domain = achievement.domain?.toLowerCase() || 'default';
+        return domainIconMapping[domain] || Award;
+    };
 
     // Filter achievements based on selected filter
     const filteredAchievements = achievements.filter(achievement => {
         if (filter === 'all') return true;
-        if (filter === 'completed') return achievement.completed;
-        if (filter === 'inProgress') return !achievement.completed;
+        if (filter === 'completed') return achievement.unlocked;
+        if (filter === 'inProgress') return !achievement.unlocked;
         return true;
     });
 
     // Count completed achievements
-    const completedCount = achievements.filter(a => a.completed).length;
+    const completedCount = stats?.summary?.unlocked || achievements.filter(a => a.unlocked).length;
+    const totalCount = stats?.summary?.total || achievements.length;
 
     // Calculate total points earned
-    const totalPoints = achievements
-        .filter(a => a.completed)
-        .reduce((sum, a) => sum + a.points, 0);
+    const totalPoints = stats?.summary?.total_points_earned ||
+        achievements.filter(a => a.unlocked).reduce((sum, a) => sum + (a.points_awarded || 0), 0);
 
     // Handle achievement card press
     const handleAchievementPress = useCallback((id) => {
@@ -149,255 +147,365 @@ const AchievementsComponent = ({ isDark }) => {
         detailsBg: darkMode ? 'bg-gray-700/80' : 'bg-gray-100/90',
     };
 
+    // Generate a badge color based on achievement name (for consistency)
+    const getBadgeColor = (name, unlocked) => {
+        if (!unlocked) return '#9CA3AF'; // gray for locked
+
+        // Generate a consistent color based on the string
+        const colors = [
+            '#4F46E5', // indigo
+            '#7C3AED', // purple
+            '#EC4899', // pink
+            '#10B981', // green
+            '#F59E0B', // amber
+            '#3B82F6', // blue
+            '#EF4444', // red
+            '#8B5CF6', // violet
+        ];
+
+        // Hash the name to get a consistent index
+        const hash = name.split('').reduce((acc, char) => {
+            return acc + char.charCodeAt(0);
+        }, 0);
+
+        return colors[hash % colors.length];
+    };
+
+    // Decide which image to use for badge
+    const getBadgeImage = (achievement) => {
+        // Check if a badge_image is provided
+        if (achievement.badge_image) {
+            return { uri: achievement.badge_image };
+        }
+
+        // Default badge images based on type
+        const defaultBadges = {
+            'STREAK_LENGTH': 'https://cdn-icons-png.flaticon.com/512/2919/2919610.png',
+            'TOTAL_COMPLETIONS': 'https://cdn-icons-png.flaticon.com/512/5219/5219398.png',
+            'CONSECUTIVE_DAYS': 'https://cdn-icons-png.flaticon.com/512/2936/2936886.png',
+            'PERFECT_WEEK': 'https://cdn-icons-png.flaticon.com/512/3075/3075919.png',
+            'PERFECT_MONTH': 'https://cdn-icons-png.flaticon.com/512/2447/2447774.png',
+            'HABIT_DIVERSITY': 'https://cdn-icons-png.flaticon.com/512/2232/2232688.png',
+            'DOMAIN_MASTERY': 'https://cdn-icons-png.flaticon.com/512/628/628283.png',
+            'SOCIAL_ENGAGEMENT': 'https://cdn-icons-png.flaticon.com/512/745/745205.png'
+        };
+
+        return { uri: defaultBadges[achievement.criteria_type] || 'https://cdn-icons-png.flaticon.com/512/3176/3176366.png' };
+    };
+
+    if (loading && !refreshing) {
+        return (
+            <View className="flex-1 items-center justify-center py-10">
+                <ActivityIndicator size="large" color="#6366F1" />
+                <Text className={`mt-4 font-medium ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                    Loading achievements...
+                </Text>
+            </View>
+        );
+    }
+
+    if (error && !refreshing) {
+        return (
+            <View className="flex-1 items-center justify-center py-10">
+                <Award size={48} color={darkMode ? "#9CA3AF" : "#D1D5DB"} />
+                <Text className={`mt-4 font-bold text-lg ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                    Couldn't load achievements
+                </Text>
+                <Text className={`mt-2 text-center ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    {error}
+                </Text>
+                <TouchableOpacity
+                    onPress={loadAchievements}
+                    className="mt-6 bg-primary-500 py-3 px-6 rounded-full"
+                >
+                    <Text className="text-white font-medium">
+                        Try Again
+                    </Text>
+                </TouchableOpacity>
+            </View>
+        );
+    }
+
     return (
-        <MotiView
-            from={{ opacity: 0, translateY: 15 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ type: 'timing', duration: 400 }}
+        <ScrollView
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+                <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={handleRefresh}
+                    colors={['#6366F1']}
+                    tintColor={darkMode ? '#6366F1' : '#6366F1'}
+                />
+            }
         >
-            {/* Header with overall progress */}
-            <View className={`${styles.card} rounded-xl p-6 shadow-sm`}>
-                <View className="flex-row justify-between items-center mb-6">
-                    <View>
-                        <Text className={`text-xl font-montserrat-semibold ${styles.text}`}>
-                            My Achievements
-                        </Text>
-                        <Text className={`font-montserrat-regular ${styles.textMuted} text-sm mt-2`}>
-                            Keep building good habits!
-                        </Text>
-                    </View>
-                    <View className={`${styles.badgeBg} px-4 py-2 rounded-full shadow-sm`}>
-                        <View className="flex-row items-center">
-                            <Trophy size={16} color={darkMode ? "#A5B4FC" : "#4F46E5"} />
-                            <Text className={`ml-2 font-montserrat-semibold text-primary-${darkMode ? '400' : '600'}`}>
-                                {totalPoints} Points
+            <MotiView
+                from={{ opacity: 0, translateY: 15 }}
+                animate={{ opacity: 1, translateY: 0 }}
+                transition={{ type: 'timing', duration: 400 }}
+            >
+                {/* Header with overall progress */}
+                <View className={`${styles.card} rounded-xl p-6 shadow-sm`}>
+                    <View className="flex-row justify-between items-center mb-6">
+                        <View>
+                            <Text className={`text-xl font-bold ${styles.text}`}>
+                                My Achievements
+                            </Text>
+                            <Text className={`font-medium ${styles.textMuted} text-sm mt-2`}>
+                                Keep building good habits!
                             </Text>
                         </View>
+                        <View className={`${styles.badgeBg} px-4 py-2 rounded-full shadow-sm`}>
+                            <View className="flex-row items-center">
+                                <Trophy size={16} color={darkMode ? "#A5B4FC" : "#4F46E5"} />
+                                <Text className={`ml-2 font-semibold text-primary-${darkMode ? '400' : '600'}`}>
+                                    {totalPoints} Points
+                                </Text>
+                            </View>
+                        </View>
+                    </View>
+
+                    <View className="flex-row items-center justify-between mb-4">
+                        <Text className={`font-medium ${styles.subText}`}>
+                            Overall Progress
+                        </Text>
+                        <Text className={`font-semibold ${styles.text}`}>
+                            {completedCount}/{totalCount} Completed
+                        </Text>
+                    </View>
+
+                    <View className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                        <MotiView
+                            animate={{
+                                width: `${totalCount > 0 ? (completedCount / totalCount) * 100 : 0}%`
+                            }}
+                            transition={{ type: 'timing', duration: 1000 }}
+                            className="h-3 bg-primary-500 rounded-full"
+                        />
                     </View>
                 </View>
 
-                <View className="flex-row items-center justify-between mb-4">
-                    <Text className={`font-montserrat-medium ${styles.subText}`}>
-                        Overall Progress
-                    </Text>
-                    <Text className={`font-montserrat-semibold ${styles.text}`}>
-                        {completedCount}/{achievements.length} Completed
-                    </Text>
-                </View>
-
-                <View className="h-3 bg-gray-200 rounded-full overflow-hidden">
-                    <MotiView
-                        animate={{
-                            width: `${(completedCount / achievements.length) * 100}%`
-                        }}
-                        transition={{ type: 'timing', duration: 1000 }}
-                        className="h-3 bg-primary-500 rounded-full"
-                    />
-                </View>
-            </View>
-
-            {/* Filter options */}
-            <View className="flex-row justify-between mt-6 mb-6">
-                <TouchableOpacity
-                    onPress={() => handleFilterChange('all')}
-                    className={`flex-1 py-3 px-3 rounded-full mx-1.5 ${filter === 'all' ? styles.buttonActive : styles.buttonInactive}`}
-                >
-                    <Text className={`text-center font-montserrat-medium text-sm ${filter === 'all' ? 'text-white' : styles.textMuted}`}>
-                        All
-                    </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    onPress={() => handleFilterChange('completed')}
-                    className={`flex-1 py-3 px-3 rounded-full mx-1.5 ${filter === 'completed' ? styles.buttonActive : styles.buttonInactive}`}
-                >
-                    <Text className={`text-center font-montserrat-medium text-sm ${filter === 'completed' ? 'text-white' : styles.textMuted}`}>
-                        Completed
-                    </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                    onPress={() => handleFilterChange('inProgress')}
-                    className={`flex-1 py-3 px-3 rounded-full mx-1.5 ${filter === 'inProgress' ? styles.buttonActive : styles.buttonInactive}`}
-                >
-                    <Text className={`text-center font-montserrat-medium text-sm ${filter === 'inProgress' ? 'text-white' : styles.textMuted}`}>
-                        In Progress
-                    </Text>
-                </TouchableOpacity>
-            </View>
-
-            {/* Achievement Cards */}
-            <AnimatePresence>
-                {filteredAchievements.map((achievement, index) => (
-                    <MotiView
-                        key={achievement.id}
-                        from={{ opacity: 0, translateY: 20 }}
-                        animate={{ opacity: 1, translateY: 0 }}
-                        exit={{ opacity: 0, scale: 0.9 }}
-                        transition={{
-                            type: 'timing',
-                            duration: 350,
-                            delay: index * 70
-                        }}
-                        className={`rounded-xl overflow-hidden shadow-sm mb-6 
-                            ${achievement.completed ? styles.cardCompleted : styles.card}`}
+                {/* Filter options */}
+                <View className="flex-row justify-between mt-6 mb-6">
+                    <TouchableOpacity
+                        onPress={() => handleFilterChange('all')}
+                        className={`flex-1 py-3 px-3 rounded-full mx-1.5 ${filter === 'all' ? styles.buttonActive : styles.buttonInactive}`}
                     >
-                        <TouchableOpacity
-                            activeOpacity={0.7}
-                            onPress={() => handleAchievementPress(achievement.id)}
-                            className="p-6"
-                        >
-                            <View className="flex-row items-center mb-4">
-                                {achievement.badgeUrl ? (
-                                    <Image
-                                        source={achievement.badgeUrl}
-                                        className="h-16 w-16 mr-5"
-                                        resizeMode="contain"
-                                    />
-                                ) : (
-                                    <View className={`h-14 w-14 rounded-full items-center justify-center mr-5 
-                                        ${achievement.completed ? styles.iconBgCompleted : styles.iconBg}`}
-                                    >
-                                        <achievement.icon
-                                            size={24}
-                                            color={achievement.completed ?
-                                                (darkMode ? "#A5B4FC" : "#4F46E5") :
-                                                (darkMode ? "#9CA3AF" : "#6B7280")
-                                            }
+                        <Text className={`text-center font-medium text-sm ${filter === 'all' ? 'text-white' : styles.textMuted}`}>
+                            All
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={() => handleFilterChange('completed')}
+                        className={`flex-1 py-3 px-3 rounded-full mx-1.5 ${filter === 'completed' ? styles.buttonActive : styles.buttonInactive}`}
+                    >
+                        <Text className={`text-center font-medium text-sm ${filter === 'completed' ? 'text-white' : styles.textMuted}`}>
+                            Completed
+                        </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                        onPress={() => handleFilterChange('inProgress')}
+                        className={`flex-1 py-3 px-3 rounded-full mx-1.5 ${filter === 'inProgress' ? styles.buttonActive : styles.buttonInactive}`}
+                    >
+                        <Text className={`text-center font-medium text-sm ${filter === 'inProgress' ? 'text-white' : styles.textMuted}`}>
+                            In Progress
+                        </Text>
+                    </TouchableOpacity>
+                </View>
+
+                {/* Achievement Cards */}
+                <AnimatePresence>
+                    {filteredAchievements.map((achievement, index) => {
+                        const isUnlocked = achievement.unlocked;
+                        const Icon = getAchievementIcon(achievement);
+                        const badgeImage = getBadgeImage(achievement);
+                        const percentComplete = isUnlocked ? 100 : achievement.progress.percent_complete;
+
+                        return (
+                            <MotiView
+                                key={achievement.achievement_id}
+                                from={{ opacity: 0, translateY: 20 }}
+                                animate={{ opacity: 1, translateY: 0 }}
+                                exit={{ opacity: 0, scale: 0.9 }}
+                                transition={{
+                                    type: 'timing',
+                                    duration: 350,
+                                    delay: index * 70
+                                }}
+                                className={`rounded-xl overflow-hidden shadow-sm mb-6 
+                                    ${isUnlocked ? styles.cardCompleted : styles.card}`}
+                            >
+                                <TouchableOpacity
+                                    activeOpacity={0.7}
+                                    onPress={() => handleAchievementPress(achievement.achievement_id)}
+                                    className="p-6"
+                                >
+                                    <View className="flex-row items-center mb-4">
+                                        <Image
+                                            source={badgeImage}
+                                            className="h-16 w-16 mr-5"
+                                            resizeMode="contain"
+                                            style={{
+                                                opacity: isUnlocked ? 1 : 0.5
+                                            }}
+                                        />
+
+                                        <View className="flex-1">
+                                            <Text className={`font-bold text-lg mb-2
+                                                ${isUnlocked ?
+                                                `text-primary-${darkMode ? '400' : '700'}` :
+                                                styles.text
+                                            }`}
+                                            >
+                                                {achievement.name}
+                                            </Text>
+                                            <Text className={`font-normal ${styles.subText} text-sm`}>
+                                                {achievement.description}
+                                            </Text>
+                                        </View>
+
+                                        <View className={`${styles.badgeBg} px-4 py-2 rounded-full flex-row items-center shadow-sm ml-3`}>
+                                            <Trophy
+                                                size={16}
+                                                color={isUnlocked ?
+                                                    (darkMode ? "#A5B4FC" : "#4F46E5") :
+                                                    (darkMode ? "#9CA3AF" : "#6B7280")
+                                                }
+                                            />
+                                            <Text className={`ml-1.5 font-semibold 
+                                                ${isUnlocked ?
+                                                `text-primary-${darkMode ? '400' : '700'}` :
+                                                styles.subText
+                                            }`}
+                                            >
+                                                {isUnlocked ? achievement.points_awarded : achievement.points_reward}
+                                            </Text>
+                                        </View>
+                                    </View>
+
+                                    <View className={`h-4 ${styles.progressBg} rounded-full mt-4 overflow-hidden`}>
+                                        <MotiView
+                                            animate={{ width: `${percentComplete}%` }}
+                                            transition={{ type: 'timing', duration: 1000 }}
+                                            className={`h-4 ${isUnlocked ? 'bg-green-500' : 'bg-primary-500'} rounded-full`}
                                         />
                                     </View>
-                                )}
 
-                                <View className="flex-1">
-                                    <Text className={`font-montserrat-bold text-lg mb-2
-                                        ${achievement.completed ?
-                                        `text-primary-${darkMode ? '400' : '700'}` :
-                                        styles.text
-                                    }`}
-                                    >
-                                        {achievement.title}
-                                    </Text>
-                                    <Text className={`font-montserrat-regular ${styles.subText} text-sm`}>
-                                        {achievement.description}
-                                    </Text>
-                                </View>
-
-                                <View className={`${styles.badgeBg} px-4 py-2 rounded-full flex-row items-center shadow-sm ml-3`}>
-                                    <Trophy
-                                        size={16}
-                                        color={achievement.completed ?
-                                            (darkMode ? "#A5B4FC" : "#4F46E5") :
-                                            (darkMode ? "#9CA3AF" : "#6B7280")
-                                        }
-                                    />
-                                    <Text className={`ml-1.5 font-montserrat-semibold 
-                                        ${achievement.completed ?
-                                        `text-primary-${darkMode ? '400' : '700'}` :
-                                        styles.subText
-                                    }`}
-                                    >
-                                        {achievement.points}
-                                    </Text>
-                                </View>
-                            </View>
-
-                            <View className={`h-4 ${styles.progressBg} rounded-full mt-4 overflow-hidden`}>
-                                <MotiView
-                                    animate={{ width: `${achievement.progress}%` }}
-                                    transition={{ type: 'timing', duration: 1000 }}
-                                    className={`h-4 ${achievement.completed ? 'bg-green-500' : 'bg-primary-500'} rounded-full`}
-                                />
-                            </View>
-
-                            <View className="flex-row justify-between items-center mt-3">
-                                <Text className={`font-montserrat-medium text-sm ${styles.subText}`}>
-                                    Progress
-                                </Text>
-                                <Text className={`font-montserrat-semibold text-sm ${styles.text}`}>
-                                    {achievement.progress}%
-                                </Text>
-                            </View>
-
-                            {/* Details section - only shown when expanded */}
-                            <AnimatePresence>
-                                {showDetails === achievement.id && (
-                                    <MotiView
-                                        from={{ opacity: 0, height: 0 }}
-                                        animate={{ opacity: 1, height: 'auto' }}
-                                        exit={{ opacity: 0, height: 0 }}
-                                        transition={{ type: 'timing', duration: 300 }}
-                                        className={`mt-6 p-5 rounded-lg ${styles.detailsBg}`}
-                                    >
-                                        <Text className={`font-montserrat-medium text-base ${styles.text} mb-3`}>
-                                            Achievement Details:
+                                    <View className="flex-row justify-between items-center mt-3">
+                                        <Text className={`font-medium text-sm ${styles.subText}`}>
+                                            Progress
                                         </Text>
-                                        <Text className={`font-montserrat-regular ${styles.subText} text-sm mb-4`}>
-                                            {achievement.longDescription || achievement.description}
+                                        <Text className={`font-semibold text-sm ${styles.text}`}>
+                                            {percentComplete}%
                                         </Text>
+                                    </View>
 
-                                        {achievement.completed && (
-                                            <View className="flex-row items-center mt-2">
-                                                <CheckCircle size={16} color={darkMode ? "#10B981" : "#059669"} />
-                                                <Text className={`ml-2.5 font-montserrat-medium text-sm text-green-${darkMode ? '500' : '600'}`}>
-                                                    Completed {achievement.date ? `on ${new Date(achievement.date).toLocaleDateString()}` : ''}
+                                    {/* Details section - only shown when expanded */}
+                                    <AnimatePresence>
+                                        {showDetails === achievement.achievement_id && (
+                                            <MotiView
+                                                from={{ opacity: 0, height: 0 }}
+                                                animate={{ opacity: 1, height: 'auto' }}
+                                                exit={{ opacity: 0, height: 0 }}
+                                                transition={{ type: 'timing', duration: 300 }}
+                                                className={`mt-6 p-5 rounded-lg ${styles.detailsBg}`}
+                                            >
+                                                <Text className={`font-medium text-base ${styles.text} mb-3`}>
+                                                    Achievement Details:
                                                 </Text>
-                                            </View>
-                                        )}
+                                                <Text className={`font-normal ${styles.subText} text-sm mb-4`}>
+                                                    {achievement.description}
+                                                </Text>
 
-                                        {!achievement.completed && (
-                                            <View className="flex-row items-center justify-between mt-2">
-                                                <View className="flex-row items-center">
-                                                    <Clock size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
-                                                    <Text className={`ml-2.5 font-montserrat-medium text-sm ${styles.textMuted}`}>
-                                                        In progress
+                                                {isUnlocked && (
+                                                    <View className="flex-row items-center mt-2">
+                                                        <CheckCircle size={16} color={darkMode ? "#10B981" : "#059669"} />
+                                                        <Text className={`ml-2.5 font-medium text-sm text-green-${darkMode ? '500' : '600'}`}>
+                                                            Completed on {new Date(achievement.unlocked_at).toLocaleDateString()}
+                                                        </Text>
+                                                    </View>
+                                                )}
+
+                                                {!isUnlocked && (
+                                                    <View className="flex-row items-center justify-between mt-2">
+                                                        <View className="flex-row items-center">
+                                                            <Clock size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                                                            <Text className={`ml-2.5 font-medium text-sm ${styles.textMuted}`}>
+                                                                In progress
+                                                            </Text>
+                                                        </View>
+
+                                                        <Text className={`font-semibold text-sm ${styles.text}`}>
+                                                            {percentComplete < 100 ?
+                                                                `${100 - percentComplete}% remaining` :
+                                                                'Ready to claim!'
+                                                            }
+                                                        </Text>
+                                                    </View>
+                                                )}
+
+                                                <View className="flex-row items-center mt-4">
+                                                    <Trophy size={16} color={darkMode ? "#A5B4FC" : "#4F46E5"} />
+                                                    <Text className={`ml-2.5 font-medium text-sm text-primary-${darkMode ? '400' : '600'}`}>
+                                                        {achievement.criteria_type.replace(/_/g, ' ')}
                                                     </Text>
                                                 </View>
 
-                                                <Text className={`font-montserrat-semibold text-sm ${styles.text}`}>
-                                                    {achievement.progress < 100 ?
-                                                        `${100 - achievement.progress}% remaining` :
-                                                        'Ready to claim!'
-                                                    }
-                                                </Text>
-                                            </View>
+                                                <View className="flex-row items-center mt-3">
+                                                    <Target size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                                                    <Text className={`ml-2.5 font-medium text-sm ${styles.textMuted}`}>
+                                                        Target: {achievement.progress.target_value}
+                                                        {achievement.criteria_type === 'STREAK_LENGTH' ? ' days' : ''}
+                                                    </Text>
+                                                </View>
+
+                                                <View className="flex-row items-center mt-3">
+                                                    <TrendingUp size={16} color={darkMode ? "#9CA3AF" : "#6B7280"} />
+                                                    <Text className={`ml-2.5 font-medium text-sm ${styles.textMuted}`}>
+                                                        Current: {achievement.progress.current_value}
+                                                        {achievement.criteria_type === 'STREAK_LENGTH' ? ' days' : ''}
+                                                    </Text>
+                                                </View>
+                                            </MotiView>
                                         )}
-                                    </MotiView>
-                                )}
-                            </AnimatePresence>
+                                    </AnimatePresence>
+                                </TouchableOpacity>
+                            </MotiView>
+                        );
+                    })}
+                </AnimatePresence>
+
+                {filteredAchievements.length === 0 && (
+                    <MotiView
+                        from={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{ type: 'spring', damping: 15 }}
+                        className={`${styles.card} rounded-xl p-10 my-8 items-center justify-center`}
+                    >
+                        <Award size={48} color={darkMode ? "#9CA3AF" : "#D1D5DB"} />
+                        <Text className={`mt-6 font-semibold text-lg text-center ${styles.text}`}>
+                            No {filter === 'completed' ? 'completed' : 'in-progress'} achievements
+                        </Text>
+                        <Text className={`mt-4 font-normal text-sm text-center ${styles.textMuted} px-4`}>
+                            {filter === 'completed' ?
+                                'Keep building habits to earn achievements!' :
+                                'Check back soon for new challenges.'
+                            }
+                        </Text>
+                        <TouchableOpacity
+                            onPress={() => handleFilterChange('all')}
+                            className="mt-6 bg-primary-500 py-3 px-6 rounded-full"
+                        >
+                            <Text className="text-white font-medium">
+                                View All Achievements
+                            </Text>
                         </TouchableOpacity>
                     </MotiView>
-                ))}
-            </AnimatePresence>
+                )}
+            </MotiView>
+        </ScrollView>
+    );
+};
 
-            {filteredAchievements.length === 0 && (
-                <MotiView
-                    from={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ type: 'spring', damping: 15 }}
-                    className={`${styles.card} rounded-xl p-10 my-8 items-center justify-center`}
-                >
-                    <Award size={48} color={darkMode ? "#9CA3AF" : "#D1D5DB"} />
-                    <Text className={`mt-6 font-montserrat-semibold text-lg text-center ${styles.text}`}>
-                        No {filter === 'completed' ? 'completed' : 'in-progress'} achievements
-                    </Text>
-                    <Text className={`mt-4 font-montserrat-regular text-sm text-center ${styles.textMuted} px-4`}>
-                        {filter === 'completed' ?
-                            'Keep building habits to earn achievements!' :
-                            'Check back soon for new challenges.'
-                        }
-                    </Text>
-                    <TouchableOpacity
-                        onPress={() => handleFilterChange('all')}
-                        className="mt-6 bg-primary-500 py-3 px-6 rounded-full"
-                    >
-                        <Text className="text-white font-montserrat-medium">
-                            View All Achievements
-                        </Text>
-                    </TouchableOpacity>
-                </MotiView>
-            )}
-        </MotiView>
-    )
-}
-
-export default AchievementsComponent
+export default AchievementsComponent;

@@ -22,8 +22,6 @@ const BlogPost = ({ post, isDark, authorProfile }) => {
     const [expandContent, setExpandContent] = useState(false);
     const [showAllImages, setShowAllImages] = useState(false);
 
-    console.log(post)
-
     // Get current user from Redux
     const userDetails = useSelector((state) => state.user);
     const currentUser = userDetails?.user || {};

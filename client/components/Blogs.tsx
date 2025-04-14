@@ -13,20 +13,22 @@ import {
     StatusBar,
     KeyboardAvoidingView,
     Platform,
-    Keyboard
+    Keyboard,
+    Alert
 } from 'react-native';
 import React, { useState, useRef, useEffect } from 'react';
-import { Heart, MessageCircle, Share2, ArrowLeft, MoreHorizontal, Bookmark, Send, X } from 'lucide-react-native';
+import { Heart, MessageCircle, Share2, ArrowLeft, MoreHorizontal, Bookmark, Send, X, Edit, Trash2 } from 'lucide-react-native';
 import { MotiView, AnimatePresence } from 'moti';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Comment from './Comment';
 import icons from '../constants/images';
 import { API_BASE_URL } from '../services/api';
-import { toggleLikeBlog } from '../services/blogService';
+import { toggleLikeBlog, deleteBlog, editBlog } from '../services/blogService';
 import { getComments, addComment } from '../services/commentService';
-import {useSelector} from "react-redux";
-import {router} from "expo-router";
+import { useSelector } from "react-redux";
+import { router } from "expo-router";
+import BlogPostCreator from './BlogPostCreator';
 
 const Blog = ({
                   blog,
@@ -36,11 +38,12 @@ const Blog = ({
                   onMenuPress,
                   onReadMore,
                   authorProfile = icons.maleProfile,
-
+                  onEditBlog,
+                  onDeleteBlog,
+                  onBlogUpdated
               }) => {
     // Safe area insets for proper Dynamic Island padding
     const insets = useSafeAreaInsets();
-
     // Animation values
     const likeScale = useRef(new Animated.Value(1)).current;
     const saveScale = useRef(new Animated.Value(1)).current;
@@ -59,9 +62,21 @@ const Blog = ({
     const [refreshing, setRefreshing] = useState(false);
     const [keyboardVisible, setKeyboardVisible] = useState(false);
     const [keyboardHeight, setKeyboardHeight] = useState(0);
+    const [isDeleting, setIsDeleting] = useState(false);
+
+    // Edit mode state
+    const [editModalVisible, setEditModalVisible] = useState(false);
+    const [editLoading, setEditLoading] = useState(false);
 
     const scrollViewRef = useRef(null);
     const commentInputRef = useRef(null);
+
+    // Get current user from Redux
+    const userDetails = useSelector((state) => state.user);
+    const currentUser = userDetails || {};
+
+    // Check if current user is the blog owner
+    const isOwner = currentUser?.user_id === blog.user?.user_id;
 
     // Keyboard event listeners
     useEffect(() => {
@@ -231,6 +246,129 @@ const Blog = ({
         if (onBookmark) onBookmark(blog.blog_id, isSaved);
     };
 
+    // Prepare blog data for editor
+    const prepareCurrentBlogForEditor = () => {
+        return {
+            title: blog.title || '',
+            content: blog.content || '',
+            images: blog.image ? [blog.image] : [],
+            category_id: blog.category?.category_id,
+            is_public: blog.is_public !== false // Default to true if not specified
+        };
+    };
+
+    // Handle edit blog
+    const handleEditBlog = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        setShowOptions(false);
+
+        if (onEditBlog) {
+            onEditBlog(blog);
+        } else {
+            // Open edit modal
+            setEditModalVisible(true);
+        }
+    };
+
+    // Handle blog update through the modal
+    const handleUpdateBlog = async (updatedData) => {
+        if (!blog || !blog.blog_id) {
+            Alert.alert("Error", "Blog ID is missing. Please try again.");
+            return;
+        }
+
+        try {
+            setEditLoading(true);
+
+            // If the post has a single image string, convert it to an array for the editor
+            const postData = {
+                ...updatedData,
+                // If the blog already has an image but it's not included in the updated images,
+                // we need to keep track of whether the image should be removed
+                image: updatedData.images && updatedData.images.length > 0 ? updatedData.images[0] : null
+            };
+
+            const response = await editBlog(blog.blog_id, postData);
+
+            if (response && response.success) {
+                // Update the blog data locally
+                const updatedBlog = {
+                    ...blog,
+                    title: postData.title,
+                    content: postData.content,
+                    image: postData.image,
+                    category_id: postData.category_id,
+                    is_public: postData.is_public
+                };
+
+                // Notify parent component about the update
+                if (onBlogUpdated) {
+                    onBlogUpdated(updatedBlog);
+                }
+
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                setEditModalVisible(false);
+
+                // Show success message
+                Alert.alert("Success", "Your blog has been updated successfully.");
+            } else {
+                Alert.alert("Error", response?.message || "Failed to update blog.");
+            }
+        } catch (err) {
+            console.error('Error updating blog:', err);
+            Alert.alert("Error", "Failed to update blog. Please try again.");
+        } finally {
+            setEditLoading(false);
+        }
+    };
+
+    // Handle delete blog
+    const handleDeleteBlog = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+        // Confirm deletion first
+        Alert.alert(
+            "Delete Post",
+            "Are you sure you want to delete this post? This action cannot be undone.",
+            [
+                {
+                    text: "Cancel",
+                    style: "cancel"
+                },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            setIsDeleting(true);
+                            const response = await deleteBlog(blog.blog_id);
+
+                            if (response && response.success) {
+                                // Close options and notify parent component
+                                setShowOptions(false);
+
+                                if (onDeleteBlog) {
+                                    onDeleteBlog(blog.blog_id);
+                                }
+
+                                // Provide feedback
+                                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                            } else {
+                                console.error('Error deleting blog:', response?.error || 'Unknown error');
+                                Alert.alert("Error", "Failed to delete post. Please try again later.");
+                            }
+                        } catch (error) {
+                            console.error('Error deleting blog:', error);
+                            Alert.alert("Error", "Failed to delete post. Please try again later.");
+                        } finally {
+                            setIsDeleting(false);
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     // Handle share
     const handleShare = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -266,10 +404,6 @@ const Blog = ({
     const closeCommentsModal = () => {
         setShowComments(false);
     };
-
-    // Get current user from Redux
-    const userDetails = useSelector((state) => state.user);
-    const currentUser = userDetails?.user || {};
 
     // Submit a new comment
     const handleSubmitComment = async () => {
@@ -356,7 +490,7 @@ const Blog = ({
 
         // Small delay to ensure the modal closes properly before navigation
         setTimeout(() => {
-            if (currentUser?.user?.user_id === userId) {
+            if (currentUser?.user_id === userId) {
                 router.push('/profile');
             } else {
                 router.push({
@@ -373,7 +507,7 @@ const Blog = ({
     const iosTopPadding = Platform.OS === 'ios' ? Math.max(insets.top, 34) : 0;
     const iosBottomPadding = Platform.OS === 'ios' ? Math.max(insets.bottom, 5) : 0;
 
-    // Main Blog component with styling using standard React Native styles instead of Tailwind classes
+    // Main Blog component with NativeWind styling
     return (
         <>
             {/* Options Menu Overlay */}
@@ -381,48 +515,56 @@ const Blog = ({
                 {showOptions && (
                     <Pressable
                         onPress={() => setShowOptions(false)}
-                        style={{
-                            position: 'absolute',
-                            top: 0,
-                            bottom: 0,
-                            left: 0,
-                            right: 0,
-                            zIndex: 50,
-                            backgroundColor: 'rgba(0, 0, 0, 0.3)'
-                        }}
+                        className="absolute inset-0 z-50 bg-black/30"
                     >
                         <MotiView
                             from={{ opacity: 0, translateY: -10 }}
                             animate={{ opacity: 1, translateY: 0 }}
                             exit={{ opacity: 0, translateY: -10 }}
                             transition={{ type: 'timing', duration: 200 }}
-                            style={{
-                                position: 'absolute',
-                                right: 24,
-                                top: 64,
-                                borderRadius: 12,
-                                padding: 8,
-                                shadowColor: "#000",
-                                shadowOffset: { width: 0, height: 2 },
-                                shadowOpacity: 0.25,
-                                shadowRadius: 3.84,
-                                elevation: 5,
-                                backgroundColor: isDark ? '#1F2937' : '#FFFFFF'
-                            }}
+                            className={`absolute right-6 top-16 rounded-xl p-2 shadow-md ${isDark ? 'bg-gray-800' : 'bg-white'}`}
                         >
+                            {/* Edit option - only visible for blog owner */}
+                            {isOwner && (
+                                <TouchableOpacity
+                                    onPress={handleEditBlog}
+                                    className="flex-row items-center px-4 py-3 rounded-lg"
+                                >
+                                    <Edit size={18} color={isDark ? '#FFFFFF' : '#1F2937'} className="mr-2" />
+                                    <Text className={isDark ? 'text-white' : 'text-gray-800'}>
+                                        Edit post
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {/* Delete option - only visible for blog owner */}
+                            {isOwner && (
+                                <TouchableOpacity
+                                    onPress={handleDeleteBlog}
+                                    disabled={isDeleting}
+                                    className="flex-row items-center px-4 py-3 rounded-lg"
+                                >
+                                    {isDeleting ? (
+                                        <ActivityIndicator size="small" color="#EF4444" className="mr-2" />
+                                    ) : (
+                                        <Trash2 size={18} color="#EF4444" className="mr-2" />
+                                    )}
+                                    <Text className="text-red-500">
+                                        {isDeleting ? 'Deleting...' : 'Delete post'}
+                                    </Text>
+                                </TouchableOpacity>
+                            )}
+
+                            {/* Report option - visible for everyone */}
                             <TouchableOpacity
                                 onPress={() => {
                                     setShowOptions(false);
                                     // Add your report function here
                                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                                 }}
-                                style={{
-                                    paddingHorizontal: 16,
-                                    paddingVertical: 12,
-                                    borderRadius: 8
-                                }}
+                                className="flex-row items-center px-4 py-3 rounded-lg"
                             >
-                                <Text style={{ color: isDark ? '#FFFFFF' : '#1F2937' }}>
+                                <Text className={isDark ? 'text-white' : 'text-gray-800'}>
                                     Report post
                                 </Text>
                             </TouchableOpacity>
@@ -435,60 +577,29 @@ const Blog = ({
                 from={{ opacity: 0, translateY: 20 }}
                 animate={{ opacity: 1, translateY: 0 }}
                 transition={{ type: 'timing', duration: 500 }}
-                style={{
-                    marginBottom: 16,
-                    borderRadius: 24,
-                    overflow: 'hidden',
-                    shadowColor: "#000",
-                    shadowOffset: { width: 0, height: 1 },
-                    shadowOpacity: 0.1,
-                    shadowRadius: 2,
-                    elevation: 2,
-                    backgroundColor: isDark ? '#1F2937' : '#FFFFFF'
-                }}
+                className={`mb-4 rounded-3xl overflow-hidden shadow ${isDark ? 'bg-gray-800' : 'bg-white'}`}
             >
                 {/* Author Info */}
-                <View style={{
-                    padding: 16,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between'
-                }}>
-                    <View style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 8
-                    }}>
+                <View className="p-4 flex-row items-center justify-between">
+                    <View className="flex-row items-center gap-2">
                         <Image
                             source={blog.user?.avatar ? { uri: blog.user.avatar } : authorProfile}
-                            style={{
-                                width: 40,
-                                height: 40,
-                                borderRadius: 20,
-                                backgroundColor: '#D1D5DB'
-                            }}
+                            className="w-10 h-10 rounded-full bg-gray-300"
                         />
                         <View>
-
                             <TouchableOpacity onPress={() => navigateToProfile(blog.user.user_id, blog.user.user_name)}>
-                                <Text style={{
-                                    fontWeight: 'bold',
-                                    color: isDark ? '#FFFFFF' : '#1F2937'
-                                }}>
+                                <Text className={`font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>
                                     {blog.user?.user_name || "Anonymous"}
                                 </Text>
                             </TouchableOpacity>
-                            <Text style={{
-                                fontSize: 12,
-                                color: isDark ? '#9CA3AF' : '#6B7280'
-                            }}>
+                            <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                                 {formatDate(blog.createdAt || new Date())}
                             </Text>
                         </View>
                     </View>
 
                     <TouchableOpacity
-                        style={{ padding: 8 }}
+                        className="p-2"
                         onPress={handleMenuPress}
                     >
                         <MoreHorizontal size={20} color={isDark ? '#94A3B8' : '#6B7280'} />
@@ -497,21 +608,12 @@ const Blog = ({
 
                 {/* Category Tag */}
                 {blog.category && (
-                    <View style={{ paddingHorizontal: 16, marginBottom: 8 }}>
+                    <View className="px-4 mb-2">
                         <View
-                            style={{
-                                alignSelf: 'flex-start',
-                                borderRadius: 9999,
-                                paddingHorizontal: 12,
-                                paddingVertical: 4,
-                                backgroundColor: blog.category.color || '#6366F1'
-                            }}
+                            className="self-start rounded-full px-3 py-1"
+                            style={{ backgroundColor: blog.category.color || '#6366F1' }}
                         >
-                            <Text style={{
-                                color: '#FFFFFF',
-                                fontSize: 12,
-                                fontWeight: '500'
-                            }}>
+                            <Text className="text-white text-xs font-medium">
                                 {blog.category.icon ? `${blog.category.icon} ` : ''}{blog.category.category_name || 'General'}
                             </Text>
                         </View>
@@ -520,36 +622,28 @@ const Blog = ({
 
                 {/* Blog Title - if available */}
                 {blog.title && (
-                    <View style={{ paddingHorizontal: 16, paddingBottom: 8 }}>
-                        <Text style={{
-                            fontSize: 18,
-                            fontWeight: 'bold',
-                            color: isDark ? '#FFFFFF' : '#1F2937'
-                        }}>
+                    <View className="px-4 pb-2">
+                        <Text className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-800'}`}>
                             {blog.title}
                         </Text>
                     </View>
                 )}
 
                 {/* Blog Content */}
-                <View style={{ paddingHorizontal: 16, paddingBottom: 12 }}>
-                    <Text style={{
-                        fontSize: 16,
-                        lineHeight: 24,
-                        color: isDark ? '#D1D5DB' : '#4B5563'
-                    }}>
+                <View className="px-4 pb-3">
+                    <Text className={`text-base leading-6 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                         {formatContentPreview(blog.content)}
                     </Text>
                 </View>
 
                 {/* Blog Image - if available */}
                 {blog.image && !imageError && (
-                    <View style={{ width: '100%', height: 256 }}>
+                    <View className="w-full h-64">
                         <Image
                             source={{
                                 uri: getFullImageUrl(blog.image)
                             }}
-                            style={{ width: '100%', height: '100%' }}
+                            className="w-full h-full"
                             resizeMode="cover"
                             onError={handleImageError}
                         />
@@ -557,24 +651,12 @@ const Blog = ({
                 )}
 
                 {/* Action Buttons */}
-                <View style={{
-                    paddingHorizontal: 16,
-                    paddingVertical: 12,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    borderTopWidth: 1,
-                    borderTopColor: isDark ? '#374151' : '#F3F4F6'
-                }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View className={`px-4 py-3 flex-row items-center justify-between border-t ${isDark ? 'border-gray-700' : 'border-gray-100'}`}>
+                    <View className="flex-row items-center">
                         {/* Like Button */}
                         <TouchableOpacity
                             onPress={handleLike}
-                            style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                marginRight: 24
-                            }}
+                            className="flex-row items-center mr-6"
                         >
                             <Animated.View style={{ transform: [{ scale: likeScale }] }}>
                                 <Heart
@@ -583,12 +665,11 @@ const Blog = ({
                                     fill={isLiked ? '#7C3AED' : 'none'}
                                 />
                             </Animated.View>
-                            <Text style={{
-                                marginLeft: 6,
-                                color: isLiked
-                                    ? '#7C3AED'
-                                    : (isDark ? '#9CA3AF' : '#4B5563')
-                            }}>
+                            <Text
+                                className={`ml-1.5 ${isLiked
+                                    ? 'text-purple-600'
+                                    : (isDark ? 'text-gray-400' : 'text-gray-600')}`}
+                            >
                                 {likesCount > 999 ? `${(likesCount / 1000).toFixed(1)}k` : likesCount}
                             </Text>
                         </TouchableOpacity>
@@ -596,20 +677,13 @@ const Blog = ({
                         {/* Comment Button */}
                         <TouchableOpacity
                             onPress={handleCommentPress}
-                            style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                marginRight: 24
-                            }}
+                            className="flex-row items-center mr-6"
                         >
                             <MessageCircle
                                 size={22}
                                 color={isDark ? '#94A3B8' : '#6B7280'}
                             />
-                            <Text style={{
-                                marginLeft: 6,
-                                color: isDark ? '#9CA3AF' : '#4B5563'
-                            }}>
+                            <Text className={`ml-1.5 ${isDark ? 'text-gray-400' : 'text-gray-600'}`}>
                                 {blog.commentsCount || 0}
                             </Text>
                         </TouchableOpacity>
@@ -641,19 +715,9 @@ const Blog = ({
                 {blog.content && blog.content.length > 150 && (
                     <TouchableOpacity
                         onPress={handleReadMore}
-                        style={{
-                            marginHorizontal: 16,
-                            marginBottom: 16,
-                            paddingVertical: 8,
-                            borderRadius: 12,
-                            backgroundColor: isDark ? '#374151' : '#F3F4F6'
-                        }}
+                        className={`mx-4 mb-4 py-2 rounded-xl ${isDark ? 'bg-gray-700' : 'bg-gray-100'}`}
                     >
-                        <Text style={{
-                            textAlign: 'center',
-                            fontWeight: '500',
-                            color: isDark ? '#A5B4FC' : '#6366F1'
-                        }}>
+                        <Text className={`text-center font-medium ${isDark ? 'text-indigo-300' : 'text-indigo-600'}`}>
                             Read more
                         </Text>
                     </TouchableOpacity>
@@ -671,49 +735,33 @@ const Blog = ({
                     <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
                     <SafeAreaView
                         edges={['left', 'right']} // Don't use top/bottom edges - we'll handle manually
-                        style={{
-                            flex: 1,
-                            backgroundColor: isDark ? '#111827' : '#FFFFFF'
-                        }}
+                        className={`flex-1 ${isDark ? 'bg-gray-900' : 'bg-white'}`}
                     >
                         <KeyboardAvoidingView
                             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-                            style={{ flex: 1 }}
+                            className="flex-1"
                             keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
                         >
                             {/* Header with proper padding for Dynamic Island */}
                             <View
-                                style={{
-                                    paddingTop: iosTopPadding,
-                                    flexDirection: 'row',
-                                    alignItems: 'center',
-                                    justifyContent: 'space-between',
-                                    paddingHorizontal: 16,
-                                    paddingBottom: 8,
-                                    borderBottomWidth: 1,
-                                    borderBottomColor: isDark ? '#374151' : '#E5E7EB'
-                                }}
+                                style={{ paddingTop: iosTopPadding }}
+                                className={`flex-row items-center justify-between px-4 pb-2 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}
                             >
-                                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                <View className="flex-row items-center">
                                     <TouchableOpacity
                                         onPress={() => setShowComments(false)}
-                                        style={{ padding: 8 }}
+                                        className="p-2"
                                     >
                                         <ArrowLeft size={24} color={isDark ? '#E2E8F0' : '#1F2937'} />
                                     </TouchableOpacity>
-                                    <Text style={{
-                                        fontSize: 18,
-                                        fontWeight: 'bold',
-                                        marginLeft: 8,
-                                        color: isDark ? '#FFFFFF' : '#1F2937'
-                                    }}>
+                                    <Text className={`text-lg font-bold ml-2 ${isDark ? 'text-white' : 'text-gray-800'}`}>
                                         Comments
                                     </Text>
                                 </View>
 
                                 <TouchableOpacity
                                     onPress={() => setShowComments(false)}
-                                    style={{ padding: 8 }}
+                                    className="p-2"
                                 >
                                     <X size={24} color={isDark ? '#E2E8F0' : '#1F2937'} />
                                 </TouchableOpacity>
@@ -722,7 +770,7 @@ const Blog = ({
                             {/* Comments List */}
                             <ScrollView
                                 ref={scrollViewRef}
-                                style={{ flex: 1 }}
+                                className="flex-1"
                                 contentContainerStyle={{
                                     paddingHorizontal: 16,
                                     paddingBottom: keyboardVisible ? 100 : 20 // Extra padding when keyboard is visible
@@ -739,12 +787,9 @@ const Blog = ({
                                 }
                             >
                                 {loadingComments ? (
-                                    <View style={{ paddingVertical: 32, alignItems: 'center', justifyContent: 'center' }}>
+                                    <View className="py-8 items-center justify-center">
                                         <ActivityIndicator size="large" color="#6366F1" />
-                                        <Text style={{
-                                            marginTop: 8,
-                                            color: isDark ? '#9CA3AF' : '#6B7280'
-                                        }}>
+                                        <Text className={`mt-2 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                                             Loading comments...
                                         </Text>
                                     </View>
@@ -764,34 +809,24 @@ const Blog = ({
                                         />
                                     ))
                                 ) : (
-                                    <View style={{ paddingVertical: 32, alignItems: 'center', justifyContent: 'center' }}>
-                                        <Text style={{
-                                            textAlign: 'center',
-                                            color: isDark ? '#9CA3AF' : '#6B7280'
-                                        }}>
+                                    <View className="py-8 items-center justify-center">
+                                        <Text className={`text-center ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
                                             No comments yet. Be the first to comment!
                                         </Text>
                                     </View>
                                 )}
 
                                 {/* Add some bottom padding for better scrolling */}
-                                <View style={{ height: keyboardVisible ? 120 : 80 }} />
+                                <View className={`h-${keyboardVisible ? '30' : '20'}`} />
                             </ScrollView>
 
                             {/* Reply indicator */}
                             {replyingTo && (
-                                <View style={{
-                                    paddingHorizontal: 16,
-                                    paddingVertical: 8,
-                                    borderTopWidth: 1,
-                                    flexDirection: 'row',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    backgroundColor: isDark ? '#1F2937' : '#F9FAFB',
-                                    borderTopColor: isDark ? '#374151' : '#E5E7EB'
-                                }}>
-                                    <Text style={{ color: isDark ? '#D1D5DB' : '#4B5563' }}>
-                                        Replying to <Text style={{ fontWeight: 'bold' }}>{replyingTo.user.user_name || replyingTo.user.name}</Text>
+                                <View className={`px-4 py-2 border-t flex-row justify-between items-center ${
+                                    isDark ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'
+                                }`}>
+                                    <Text className={isDark ? 'text-gray-300' : 'text-gray-600'}>
+                                        Replying to <Text className="font-bold">{replyingTo.user.user_name || replyingTo.user.name}</Text>
                                     </Text>
                                     <TouchableOpacity onPress={cancelReply}>
                                         <X size={18} color={isDark ? '#94A3B8' : '#6B7280'} />
@@ -800,46 +835,33 @@ const Blog = ({
                             )}
 
                             {/* Comment Input - Fixed at bottom */}
-                            <View style={{
-                                paddingHorizontal: 16,
-                                paddingTop: 12,
-                                paddingBottom: Platform.OS === 'ios' ? Math.max(iosBottomPadding, 0) : 5,
-                                borderTopWidth: 1,
-                                borderTopColor: isDark ? '#374151' : '#E5E7EB',
-                                backgroundColor: isDark ? '#111827' : '#FFFFFF'
-                            }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'flex-end' }}>
+                            <View
+                                style={{ paddingBottom: Platform.OS === 'ios' ? Math.max(iosBottomPadding, 0) : 5 }}
+                                className={`px-4 pt-3 border-t ${isDark ? 'bg-gray-900 border-gray-700' : 'bg-white border-gray-200'}`}
+                            >
+                                <View className="flex-row items-end">
                                     <TextInput
                                         ref={commentInputRef}
                                         value={newComment}
                                         onChangeText={setNewComment}
                                         placeholder={replyingTo ? "Write a reply..." : "Add a comment..."}
                                         placeholderTextColor={isDark ? '#94A3B8' : '#9CA3AF'}
-                                        style={{
-                                            flex: 1,
-                                            maxHeight: 100,
-                                            minHeight: Platform.OS === 'ios' ? 40 : 56,
-                                            paddingVertical: Platform.OS === 'ios' ? 10 : 8,
-                                            paddingHorizontal: 16,
-                                            borderRadius: 24,
-                                            marginRight: 8,
-                                            backgroundColor: isDark ? '#1F2937' : '#F3F4F6',
-                                            color: isDark ? '#FFFFFF' : '#1F2937',
-                                            borderWidth: 1,
-                                            borderColor: isDark ? '#374151' : '#E5E7EB'
-                                        }}
+                                        className={`flex-1 max-h-24 min-h-[40px] px-4 py-2 mr-2 rounded-3xl border ${
+                                            isDark
+                                                ? 'bg-gray-800 text-white border-gray-700'
+                                                : 'bg-gray-100 text-gray-800 border-gray-200'
+                                        }`}
                                         multiline
                                         maxLength={500}
                                     />
                                     <TouchableOpacity
                                         onPress={handleSubmitComment}
                                         disabled={!newComment.trim()}
-                                        style={{
-                                            padding: 12,
-                                            borderRadius: 24,
-                                            backgroundColor: newComment.trim()
-                                                ? '#7C3AED'
-                                                : isDark ? '#1F2937' : '#E5E7EB'}}
+                                        className={`p-3 rounded-full ${
+                                            newComment.trim()
+                                                ? 'bg-purple-700'
+                                                : isDark ? 'bg-gray-800' : 'bg-gray-200'
+                                        }`}
                                     >
                                         <Send
                                             size={20}
@@ -851,6 +873,19 @@ const Blog = ({
                         </KeyboardAvoidingView>
                     </SafeAreaView>
                 </Modal>
+            )}
+
+            {/* Edit Blog Modal */}
+            {editModalVisible && (
+                <BlogPostCreator
+                    visible={editModalVisible}
+                    onClose={() => setEditModalVisible(false)}
+                    onPost={handleUpdateBlog}
+                    loading={editLoading}
+                    initialData={prepareCurrentBlogForEditor()}
+                    isEditMode={true}
+                    isDark={isDark}
+                />
             )}
         </>
     );

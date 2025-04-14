@@ -11,12 +11,18 @@ router.post('/register', userController.register);
 router.post('/login', userController.login);
 
 // User details route (/api/users/changePassword)
-router.post('/changePassword',validateToken, userController.changePassword);
+router.post('/changePassword', validateToken, userController.changePassword);
 
 //forgot password route (/api/users/forgotPassword)
 router.post('/forgotPassword', userController.forgotPassword);
 
-//forgot password route (/api/users/verifyUser)
-router.get('/verifyUser',validateToken, userController.verifyUser);
+// Verify OTP route (/api/users/verifyOTP)
+router.post('/verifyOTP', userController.verifyOTP);
+
+// Reset password route (/api/users/resetPassword)
+router.post('/resetPassword', userController.resetPassword);
+
+//User verification route (/api/users/verifyUser)
+router.get('/verifyUser', validateToken, userController.verifyUser);
 
 module.exports = router;

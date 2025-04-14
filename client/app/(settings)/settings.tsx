@@ -82,7 +82,7 @@ export default function SettingsScreen() {
         dailyGoal,
         weeklyGoal,
         onVacation
-    } = userState?.user?.user || {};
+    } = userState || {};
 
     // Loading state for actions
     const [loading, setLoading] = useState({

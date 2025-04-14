@@ -1,6 +1,13 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 const moment = require('moment-timezone');
+const {  checkAndUpdateAchievements,
+    updateTotalCompletionsAchievements,
+    updateStreakAchievements,
+    updateDomainMasteryAchievements,
+    checkPerfectCompletionAchievements,
+    updateHabitDiversityAchievements,
+    awardAchievement,updateConsecutiveDaysAchievements } = require('../utils/achievements/achievementFunctions');
 
 /**
  * Helper function to determine if a habit should be scheduled for a specific date
@@ -147,22 +154,18 @@ const getFrequencyDisplay = (habit) => {
  * Helper function to create a daily status record for a habit
  */
 const createHabitDailyStatus = async (habitId, userId, date, isScheduled) => {
-    try {
-        return await prisma.habitDailyStatus.create({
-            data: {
-                habit_id: habitId,
-                user_id: userId,
-                date: date,
-                is_scheduled: isScheduled,
-                is_completed: false,
-                is_skipped: false
-            }
-        });
-    } catch (error) {
-        console.error('Error creating habit daily status:', error);
-        return null;
-    }
+    return await prisma.habitDailyStatus.create({
+        data: {
+            habit_id: habitId,
+            user_id: userId,
+            date: date,
+            is_scheduled: isScheduled,
+            is_completed: false,
+            is_skipped: false
+        }
+    });
 };
+
 
 /**
  * Add a new habit to the database with enhanced reminder support and points setup
@@ -1058,7 +1061,7 @@ const getHabitsByDomain = async (req, res) => {
 };
 
 /**
- * Log a habit completion with enhanced streak management and points system
+ * Log a habit completion with streak management, points, and achievement tracking
  */
 const logHabitCompletion = async (req, res) => {
     try {
@@ -1190,6 +1193,9 @@ const logHabitCompletion = async (req, res) => {
             data: logData
         });
 
+        // For storing achievement updates
+        let unlockedAchievements = [];
+
         // Handle streak and points for completion
         if (completed && !skipped) {
             // Update streak with enhanced rules
@@ -1237,17 +1243,34 @@ const logHabitCompletion = async (req, res) => {
                 }
             });
 
-            // Update user's total points
+            // Update user's total points and completion count
             await prisma.user.update({
                 where: { user_id: userId },
                 data: {
-                    points_gained: { increment: pointsEarned }
+                    points_gained: { increment: pointsEarned },
+                    totalHabitsCompleted: { increment: 1 }
                 }
             });
 
             // Check for streak milestones and award bonus points
             if (streakData.newStreak >= 7) {
                 await checkAndAwardStreakMilestone(habit, userId, streakData.newStreak);
+            }
+
+            // Update achievement progress for total completions
+            await updateTotalCompletionsAchievements(userId);
+
+            // Update achievement progress for streak length if applicable
+            if (streakData.newStreak > 0) {
+                await updateStreakAchievements(userId, streakData.newStreak);
+            }
+
+            // Update domain mastery achievements
+            await updateDomainMasteryAchievements(userId, habit.domain_id);
+
+            // Update habit diversity achievements (only update if completed today)
+            if (!isBackdated) {
+                await updateHabitDiversityAchievements(userId);
             }
         } else if (skipped) {
             // Handle skips based on user's preferences
@@ -1282,7 +1305,7 @@ const logHabitCompletion = async (req, res) => {
             const todayStats = await prisma.userStats.findFirst({
                 where: {
                     user_id: userId,
-                    date: {
+                    updated_at: {
                         gte: today,
                         lt: new Date(today.getTime() + 24 * 60 * 60 * 1000)
                     }
@@ -1293,8 +1316,6 @@ const logHabitCompletion = async (req, res) => {
                 // Daily goal bonus points
                 dailyGoalPoints = 20;
                 dailyGoalAchieved = true;
-
-
 
                 // Create points log for daily goal
                 await prisma.pointsLog.create({
@@ -1326,6 +1347,12 @@ const logHabitCompletion = async (req, res) => {
                         type: 'SYSTEM_MESSAGE'
                     }
                 });
+
+                // Update consecutive days achievements
+                await updateConsecutiveDaysAchievements(userId, user.currentDailyStreak + 1);
+
+                // Check for perfect completion (all scheduled habits completed)
+                await checkPerfectCompletionAchievements(userId);
             }
         }
 
@@ -3057,6 +3084,8 @@ const getHabitDomains = async (req, res) => {
             };
         }));
 
+        console.log(domainStats)
+
         return res.status(200).json({
             success: true,
             data: domainStats
@@ -3070,6 +3099,30 @@ const getHabitDomains = async (req, res) => {
         });
     }
 };
+
+const getAllHabitDomains = async (req, res) => {
+    try {
+        // Get all domains without any filtering
+        const domains = await prisma.habitDomain.findMany({
+            orderBy: {
+                name: 'asc'
+            }
+        });
+
+        return res.status(200).json({
+            success: true,
+            data: domains
+        });
+    } catch (error) {
+        console.error('Error getting all habit domains:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve habit domains',
+            error: error.message
+        });
+    }
+};
+
 
 /**
  * Add a new habit domain
@@ -3247,5 +3300,5 @@ module.exports = {
     getHabitDomains,
     addHabitDomain,
     updateHabitDomain,
-    deleteHabitDomain
+    deleteHabitDomain,getAllHabitDomains
 };

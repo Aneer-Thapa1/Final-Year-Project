@@ -47,7 +47,7 @@ const FriendsComponent: React.FC<FriendsComponentProps> = ({ isDark }) => {
     } = useAppSelector((state: RootState) => state.friendship);
 
     // Get user data from Redux store
-    const currentUserId = useAppSelector((state: RootState) => state.user.user?.user?.user_id);
+    const currentUserId = useAppSelector((state: RootState) => state.user?.user_id);
 
     // Get chat data from Redux store
     const { chatRooms, loadingChat, socketConnected } = useAppSelector((state: RootState) => state.chat);

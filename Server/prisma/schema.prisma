@@ -1,3 +1,4 @@
+// HabitPulse - Complete Prisma Schema
 generator client {
   provider = "prisma-client-js"
 }
@@ -33,6 +34,16 @@ model User {
   weeklyGoal  Int @default(15)
   monthlyGoal Int @default(60)
 
+  // Password reset fields - Previous implementation
+  resetPasswordToken  String?
+  resetPasswordExpiry DateTime?
+
+  // New OTP fields
+  resetOTP       String? // Stores the OTP code (hashed)
+  resetOTPExpiry DateTime? // When the OTP expires
+  otpAttempts    Int       @default(0) // Count failed attempts
+  otpLastSent    DateTime? // Rate limiting for OTP requests
+
   // Social & Activity Relationships
   sentFriendRequests     FriendRequest[] @relation("SentRequests")
   receivedFriendRequests FriendRequest[] @relation("ReceivedRequests")
@@ -57,11 +68,22 @@ model User {
   dailyStatuses       HabitDailyStatus[]
 
   // Reminder System Relationships
-  scheduledReminders ScheduledReminder[]
-  devices            UserDevice[]
+  scheduledReminders      ScheduledReminder[]
+  devices                 UserDevice[]
+  notificationPreferences UserNotificationPreference[]
+
+  // Challenge System
+  challengesCreated Challenge[]            @relation("ChallengeCreator")
+  challengesJoined  ChallengeParticipant[]
 
   // Points System
   pointsLogs PointsLog[]
+
+  // Stats
+  userStats UserStats?
+
+  // Notifications
+  notifications Notification[]
 
   // Timestamps
   registeredAt DateTime @default(now())
@@ -157,6 +179,23 @@ model UserDevice {
 
   @@index([user_id])
   @@index([token])
+}
+
+// 🔹 User Notification Preferences
+model UserNotificationPreference {
+  preference_id Int      @id @default(autoincrement())
+  user_id       Int
+  type          String
+  channel       String?
+  enabled       Boolean  @default(true)
+  settings      Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relationship
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id, type, channel])
 }
 
 // 🔹 Friend Request - For Social Connection Features
@@ -345,6 +384,7 @@ model Habit {
   resets             HabitReset[]
   dailyStatuses      HabitDailyStatus[]
   scheduledReminders ScheduledReminder[]
+  habitChallenges    HabitChallenge[]
 
   // Timestamps
   createdAt DateTime @default(now())
@@ -537,6 +577,27 @@ enum AchievementType {
   SOCIAL_ENGAGEMENT
 }
 
+// 🔹 Achievement Progress - Tracks user progress toward achievements
+model AchievementProgress {
+  id               Int      @id @default(autoincrement())
+  user_id          Int
+  achievement_id   Int
+  current_value    Float    @default(0)
+  target_value     Float
+  percent_complete Int      @default(0)
+  last_updated     DateTime @default(now())
+  created_at       DateTime @default(now())
+
+  // Relationships
+  user        User        @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievement_id], references: [achievement_id], onDelete: Cascade)
+
+  @@unique([user_id, achievement_id], name: "user_id_achievement_id")
+  @@index([user_id])
+  @@index([achievement_id])
+  @@index([last_updated])
+}
+
 // 🔹 Blog - For Social Sharing and Progress Updates
 model Blog {
   blog_id     Int      @id @default(autoincrement())
@@ -613,9 +674,13 @@ model Notification {
   createdAt       DateTime         @default(now())
   readAt          DateTime?
   action_url      String?
+  related_id      Int?
 
-  // Relationships are handled through the type and related_id fields
-  related_id Int?
+  // Relationship
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id, is_read])
+  @@index([createdAt])
 }
 
 enum NotificationType {
@@ -679,23 +744,140 @@ model HabitDailyStatus {
   @@index([user_id, date]) // For querying all habits for a user on a specific day
 }
 
-// 🔹 Achievement Progress - Tracks user progress toward achievements
-model AchievementProgress {
-  id               Int      @id @default(autoincrement())
-  user_id          Int
-  achievement_id   Int
-  current_value    Float    @default(0)
-  target_value     Float
-  percent_complete Int      @default(0)
-  last_updated     DateTime @default(now())
-  created_at       DateTime @default(now())
+// 🔹 Challenge - For Group Challenges
+model Challenge {
+  challenge_id     Int             @id @default(autoincrement())
+  title            String
+  description      String
+  start_date       DateTime
+  end_date         DateTime
+  created_by       Int
+  difficulty       DifficultyLevel @default(MEDIUM)
+  is_public        Boolean         @default(true)
+  max_participants Int? // Null means unlimited
+  points_reward    Int             @default(50)
+  badge_image      String?
+  created_at       DateTime        @default(now())
+  updated_at       DateTime        @updatedAt
+
+  // Challenge requirements
+  required_habit_count     Int   @default(1)
+  required_completion_rate Float @default(0.8) // 80% completion required
 
   // Relationships
-  user        User        @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
-  achievement Achievement @relation(fields: [achievement_id], references: [achievement_id], onDelete: Cascade)
+  creator         User                   @relation("ChallengeCreator", fields: [created_by], references: [user_id], onDelete: Cascade)
+  participants    ChallengeParticipant[]
+  habitChallenges HabitChallenge[]
 
-  @@unique([user_id, achievement_id], name: "user_id_achievement_id")
+  @@index([created_by])
+  @@index([start_date, end_date])
+  @@index([is_public])
+}
+
+// 🔹 Challenge Participant - Tracks Users in Challenges
+model ChallengeParticipant {
+  participant_id Int                        @id @default(autoincrement())
+  challenge_id   Int
+  user_id        Int
+  joined_at      DateTime                   @default(now())
+  status         ChallengeParticipantStatus @default(ACTIVE)
+  progress       Float                      @default(0)
+  completed      Boolean                    @default(false)
+  completed_at   DateTime?
+  points_awarded Int                        @default(0)
+
+  // Relationships
+  challenge Challenge @relation(fields: [challenge_id], references: [challenge_id], onDelete: Cascade)
+  user      User      @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@unique([challenge_id, user_id])
   @@index([user_id])
-  @@index([achievement_id])
-  @@index([last_updated])
+  @@index([challenge_id])
+}
+
+enum ChallengeParticipantStatus {
+  INVITED
+  ACTIVE
+  COMPLETED
+  FAILED
+  WITHDRAWN
+}
+
+// 🔹 Habit-Challenge Relationship - Links habits to challenges
+model HabitChallenge {
+  habit_challenge_id Int      @id @default(autoincrement())
+  habit_id           Int
+  challenge_id       Int
+  added_at           DateTime @default(now())
+
+  // Relationships
+  habit     Habit     @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
+  challenge Challenge @relation(fields: [challenge_id], references: [challenge_id], onDelete: Cascade)
+
+  @@unique([habit_id, challenge_id])
+  @@index([habit_id])
+  @@index([challenge_id])
+}
+
+// 🔹 Leaderboard Cache - For Performance Optimization
+model LeaderboardCache {
+  id          Int      @id @default(autoincrement())
+  period_type String
+  period_key  String
+  data        Json
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  expiresAt   DateTime
+
+  @@unique([period_type, period_key])
+  @@index([period_type, expiresAt])
+}
+
+// 🔹 App Settings - For Global App Configuration
+model AppSettings {
+  setting_id    Int      @id @default(autoincrement())
+  setting_key   String   @unique
+  setting_value String
+  description   String?
+  is_public     Boolean  @default(false)
+  updated_at    DateTime @updatedAt
+  updated_by    String?
+}
+
+// 🔹 Motivation Quote - For Inspirational Quotes
+model MotivationQuote {
+  quote_id   Int      @id @default(autoincrement())
+  quote_text String
+  author     String?
+  category   String?
+  is_active  Boolean  @default(true)
+  created_at DateTime @default(now())
+
+  @@index([category])
+}
+
+// 🔹 User Stats - For Quick Access to User Statistics
+model UserStats {
+  stats_id            Int      @id @default(autoincrement())
+  user_id             Int      @unique
+  daily_completed     Int      @default(0)
+  weekly_completed    Int      @default(0)
+  monthly_completed   Int      @default(0)
+  total_completed     Int      @default(0)
+  current_streak      Int      @default(0)
+  longest_streak      Int      @default(0)
+  perfect_days        Int      @default(0)
+  perfect_weeks       Int      @default(0)
+  perfect_months      Int      @default(0)
+  points_earned_today Int      @default(0)
+  points_earned_week  Int      @default(0)
+  points_earned_month Int      @default(0)
+  points_earned_total Int      @default(0)
+  last_active_date    DateTime @default(now())
+  updated_at          DateTime @default(now()) @updatedAt
+
+  // Relationship
+  user User @relation(fields: [user_id], references: [user_id], onDelete: Cascade)
+
+  @@index([user_id])
 }

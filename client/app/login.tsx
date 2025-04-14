@@ -34,32 +34,14 @@ interface LoginErrors {
     general: string;
 }
 
-interface LoginResponse {
-    success: boolean;
-    data: {
-        token: string;
-        user: UserData;
-    };
-    message?: string;
-}
-
-interface UserData {
-    id: string;
-    email: string;
-    name: string;
-    createdAt: string;
-}
-
-interface LoginCredentials {
-    userEmail: string;
-    password: string;
-}
-
 // Constants
 const EMAIL_REGEX = /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i;
 const PASSWORD_MIN_LENGTH = 8;
 const MAX_LOGIN_ATTEMPTS = 3;
 const LOCKOUT_DURATION = 2 * 60 * 1000; // 2 minutes in milliseconds
+
+// Theme colors
+const GRADIENT_COLORS = ['#7C3AED', '#6D28D9']; // Purple gradient
 
 const Login = () => {
     // Theme and System
@@ -199,6 +181,9 @@ const Login = () => {
     // Handle Login Process
     const handleLogin = async () => {
         try {
+            // Dismiss keyboard
+            Keyboard.dismiss();
+
             // Check if user is locked out
             if (lockoutEndTime && Date.now() < lockoutEndTime) {
                 const remainingMinutes = Math.ceil((lockoutEndTime - Date.now()) / 1000 / 60);
@@ -206,6 +191,15 @@ const Login = () => {
                     ...prev,
                     general: `Too many failed attempts. Please try again in ${remainingMinutes} minutes.`
                 }));
+                return;
+            }
+
+            // Validate inputs
+            const isEmailValid = validateEmail(email);
+            const isPasswordValid = validatePassword(password);
+
+            if (!isEmailValid || !isPasswordValid) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
                 return;
             }
 
@@ -223,16 +217,38 @@ const Login = () => {
                 setLoginAttempts(0);
                 setLockoutEndTime(null);
 
+                // Success feedback
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-                // Handle successful login
+                // Store token separately
                 await AsyncStorage.setItem('token', response.data.token);
-                dispatch(loginSuccess(response.data.user));
-                setIsSuccess(true);
 
+                // Prepare flattened user data for Redux
+                const userData = {
+                    user_id: response.data.user.user_id,
+                    user_name: response.data.user.user_name,
+                    user_email: response.data.user.user_email,
+                    avatar: response.data.user.avatar || null,
+                    points_gained: response.data.user.points_gained || 0,
+                    theme_preference: response.data.user.theme_preference || 'auto',
+                    onVacation: response.data.user.onVacation,
+                    dailyGoal: response.data.user.dailyGoal,
+                    totalHabitsCompleted: response.data.user.totalHabitsCompleted,
+                    currentDailyStreak: response.data.user.currentDailyStreak,
+                    totalHabitsCreated: response.data.user.totalHabitsCreated,
+                    gender : response.data.user.gender,
+                    token: response.data.token
+                };
+
+
+                // Dispatch to Redux with flattened structure
+                dispatch(loginSuccess(userData));
+                console.log("here")
                 // Navigate after delay
                 setTimeout(() => {
                     router.replace('/(tabs)');
                 }, 1500);
+                setIsSuccess(true);
             } else {
                 // Handle invalid credentials
                 handleInvalidCredentials();
@@ -246,6 +262,7 @@ const Login = () => {
                     ...prev,
                     general: "Connection error. Please check your internet and try again."
                 }));
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             }
         } finally {
             setIsLoading(false);
@@ -256,6 +273,8 @@ const Login = () => {
     const handleInvalidCredentials = () => {
         const newAttempts = loginAttempts + 1;
         setLoginAttempts(newAttempts);
+
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
         if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
             // Lock the user out
@@ -272,27 +291,6 @@ const Login = () => {
             }));
         }
     };
-
-
-    // const handleLoginError = (errorMessage: string) => {
-    //     setLoginAttempts(prev => {
-    //         const newAttempts = prev + 1;
-    //         if (newAttempts >= MAX_LOGIN_ATTEMPTS) {
-    //             setLockoutEndTime(Date.now() + LOCKOUT_DURATION);
-    //             setErrors(prev => ({
-    //                 ...prev,
-    //                 general: `Too many login attempts. Please try again in 5 minutes.`
-    //             }));
-    //         } else {
-    //             setErrors(prev => ({
-    //                 ...prev,
-    //                 general: errorMessage
-    //             }));
-    //         }
-    //         return newAttempts;
-    //     });
-    //     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-    // };
 
     // Helper Functions
     const clearForm = () => {
@@ -326,7 +324,12 @@ const Login = () => {
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 className="flex-1 bg-theme-background-dark"
             >
-                <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
+                {/* Status bar with matching gradient color */}
+                <StatusBar
+                    barStyle="light-content"
+                    backgroundColor={GRADIENT_COLORS[0]}
+                    translucent={false}
+                />
 
                 {/* Network Status Warning */}
                 {!isOnline && (
@@ -344,7 +347,7 @@ const Login = () => {
 
                 {/* Background Gradient */}
                 <LinearGradient
-                    colors={['#7C3AED', '#6D28D9']}
+                    colors={GRADIENT_COLORS}
                     className={`absolute top-0 left-0 right-0 ${
                         isKeyboardVisible ? 'h-1/2' : 'h-2/3'
                     }`}

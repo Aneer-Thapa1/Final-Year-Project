@@ -74,7 +74,7 @@ export default function ChatDetailScreen() {
     const processedMessageIds = useRef(new Set());
 
     // Get user from Redux store
-    const currentUser = useSelector(state => state.user?.user);
+    const currentUser = useSelector(state => state.user);
 
     // Initialize socket when component mounts
     useEffect(() => {
@@ -114,11 +114,13 @@ export default function ChatDetailScreen() {
         };
     }, []);
 
+    console.log(currentUser)
+
     // Load initial data and set current user ID
     useEffect(() => {
         // If currentUser is available from Redux, store the ID in component state
-        if (currentUser && currentUser?.user?.user_id) {
-            setCurrentUserId(currentUser?.user?.user_id || currentUser?.user?.user?.user_id);
+        if (currentUser && currentUser?.user_id) {
+            setCurrentUserId(currentUser?.user_id || currentUser?.user_id);
         } else {
             // Fallback user ID if not available from Redux
             setCurrentUserId(1); // Default user ID or fetch from another source
