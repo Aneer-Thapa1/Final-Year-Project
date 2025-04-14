@@ -21,7 +21,7 @@ const Comment = ({
 
     // Get current user from Redux
     const userDetails = useSelector((state) => state.user);
-    const currentUser = userDetails?.user || {};
+    const currentUser = userDetails || {};
 
     const insets = useSafeAreaInsets();
     const inputRef = useRef(null);
@@ -68,8 +68,10 @@ const Comment = ({
     const commentText = comment.content || comment.text || '';
     const commentTime = formatDate ? formatDate(comment.createdAt || comment.time) : (comment.time || 'Recently');
 
+
+    console.log(currentUser)
     // Check if current user is the comment author (with null checking)
-    const isCommentAuthor = currentUser && currentUser.user.user_id && (userId && currentUser?.user?.user_id === userId);
+    const isCommentAuthor = currentUser && currentUser.user_id && (userId && currentUser?.user_id === userId);
 
     // Get replies safely
     const replies = comment.replies || [];
@@ -85,7 +87,7 @@ const Comment = ({
 
         // Small delay to ensure the modal closes properly before navigation
         setTimeout(() => {
-            if (currentUser?.user?.user_id == userId) {
+            if (currentUser?.user_id == userId) {
                 router.push('/profile');
             } else {
                 router.push({

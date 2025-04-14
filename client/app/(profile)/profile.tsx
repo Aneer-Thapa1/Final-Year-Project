@@ -1,17 +1,30 @@
-import { Image, Text, View, ScrollView, TouchableOpacity, useColorScheme, StatusBar, RefreshControl } from 'react-native'
-import React, { useState, useCallback } from 'react'
+import {
+    Image,
+    Text,
+    View,
+    ScrollView,
+    TouchableOpacity,
+    useColorScheme,
+    StatusBar,
+    RefreshControl,
+    FlatList,
+    ActivityIndicator
+} from 'react-native'
+import React, { useState, useCallback, useEffect } from 'react'
 import { useSelector } from 'react-redux';
-import { ArrowLeft, Settings, Trophy, Activity, Users, Calendar, Clock, Star, Award, BookOpen } from 'lucide-react-native';
+import { ArrowLeft, Settings, Trophy, Activity, Users, Calendar, Star, Award, BookOpen, Plus } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MotiView, MotiText, AnimatePresence } from 'moti';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import icons from "../../constants/images";
 
 // Import the tab components
 import ActivityComponent from '../../components/ActivityComponent';
 import AchievementsComponent from '../../components/AchievementsComponent';
 import FriendsComponent from '../../components/FriendsComponent';
-import BlogsComponent from '../../components/UserBlog';
+import Blog from '../../components/Blogs';
+import { getUserBlogs } from '../../services/blogService';
 
 const Profile = () => {
     const userDetails = useSelector((state) => state.user);
@@ -20,11 +33,16 @@ const Profile = () => {
     const [activeTab, setActiveTab] = useState('Activity');
     const [refreshing, setRefreshing] = useState(false);
     const [userStats, setUserStats] = useState({
-        streakDays: 28,
-        completedHabits: 143,
-        totalPoints: userDetails?.user?.user?.points_gained || 1250,
-        level: 7
+        streakDays: userDetails?.currentDailyStreak || 0,
+        completedHabits: userDetails?.totalHabitsCompleted || 0,
+        totalPoints: userDetails?.points_gained || 1250,
+        level: userDetails?.dailyGoal || 1,
     });
+
+    // Blogs state
+    const [blogs, setBlogs] = useState([]);
+    const [blogsLoading, setBlogsLoading] = useState(false);
+    const [blogsError, setBlogsError] = useState(null);
 
     // Tab definitions with enhanced metadata
     const tabs = [
@@ -50,6 +68,53 @@ const Profile = () => {
         }
     ];
 
+    // Fetch user blogs when Blogs tab is active
+    useEffect(() => {
+        if (activeTab === 'Blogs') {
+            fetchUserBlogs();
+        }
+    }, [activeTab]);
+
+    // Function to fetch user blogs
+    const fetchUserBlogs = async () => {
+        try {
+            setBlogsLoading(true);
+            setBlogsError(null);
+
+            const response = await getUserBlogs(userDetails?.user_id);
+
+            if (response && response.success && response.data) {
+                setBlogs(response.data);
+            } else {
+                setBlogsError('Failed to fetch blogs');
+            }
+        } catch (err) {
+            console.error('Error fetching blogs:', err);
+            setBlogsError(err.toString());
+        } finally {
+            setBlogsLoading(false);
+            setRefreshing(false);
+        }
+    };
+
+    // Handle blog deletion
+    const handleDeleteBlog = (blogId) => {
+        // Remove blog from state
+        setBlogs(prevBlogs => prevBlogs.filter(blog => blog.blog_id !== blogId));
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    };
+
+    console.log(blogs)
+
+    // Handle blog update
+    const handleBlogUpdated = (updatedBlog) => {
+        setBlogs(prevBlogs =>
+            prevBlogs.map(blog =>
+                blog.blog_id === updatedBlog.blog_id ? updatedBlog : blog
+            )
+        );
+    };
+
     // Handle tab changes with haptic feedback
     const handleTabChange = (tabId) => {
         if (activeTab !== tabId) {
@@ -62,18 +127,23 @@ const Profile = () => {
     const onRefresh = useCallback(async () => {
         setRefreshing(true);
 
-        // Simulate data refresh
-        setTimeout(() => {
-            // Update any data needed
-            setUserStats(prev => ({
-                ...prev,
-                streakDays: prev.streakDays + 1,
-                totalPoints: prev.totalPoints + 25
-            }));
-            setRefreshing(false);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }, 1500);
-    }, []);
+        // If on the blogs tab, refresh blogs
+        if (activeTab === 'Blogs') {
+            await fetchUserBlogs();
+        } else {
+            // Simulate data refresh for other tabs
+            setTimeout(() => {
+                // Update any data needed
+                setUserStats(prev => ({
+                    ...prev,
+                    streakDays: prev.streakDays + 1,
+                    totalPoints: prev.totalPoints + 25
+                }));
+                setRefreshing(false);
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            }, 1500);
+        }
+    }, [activeTab]);
 
     // Navigation handlers
     const handleBackPress = () => {
@@ -84,6 +154,82 @@ const Profile = () => {
     const handleSettingsPress = () => {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
         router.push('/settings');
+    };
+
+    // Navigate to create new blog
+    const handleCreateNewBlog = () => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+        router.push('(tabs)/explore');
+    };
+
+    // Render blogs content
+    const renderBlogsContent = () => {
+        if (blogsLoading && !refreshing && blogs.length === 0) {
+            return (
+                <View className="flex-1 items-center justify-center py-8">
+                    <ActivityIndicator size="large" color="#6366F1" />
+                    <Text className={`mt-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                        Loading your blogs...
+                    </Text>
+                </View>
+            );
+        }
+
+        if (blogsError && blogs.length === 0) {
+            return (
+                <View className="flex-1 items-center justify-center p-4">
+                    <Text className={`text-lg font-bold mb-2 ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                        Couldn't load your blogs
+                    </Text>
+                    <Text className={`text-center mb-4 ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                        {blogsError}
+                    </Text>
+                    <TouchableOpacity
+                        onPress={fetchUserBlogs}
+                        className="bg-primary-500 px-4 py-2 rounded-lg"
+                    >
+                        <Text className="text-white font-medium">Try Again</Text>
+                    </TouchableOpacity>
+                </View>
+            );
+        }
+
+        return (
+            <>
+                {/* Create New Blog Button */}
+                <TouchableOpacity
+                    onPress={handleCreateNewBlog}
+                    className={`mb-4 rounded-xl p-4 flex-row items-center justify-center ${isDark ? 'bg-gray-800' : 'bg-primary-50'}`}
+                >
+                    <Plus size={18} color="#6366F1" />
+                    <Text className="ml-2 font-medium text-primary-600">
+                        Create New Blog
+                    </Text>
+                </TouchableOpacity>
+
+                {blogs.length === 0 ? (
+                    <View className="items-center justify-center py-8">
+                        <BookOpen size={48} color={isDark ? '#9CA3AF' : '#6B7280'} />
+                        <Text className={`mt-4 text-lg font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                            No blogs yet
+                        </Text>
+                        <Text className={`text-center mt-2 mb-6 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Share your habit journey by creating your first blog
+                        </Text>
+                    </View>
+                ) : (
+                    blogs.map((blog, index) => (
+                        <Blog
+                            key={blog.blog_id?.toString() || index.toString()}
+                            blog={blog}
+                            isDark={isDark}
+                            onDeleteBlog={handleDeleteBlog}
+                            onBlogUpdated={handleBlogUpdated}
+                        />
+                    ))
+                )}
+            </>
+        );
     };
 
     return (
@@ -120,7 +266,7 @@ const Profile = () => {
                                     <ArrowLeft size={20} color={isDark ? '#E2E8F0' : '#1F2937'} />
                                 </TouchableOpacity>
 
-                                <Text className={`text-lg font-montserrat-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                <Text className={`text-lg font-bold ${isDark ? 'text-white' : 'text-gray-900'}`}>
                                     Profile
                                 </Text>
 
@@ -141,11 +287,11 @@ const Profile = () => {
                                     className="mr-4"
                                 >
                                     <Image
-                                        source={{ uri: 'https://images.unsplash.com/photo-1599566150163-29194dcaad36?fit=crop&w=300&h=300' }}
+                                        source={userDetails?.avatar ? { uri: userDetails.avatar } : icons.blogImage}
                                         className="h-24 w-24 rounded-full"
                                     />
                                     <View className="absolute -bottom-1 -right-1 bg-primary-500 h-8 w-8 rounded-full items-center justify-center border-2 border-white">
-                                        <Text className="text-white font-montserrat-bold text-xs">{userDetails?.user?.user?.dailyGoal || 7}</Text>
+                                        <Text className="text-white font-bold text-xs">{userStats.level}</Text>
                                     </View>
                                 </MotiView>
 
@@ -154,11 +300,11 @@ const Profile = () => {
                                         from={{ opacity: 0, translateY: 10 }}
                                         animate={{ opacity: 1, translateY: 0 }}
                                         transition={{ type: 'timing', duration: 600, delay: 300 }}
-                                        className={`text-xl font-montserrat-bold mb-1 ${
+                                        className={`text-xl font-bold mb-1 ${
                                             isDark ? 'text-white' : 'text-gray-900'
                                         }`}
                                     >
-                                        {userDetails?.user?.user?.user_name || "John Doe"}
+                                        {userDetails?.user_name || "Name not found!"}
                                     </MotiText>
 
                                     <MotiView
@@ -168,14 +314,14 @@ const Profile = () => {
                                     >
                                         <View className="flex-row items-center mb-2">
                                             <Award size={14} color="#6366F1" />
-                                            <Text className={`ml-1.5 text-sm font-montserrat-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
+                                            <Text className={`ml-1.5 text-sm font-medium ${isDark ? 'text-gray-300' : 'text-gray-600'}`}>
                                                 Habit Master
                                             </Text>
                                         </View>
 
                                         <View className="flex-row items-center bg-primary-100 rounded-full py-1.5 px-3 self-start">
                                             <Trophy size={14} color="#6366F1" />
-                                            <Text className="ml-1.5 text-primary-700 font-montserrat-medium text-sm">
+                                            <Text className="ml-1.5 text-primary-700 font-medium text-sm">
                                                 {userStats.totalPoints.toLocaleString()} Points
                                             </Text>
                                         </View>
@@ -193,11 +339,11 @@ const Profile = () => {
                                 <View className="items-center flex-1 px-2">
                                     <View className="flex-row items-center justify-center">
                                         <Calendar size={16} color="#6366F1" />
-                                        <Text className={`ml-1.5 font-montserrat-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                            {userDetails?.user?.user?.currentDailyStreak || userStats.streakDays}
+                                        <Text className={`ml-1.5 font-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                            {userStats.streakDays}
                                         </Text>
                                     </View>
-                                    <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
+                                    <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
                                         Day Streak
                                     </Text>
                                 </View>
@@ -207,11 +353,11 @@ const Profile = () => {
                                 <View className="items-center flex-1 px-2">
                                     <View className="flex-row items-center justify-center">
                                         <Star size={16} color="#6366F1" />
-                                        <Text className={`ml-1.5 font-montserrat-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                            {userDetails?.user?.user?.totalHabitsCompleted || userStats.completedHabits}
+                                        <Text className={`ml-1.5 font-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                            {userStats.completedHabits}
                                         </Text>
                                     </View>
-                                    <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
+                                    <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
                                         Habits Done
                                     </Text>
                                 </View>
@@ -221,11 +367,11 @@ const Profile = () => {
                                 <View className="items-center flex-1 px-2">
                                     <View className="flex-row items-center justify-center">
                                         <Award size={16} color="#6366F1" />
-                                        <Text className={`ml-1.5 font-montserrat-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
-                                            {userDetails?.user?.user?.dailyGoal || userStats.level}
+                                        <Text className={`ml-1.5 font-bold text-lg ${isDark ? 'text-white' : 'text-gray-900'}`}>
+                                            {userStats.level}
                                         </Text>
                                     </View>
-                                    <Text className={`text-xs font-montserrat ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
+                                    <Text className={`text-xs ${isDark ? 'text-gray-400' : 'text-gray-500'} text-center mt-1`}>
                                         Daily Goal
                                     </Text>
                                 </View>
@@ -246,7 +392,7 @@ const Profile = () => {
                             {activeTab === 'Activity' && <ActivityComponent isDark={isDark} />}
                             {activeTab === 'Achievements' && <AchievementsComponent isDark={isDark} />}
                             {activeTab === 'Friends' && <FriendsComponent isDark={isDark} />}
-                            {activeTab === 'Blogs' && <BlogsComponent isDark={isDark} />}
+                            {activeTab === 'Blogs' && renderBlogsContent()}
                         </MotiView>
                     </AnimatePresence>
 
@@ -269,7 +415,7 @@ const Profile = () => {
                                         color={activeTab === tab.id ? '#6366F1' : isDark ? '#9CA3AF' : '#6B7280'}
                                     />
                                     <Text
-                                        className={`text-xs font-montserrat-medium mt-1 ${
+                                        className={`text-xs font-medium mt-1 ${
                                             activeTab === tab.id ? 'text-primary-500' : isDark ? 'text-gray-400' : 'text-gray-500'
                                         }`}
                                     >

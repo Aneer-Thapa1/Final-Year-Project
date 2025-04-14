@@ -161,6 +161,7 @@ const Header = React.memo(() => {
             ])
         ).start()
 
+        console.log(userDetails.user_name)
         // Notification shake animation
         const shakeAnimation = Animated.sequence([
             Animated.timing(notificationShake, {
@@ -220,11 +221,11 @@ const Header = React.memo(() => {
                                 className={`flex-row items-center gap-3 ${Platform.OS === 'android' ? 'p-1' : ''}`}
                             >
                                 <Image
-                                    source={userDetails?.user?.avatar || fallbackAvatar || userDetails?.user?.user?.avatar }
+                                    source={userDetails?.user?.avatar || fallbackAvatar || userDetails?.avatar }
                                     className="w-9 h-9 rounded-full"
                                 />
                                 <Text className={`text-xl ${Platform.OS === 'ios' ? 'font-montserrat-medium' : 'font-montserrat-bold'} ${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`}>
-                                    Hi, {userDetails?.user?.user?.user_name || userDetails?.user?.user_name}
+                                    Hi, {userDetails?.user?.user_name || userDetails?.user_name}
                                 </Text>
                             </TouchableOpacity>
 

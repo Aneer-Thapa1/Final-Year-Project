@@ -31,6 +31,7 @@ router.get('/streakHistory/:habitId', validateToken, habitController.getHabitStr
 
 // Domain management
 router.get('/domains', validateToken, habitController.getHabitDomains);
+router.get('/allDomains', validateToken, habitController.getAllHabitDomains);
 router.post('/domains', validateToken, habitController.addHabitDomain);
 router.put('/domains/:domainId', validateToken, habitController.updateHabitDomain);
 router.delete('/domains/:domainId', validateToken, habitController.deleteHabitDomain);

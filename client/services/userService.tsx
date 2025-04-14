@@ -21,22 +21,48 @@ export const loginUser = async (credentials: { userEmail: string; password: stri
     }
 };
 
-
-// Function to update the user's profile
-export const updateUserProfile = async (updatedData: { name?: string; email?: string }) => {
-    try {
-        return await updateData('/profile', updatedData); // Used the `updateData` utility from userService
-    } catch (error: any) {
-        throw error.response?.data?.message || 'Failed to update profile';
-    }
-};
-
 // Function to log out the user
 export const logoutUser = async () => {
     try {
         return await postData('/logout', null); // Used the `postData` utility from userService
     } catch (error: any) {
         throw error.response?.data?.message || 'Logout failed';
+    }
+};
+
+// Function to request password reset OTP
+export const requestPasswordResetOTP = async (email: string) => {
+    try {
+        return await postData('/api/users/forgotPassword', { email });
+    } catch (error: any) {
+        throw error.response?.data?.error || 'Failed to send reset OTP';
+    }
+};
+
+// Function to verify OTP
+export const verifyOTP = async (email: string, otp: string) => {
+    try {
+        return await postData('/api/users/verifyOTP', { email, otp });
+    } catch (error: any) {
+        throw error.response?.data?.error || 'OTP verification failed';
+    }
+};
+
+// Function to reset password with token
+export const resetPassword = async (token: string, newPassword: string) => {
+    try {
+        return await postData('/api/users/resetPassword', { token, newPassword });
+    } catch (error: any) {
+        throw error.response?.data?.error || 'Password reset failed';
+    }
+};
+
+// Function to change password (when user is logged in)
+export const changePassword = async (currentPassword: string, newPassword: string) => {
+    try {
+        return await postData('/api/users/changePassword', { currentPassword, newPassword });
+    } catch (error: any) {
+        throw error.response?.data?.error || 'Password change failed';
     }
 };
 
@@ -62,4 +88,3 @@ export const checkAuthStatus = async () => {
         return null;
     }
 };
-

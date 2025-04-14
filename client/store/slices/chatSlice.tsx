@@ -1,4 +1,3 @@
-// src/store/slices/chatSlice.ts
 import { createSlice, createAsyncThunk, PayloadAction } from '@reduxjs/toolkit';
 import api from '../../services/api';
 import { io, Socket } from 'socket.io-client';
@@ -83,7 +82,6 @@ export const connectSocket = createAsyncThunk(
     async (_, { getState, dispatch }) => {
         try {
             const token = await AsyncStorage.getItem('token');
-
             if (!token) throw new Error('No auth token available');
             if (socketInstance?.connected) return socketInstance;
 

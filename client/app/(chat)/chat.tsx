@@ -420,7 +420,7 @@ export default function ChatScreen() {
 
         if (room.type === 'DM') {
             // Find the other user in the chat (not the current user)
-            const currentUserId = userDetails.user.user.user_id; // Get current user's ID from Redux state
+            const currentUserId = userDetails?.user_id; // Get current user's ID from Redux state
             const otherParticipant = room.participants?.find(p => p.user_id !== currentUserId);
             return otherParticipant?.user?.user_name || 'User';
         }

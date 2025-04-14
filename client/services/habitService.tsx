@@ -616,7 +616,19 @@
             throw error.response?.data?.message || 'Failed to get habit domains';
         }
     };
-    
+
+    export const getAllHabitDomains = async () => {
+        try {
+            const response = await fetchData('/api/habit/allDomains');
+
+            // Return the raw domains array
+            return response.data || [];
+        } catch (error) {
+            console.error('Failed to get all habit domains:', error);
+            throw error.response?.data?.message || 'Failed to get all habit domains';
+        }
+    };
+
     // Function to add a habit domain
     export const addHabitDomain = async (domainData: { name: string; description?: string; icon?: string; color?: string }) => {
         try {

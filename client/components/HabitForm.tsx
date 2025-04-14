@@ -2,445 +2,522 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
     View,
     Text,
-    TouchableOpacity,
     TextInput,
+    TouchableOpacity,
     ScrollView,
     Switch,
-    Modal,
     ActivityIndicator,
-    Platform,
-    KeyboardAvoidingView,
-    Keyboard,
     useColorScheme,
-    TouchableWithoutFeedback,
-    LogBox
+    Platform,
+    Keyboard,
+    Modal,
+    Pressable
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import {
-    Check,
-    Clock,
     Calendar,
-    Bell,
-    Star,
-    Tag,
-    Bookmark,
-    Umbrella,
-    Info,
+    Clock,
     ChevronDown,
-    ChevronUp,
-    Plus,
+    ChevronRight,
+    Bell,
     X,
-    Heart,
+    Check,
+    Plus,
+    Tag,
+    Star,
+    Info,
     Shield,
-    Settings,
-    Trash2,
-    Edit2
+    CalendarCheck,
+    Bookmark
 } from 'lucide-react-native';
-import { getDomains } from '../services/domainService';
-import { addHabit, updateHabit } from '../services/habitService';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { format } from 'date-fns';
+import { getAllHabitDomains } from '../services/habitService';
 
-// Default habit state for new habits
-const defaultHabitState = {
-    name: "",
-    description: "",
-    domain_id: null,
-    icon: "🏃",
-    color: "#4285F4",
-    start_date: new Date(),
-    end_date: null,
-    is_favorite: false,
-    frequency_type: "DAILY",
-    frequency_value: 1,
-    frequency_interval: 1,
-    specific_days: [],
-    tracking_type: "BOOLEAN",
-    duration_goal: null,
-    count_goal: null,
-    numeric_goal: null,
-    units: "",
-    skip_on_vacation: false,
-    require_evidence: false,
-    motivation_quote: "",
-    cue: "",
-    reward: "",
-    difficulty: "MEDIUM",
-    tags: [],
-    reminders: [],
-    grace_period_enabled: true,
-    grace_period_hours: 24
+// Types
+type DifficultyLevel = 'VERY_EASY' | 'EASY' | 'MEDIUM' | 'HARD' | 'VERY_HARD';
+type TrackingType = 'BOOLEAN' | 'DURATION' | 'COUNT' | 'NUMERIC';
+type FrequencyType = 'DAILY' | 'WEEKDAYS' | 'WEEKENDS' | 'X_TIMES_WEEK' | 'INTERVAL' | 'SPECIFIC_DAYS';
+
+interface Reminder {
+    time: string;
+    repeat?: string;
+    message?: string;
+    is_enabled?: boolean;
+    pre_notification_minutes?: number;
+    follow_up_enabled?: boolean;
+    follow_up_minutes?: number;
+}
+
+interface HabitFormProps {
+    initialData?: any;
+    onSubmit: (data: any) => void;
+    onCancel: () => void;
+    isEditMode?: boolean;
+}
+
+// Utility function to format date
+const formatDate = (date: Date | string | null): string => {
+    if (!date) return '';
+    const dateObj = typeof date === 'string' ? new Date(date) : date;
+    return format(dateObj, 'yyyy-MM-dd');
 };
 
-/**
- * HabitForm - A reusable component for creating and editing habits
- *
- * @param {Object} props
- * @param {Object} props.existingHabit - Existing habit data for edit mode (optional)
- * @param {Function} props.onSubmitSuccess - Callback when form submission is successful
- * @param {Function} props.onCancel - Callback when user cancels the form
- * @param {Boolean} props.isEditMode - Whether the form is in edit mode
- */
-const HabitForm = ({ existingHabit, onSubmitSuccess, onCancel, isEditMode = false }) => {
+// Utility function to format time
+const formatTime = (timeString: string): string => {
+    if (!timeString) return '';
+    // Handle different time formats (HH:mm:ss or ISO string)
+    if (timeString.includes('T')) {
+        // ISO string format
+        return format(new Date(timeString), 'HH:mm');
+    } else {
+        // HH:mm:ss format
+        return timeString.substring(0, 5);
+    }
+};
+
+const FREQUENCY_TYPES = [
+    { label: 'Every Day', value: 'DAILY' },
+    { label: 'Weekdays Only', value: 'WEEKDAYS' },
+    { label: 'Weekends Only', value: 'WEEKENDS' },
+    { label: 'Specific Days', value: 'SPECIFIC_DAYS' },
+    { label: 'X Times per Week', value: 'X_TIMES_WEEK' },
+    { label: 'Every X Days', value: 'INTERVAL' }
+];
+
+const DIFFICULTY_LEVELS = [
+    { label: 'Very Easy', value: 'VERY_EASY' },
+    { label: 'Easy', value: 'EASY' },
+    { label: 'Medium', value: 'MEDIUM' },
+    { label: 'Hard', value: 'HARD' },
+    { label: 'Very Hard', value: 'VERY_HARD' }
+];
+
+const TRACKING_TYPES = [
+    { label: 'Yes/No Completion', value: 'BOOLEAN', icon: <Check size={20} /> },
+    { label: 'Duration Tracking', value: 'DURATION', icon: <Clock size={20} /> },
+    { label: 'Count Tracking', value: 'COUNT', icon: <Tag size={20} /> },
+    { label: 'Numeric Value', value: 'NUMERIC', icon: <Info size={20} /> }
+];
+
+const ModernHabitForm: React.FC<HabitFormProps> = ({
+                                                       initialData,
+                                                       onSubmit,
+                                                       onCancel,
+                                                       isEditMode = false
+                                                   }) => {
     const colorScheme = useColorScheme();
-    const isDark = colorScheme === 'dark';
-    const scrollViewRef = useRef(null);
+    const isDarkMode = colorScheme === 'dark';
 
-    // Debug: Track when keyboard is shown/hidden
-    const keyboardShownRef = useRef(false);
+    // Default habit state
+    const defaultHabitState = {
+        name: "",
+        description: "",
+        domain_id: null,
+        domain_name: null,
+        domain_color: null,
+        start_date: new Date(),
+        end_date: null,
+        is_favorite: false,
+        frequency_type: "DAILY",
+        frequency_value: 1,
+        specific_days: [],
+        tracking_type: "BOOLEAN",
+        target_value: null,
+        target_duration: null,
+        units: "",
+        difficulty: "MEDIUM",
+        reminders: [],
+        grace_period_enabled: true,
+        grace_period_hours: 24,
+        points_per_completion: 5
+    };
 
-    // State for habit data
-    const [habitData, setHabitData] = useState(existingHabit || defaultHabitState);
+    // Form state
+    const [habit, setHabit] = useState(initialData || defaultHabitState);
     const [domains, setDomains] = useState([]);
-    const [selectedDomain, setSelectedDomain] = useState(null);
-    const [currentTag, setCurrentTag] = useState("");
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [activeSection, setActiveSection] = useState("basic");
+    const [error, setError] = useState<string | null>(null);
 
     // UI state
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [showSuccessModal, setShowSuccessModal] = useState(false);
-    const [showErrorToast, setShowErrorToast] = useState(false);
-    const [errorMessage, setErrorMessage] = useState("");
-    const [activeSection, setActiveSection] = useState("basic");
-
-    // Date picker states
+    const [showDomainPicker, setShowDomainPicker] = useState(false);
+    const [showFrequencyPicker, setShowFrequencyPicker] = useState(false);
+    const [showDifficultyPicker, setShowDifficultyPicker] = useState(false);
+    const [showTrackingPicker, setShowTrackingPicker] = useState(false);
     const [showStartDatePicker, setShowStartDatePicker] = useState(false);
     const [showEndDatePicker, setShowEndDatePicker] = useState(false);
-    const [showReminderTimePicker, setShowReminderTimePicker] = useState(false);
-    const [reminderTime, setReminderTime] = useState(new Date());
-    const [editingReminderIndex, setEditingReminderIndex] = useState(null);
+    const [showTimePicker, setShowTimePicker] = useState(false);
+    const [selectedReminderIndex, setSelectedReminderIndex] = useState<number | null>(null);
 
-    // Dropdown states
-    const [showDomainPicker, setShowDomainPicker] = useState(false);
-    const [showDifficultyPicker, setShowDifficultyPicker] = useState(false);
-    const [showFrequencyPicker, setShowFrequencyPicker] = useState(false);
-
-    // Debug: Add keyboard event listeners
-    useEffect(() => {
-        // Ignore yellow box warnings in development
-        LogBox.ignoreLogs(['Animated:']);
-
-        // Track keyboard events
-        const keyboardDidShowListener = Keyboard.addListener(
-            'keyboardDidShow',
-            (event) => {
-                console.log('[DEBUG] Keyboard SHOWN', {
-                    keyboardHeight: event.endCoordinates.height,
-                    timestamp: new Date().toISOString()
-                });
-                keyboardShownRef.current = true;
-            }
-        );
-
-        const keyboardDidHideListener = Keyboard.addListener(
-            'keyboardDidHide',
-            (event) => {
-                console.log('[DEBUG] Keyboard HIDDEN', {
-                    timestamp: new Date().toISOString()
-                });
-                keyboardShownRef.current = false;
-            }
-        );
-
-        // Cleanup listeners
-        return () => {
-            keyboardDidShowListener.remove();
-            keyboardDidHideListener.remove();
-        };
-    }, []);
-
-    // Set selected domain if editing an existing habit
-    useEffect(() => {
-        if (existingHabit && existingHabit.domain_id) {
-            const domain = domains.find(d => d.domain_id === existingHabit.domain_id);
-            if (domain) setSelectedDomain(domain);
-        }
-    }, [existingHabit, domains]);
-
-    // Fetch domains on component mount
+    // Fetch domains on load
     useEffect(() => {
         const fetchDomains = async () => {
             try {
-                const domainsData = await getDomains();
-                setDomains(domainsData);
-
-                // If we have an existing habit with domain_id, find and set the selected domain
-                if (existingHabit && existingHabit.domain_id) {
-                    const domain = domainsData.find(d => d.domain_id === existingHabit.domain_id);
-                    if (domain) setSelectedDomain(domain);
-                }
-            } catch (error) {
-                console.error("Failed to fetch domains:", error);
+                const domainsData = await getAllHabitDomains();
+                setDomains(domainsData || []);
+            } catch (err) {
+                console.error('Error fetching domains:', err);
             }
         };
 
         fetchDomains();
     }, []);
 
-    // Dismiss keyboard when tapping outside of TextInputs
-    const dismissKeyboard = () => {
-        console.log('[DEBUG] dismissKeyboard explicitly called', { keyboardShown: keyboardShownRef.current });
-        if (keyboardShownRef.current) {
-            // Add a small delay to prevent race conditions
-            setTimeout(() => {
-                Keyboard.dismiss();
-            }, 10);
-        }
-    };
-
-    // Form validation
-    const validateForm = () => {
-        if (!habitData.name.trim()) {
-            setErrorMessage("Please enter a habit name");
-            setShowErrorToast(true);
-            return false;
-        }
-
-        if (!habitData.domain_id) {
-            setErrorMessage("Please select a category for your habit");
-            setShowErrorToast(true);
-            return false;
-        }
-
-        if (habitData.tracking_type === "DURATION" && !habitData.duration_goal) {
-            setErrorMessage("Please enter a duration goal");
-            setShowErrorToast(true);
-            return false;
-        }
-
-        if (habitData.tracking_type === "COUNT" && !habitData.count_goal) {
-            setErrorMessage("Please enter a count goal");
-            setShowErrorToast(true);
-            return false;
-        }
-
-        if (habitData.tracking_type === "NUMERIC" && !habitData.numeric_goal) {
-            setErrorMessage("Please enter a numeric goal");
-            setShowErrorToast(true);
-            return false;
-        }
-
-        if (habitData.frequency_type === "SPECIFIC_DAYS" && habitData.specific_days.length === 0) {
-            setErrorMessage("Please select at least one day of the week");
-            setShowErrorToast(true);
-            return false;
-        }
-
-        return true;
-    };
-
-    // Handle form submission
-    const handleSubmit = async () => {
-        console.log('[DEBUG] handleSubmit called');
-        dismissKeyboard();
-        if (!validateForm()) return;
-
-        try {
-            setIsSubmitting(true);
-
-            // Prepare data for submission
-            const formData = {
-                ...habitData,
-                start_date: habitData.start_date.toISOString(),
-                end_date: habitData.end_date ? habitData.end_date.toISOString() : null,
-                duration_goal: habitData.tracking_type === "DURATION" ? Number(habitData.duration_goal) : null,
-                count_goal: habitData.tracking_type === "COUNT" ? Number(habitData.count_goal) : null,
-                numeric_goal: habitData.tracking_type === "NUMERIC" ? Number(habitData.numeric_goal) : null,
-                frequency_value: Number(habitData.frequency_value),
-                frequency_interval: Number(habitData.frequency_interval),
-                tags: habitData.tags.length > 0 ? habitData.tags : null,
-                reminders: habitData.reminders.length > 0 ? habitData.reminders.map(reminder => ({
-                    time: reminder.time,
-                    repeat: reminder.repeat || "DAILY",
-                    message: reminder.message || `Time to complete your ${habitData.name} habit!`,
-                    pre_notification_minutes: reminder.pre_notification_minutes || 10,
-                    follow_up_enabled: reminder.follow_up_enabled || true,
-                    follow_up_minutes: reminder.follow_up_minutes || 30
-                })) : null
-            };
-
-            let response;
-            if (isEditMode) {
-                response = await updateHabit(habitData.id, formData);
-            } else {
-                response = await addHabit(formData);
-            }
-
-            if (response.success) {
-                setShowSuccessModal(true);
-            } else {
-                throw new Error(response.message || "Failed to save habit");
-            }
-        } catch (error) {
-            console.error("Error saving habit:", error);
-            setErrorMessage(error.message || "Something went wrong. Please try again.");
-            setShowErrorToast(true);
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    // Handle text input changes
-    const handleTextChange = (text, field) => {
-        console.log(`[DEBUG] Text changed for field: ${field}`, { length: text.length });
-        setHabitData(prev => ({
-            ...prev,
-            [field]: text
-        }));
+    // Handle input changes
+    const handleInputChange = (field: string, value: any) => {
+        setHabit(prev => ({ ...prev, [field]: value }));
     };
 
     // Handle date changes
-    const handleDateChange = (event, selectedDate, dateType) => {
-        if (Platform.OS === "android" && event.type === "dismissed") {
+    const handleDateChange = (event: any, selectedDate?: Date) => {
+        if (Platform.OS === 'android' && event.type === 'dismissed') {
+            setShowStartDatePicker(false);
+            setShowEndDatePicker(false);
             return;
         }
 
         if (selectedDate) {
-            setHabitData(prev => ({
-                ...prev,
-                [dateType]: selectedDate
-            }));
+            if (showStartDatePicker) {
+                setHabit(prev => ({ ...prev, start_date: selectedDate }));
+            } else if (showEndDatePicker) {
+                setHabit(prev => ({ ...prev, end_date: selectedDate }));
+            }
         }
 
-        // Close date pickers
-        if (dateType === "start_date") setShowStartDatePicker(false);
-        if (dateType === "end_date") setShowEndDatePicker(false);
+        if (Platform.OS === 'android') {
+            setShowStartDatePicker(false);
+            setShowEndDatePicker(false);
+        }
     };
 
-    // Handle reminder time change
-    const handleReminderTimeChange = (event, selectedTime) => {
-        if (Platform.OS === "android" && event.type === "dismissed") {
-            setShowReminderTimePicker(false);
+    // Handle form submission
+    const handleSubmit = () => {
+        // Validate form
+        if (!habit.name.trim()) {
+            setError('Habit name is required');
             return;
         }
 
-        if (selectedTime) {
-            setReminderTime(selectedTime);
-        }
+        setIsSubmitting(true);
 
-        if (Platform.OS === "android") {
-            setShowReminderTimePicker(false);
-        }
-    };
-
-    // Add reminder
-    const addReminder = () => {
-        const newReminder = {
-            time: reminderTime.toISOString(),
-            repeat: "DAILY",
-            message: `Time to complete your ${habitData.name} habit!`,
-            pre_notification_minutes: 10,
-            follow_up_enabled: true,
-            follow_up_minutes: 30
+        // Prepare data for submission
+        const formData = {
+            ...habit,
+            start_date: habit.start_date instanceof Date ?
+                formatDate(habit.start_date) : habit.start_date,
+            end_date: habit.end_date ?
+                (habit.end_date instanceof Date ? formatDate(habit.end_date) : habit.end_date)
+                : null
         };
 
-        if (editingReminderIndex !== null) {
-            // Edit existing reminder
-            const updatedReminders = [...habitData.reminders];
-            updatedReminders[editingReminderIndex] = newReminder;
-            setHabitData(prev => ({ ...prev, reminders: updatedReminders }));
-            setEditingReminderIndex(null);
-        } else {
-            // Add new reminder
-            setHabitData(prev => ({
-                ...prev,
-                reminders: [...prev.reminders, newReminder]
-            }));
-        }
-
-        setShowReminderTimePicker(false);
+        // Call the onSubmit callback
+        onSubmit(formData);
+        setIsSubmitting(false);
     };
 
-    // Delete reminder
-    const deleteReminder = (index) => {
-        const updatedReminders = [...habitData.reminders];
+    // Toggle specific day for weekly habits
+    const toggleSpecificDay = (day: number) => {
+        const updatedDays = [...(habit.specific_days || [])];
+        const index = updatedDays.indexOf(day);
+
+        if (index !== -1) {
+            updatedDays.splice(index, 1);
+        } else {
+            updatedDays.push(day);
+        }
+
+        setHabit(prev => ({ ...prev, specific_days: updatedDays }));
+    };
+
+    // Handle adding a reminder
+    const addReminder = (time?: Date) => {
+        const newReminder = {
+            time: time ? format(time, 'HH:mm:00') : '09:00:00',
+            repeat: 'DAILY',
+            message: `Time to complete: ${habit.name}`,
+            is_enabled: true
+        };
+
+        setHabit(prev => ({
+            ...prev,
+            reminders: [...(prev.reminders || []), newReminder]
+        }));
+    };
+
+    // Handle reminder time change
+    const handleTimeChange = (event: any, selectedTime?: Date) => {
+        if (Platform.OS === 'android' && event.type === 'dismissed') {
+            setShowTimePicker(false);
+            return;
+        }
+
+        if (selectedTime && selectedReminderIndex !== null) {
+            const timeString = format(selectedTime, 'HH:mm:00');
+            const updatedReminders = [...(habit.reminders || [])];
+
+            if (selectedReminderIndex < updatedReminders.length) {
+                // Edit existing reminder
+                updatedReminders[selectedReminderIndex] = {
+                    ...updatedReminders[selectedReminderIndex],
+                    time: timeString
+                };
+            } else {
+                // Add new reminder
+                updatedReminders.push({
+                    time: timeString,
+                    repeat: 'DAILY',
+                    message: `Time to complete: ${habit.name}`,
+                    is_enabled: true
+                });
+            }
+
+            setHabit(prev => ({ ...prev, reminders: updatedReminders }));
+        }
+
+        if (Platform.OS === 'android') {
+            setShowTimePicker(false);
+        }
+    };
+
+    // Handle removing a reminder
+    const removeReminder = (index: number) => {
+        const updatedReminders = [...(habit.reminders || [])];
         updatedReminders.splice(index, 1);
-        setHabitData(prev => ({ ...prev, reminders: updatedReminders }));
+        setHabit(prev => ({ ...prev, reminders: updatedReminders }));
     };
 
+    // Toggle reminder enable/disable
+    const toggleReminderEnabled = (index: number) => {
+        const updatedReminders = [...(habit.reminders || [])];
+        updatedReminders[index] = {
+            ...updatedReminders[index],
+            is_enabled: !updatedReminders[index].is_enabled
+        };
 
-    // Toggle day selection for weekly habits
-    const toggleDaySelection = (dayIndex) => {
-        const updatedDays = [...habitData.specific_days];
-        const dayPosition = updatedDays.indexOf(dayIndex);
+        setHabit(prev => ({ ...prev, reminders: updatedReminders }));
+    };
 
-        if (dayPosition >= 0) {
-            updatedDays.splice(dayPosition, 1);
-        } else {
-            updatedDays.push(dayIndex);
+    // Select a domain
+    const selectDomain = (domain: any) => {
+        setHabit(prev => ({
+            ...prev,
+            domain_id: domain.domain_id,
+            domain_name: domain.name,
+            domain_color: domain.color
+        }));
+        setShowDomainPicker(false);
+    };
+
+    // Clear selected domain
+    const clearDomain = () => {
+        setHabit(prev => ({
+            ...prev,
+            domain_id: null,
+            domain_name: null,
+            domain_color: null
+        }));
+        setShowDomainPicker(false);
+    };
+
+    // Theme styles
+    const theme = {
+        bg: isDarkMode ? 'bg-gray-900' : 'bg-gray-50',
+        card: isDarkMode ? 'bg-gray-800' : 'bg-white',
+        input: isDarkMode ? 'bg-gray-700' : 'bg-gray-100',
+        text: isDarkMode ? 'text-white' : 'text-gray-900',
+        textSecondary: isDarkMode ? 'text-gray-300' : 'text-gray-700',
+        textMuted: isDarkMode ? 'text-gray-400' : 'text-gray-500',
+        border: isDarkMode ? 'border-gray-700' : 'border-gray-200',
+        success: isDarkMode ? 'bg-green-800 text-green-100' : 'bg-green-50 text-green-900',
+        primary: isDarkMode ? 'bg-primary-700' : 'bg-primary-500',
+        primaryText: 'text-white',
+        activeTab: isDarkMode ? 'bg-primary-900/40 border-primary-700' : 'bg-primary-100 border-primary-200',
+        activeTabText: isDarkMode ? 'text-primary-400' : 'text-primary-700',
+        inactiveTab: isDarkMode ? 'bg-gray-800' : 'bg-gray-100',
+        inactiveTabText: isDarkMode ? 'text-gray-400' : 'text-gray-600',
+    };
+
+    // Styled components
+    const FormSection = ({ title, children }: { title: string, children: React.ReactNode }) => (
+        <View className="mb-6">
+            <Text className={`text-lg font-montserrat-semibold mb-4 ${theme.text}`}>
+                {title}
+            </Text>
+            {children}
+        </View>
+    );
+
+    const FormField = ({
+                           label,
+                           children,
+                           required = false,
+                           className = ""
+                       }: {
+        label: string,
+        children: React.ReactNode,
+        required?: boolean,
+        className?: string
+    }) => (
+        <View className={`mb-4 ${className}`}>
+            <View className="flex-row items-center mb-2">
+                <Text className={`text-sm font-montserrat-medium ${theme.textSecondary}`}>
+                    {label}
+                </Text>
+                {required && <Text className="text-red-500 ml-1">*</Text>}
+            </View>
+            {children}
+        </View>
+    );
+
+    const TabButton = ({
+                           title,
+                           icon,
+                           isActive,
+                           onPress
+                       }: {
+        title: string,
+        icon: React.ReactNode,
+        isActive: boolean,
+        onPress: () => void
+    }) => (
+        <TouchableOpacity
+            onPress={onPress}
+            className={`flex-1 py-3 items-center justify-center rounded-lg border ${
+                isActive ? theme.activeTab : theme.inactiveTab
+            }`}
+        >
+            {icon}
+            <Text className={`mt-1 text-xs font-montserrat-medium ${
+                isActive ? theme.activeTabText : theme.inactiveTabText
+            }`}>
+                {title}
+            </Text>
+        </TouchableOpacity>
+    );
+
+    // Dropdown component
+    const DropdownPicker = ({
+                                visible,
+                                options,
+                                onSelect,
+                                onClose,
+                                title
+                            }: {
+        visible: boolean,
+        options: Array<{ label: string, value: string, icon?: React.ReactNode }>,
+        onSelect: (option: any) => void,
+        onClose: () => void,
+        title: string
+    }) => (
+        <Modal
+            transparent={true}
+            visible={visible}
+            animationType="fade"
+            onRequestClose={onClose}
+        >
+            <Pressable
+                className="flex-1 justify-center bg-black/50"
+                onPress={onClose}
+            >
+                <View
+                    className={`mx-4 rounded-xl ${theme.card} overflow-hidden`}
+                    onStartShouldSetResponder={() => true}
+                >
+                    <View className={`px-4 py-3 border-b ${theme.border}`}>
+                        <Text className={`text-base font-montserrat-bold ${theme.text}`}>{title}</Text>
+                    </View>
+
+                    {options.map((option, index) => (
+                        <TouchableOpacity
+                            key={option.value}
+                            onPress={() => onSelect(option)}
+                            className={`px-4 py-3.5 flex-row items-center ${
+                                index !== options.length - 1 ? `border-b ${theme.border}` : ''
+                            }`}
+                        >
+                            {option.icon && (
+                                <View className="mr-3">
+                                    {option.icon}
+                                </View>
+                            )}
+                            <Text className={`${theme.text} font-montserrat`}>{option.label}</Text>
+                        </TouchableOpacity>
+                    ))}
+                </View>
+            </Pressable>
+        </Modal>
+    );
+
+    // Date and time pickers
+    const renderDatePicker = () => {
+        const isStartDatePicker = showStartDatePicker;
+        const isEndDatePicker = showEndDatePicker;
+
+        if (!showStartDatePicker && !showEndDatePicker && !showTimePicker) {
+            return null;
         }
 
-        setHabitData(prev => ({
-            ...prev,
-            specific_days: updatedDays
-        }));
-    };
+        let currentDate = new Date();
+        let mode: 'date' | 'time' = 'date';
 
-    // Add tag
-    const addTag = () => {
-        console.log('[DEBUG] addTag called', { currentTag });
-        if (currentTag.trim() && !habitData.tags.includes(currentTag.trim())) {
-            setHabitData(prev => ({
-                ...prev,
-                tags: [...prev.tags, currentTag.trim()]
-            }));
-            setCurrentTag("");
+        if (isStartDatePicker) {
+            currentDate = habit.start_date instanceof Date ? habit.start_date : new Date(habit.start_date);
+        } else if (isEndDatePicker) {
+            currentDate = habit.end_date instanceof Date ? habit.end_date : (habit.end_date ? new Date(habit.end_date) : new Date());
+        } else if (showTimePicker) {
+            mode = 'time';
+            if (selectedReminderIndex !== null && selectedReminderIndex < (habit.reminders || []).length) {
+                const timeString = habit.reminders[selectedReminderIndex].time;
+                const [hours, minutes] = timeString.split(':');
+                currentDate = new Date();
+                currentDate.setHours(parseInt(hours), parseInt(minutes));
+            }
         }
-    };
 
-    // Remove tag
-    const removeTag = (tagToRemove) => {
-        setHabitData(prev => ({
-            ...prev,
-            tags: prev.tags.filter(tag => tag !== tagToRemove)
-        }));
-    };
+        const onChange = showTimePicker ? handleTimeChange : handleDateChange;
 
-    // Format time for display
-    const formatTime = (isoString) => {
-        const date = new Date(isoString);
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    };
-
-    // Handle success modal completion
-    const handleSuccessConfirmation = () => {
-        setShowSuccessModal(false);
-        if (onSubmitSuccess) onSubmitSuccess(habitData);
-    };
-
-    // Render date picker based on platform
-    const renderDatePicker = (visible, currentDate, onChange, mode = "date") => {
-        if (!visible) return null;
-
-        if (Platform.OS === "ios") {
+        if (Platform.OS === 'ios') {
             return (
                 <Modal
-                    animationType="slide"
                     transparent={true}
-                    visible={visible}
+                    visible={true}
+                    animationType="slide"
                 >
                     <View className="flex-1 justify-end bg-black/40">
-                        <View className={`p-5 rounded-t-3xl ${isDark ? "bg-gray-800" : "bg-white"}`}>
+                        <View className={`rounded-t-xl ${theme.card} p-4`}>
+                            <View className="flex-row justify-between items-center mb-4">
+                                <TouchableOpacity onPress={() => {
+                                    setShowStartDatePicker(false);
+                                    setShowEndDatePicker(false);
+                                    setShowTimePicker(false);
+                                }}>
+                                    <Text className="text-primary-500 font-montserrat-medium">Cancel</Text>
+                                </TouchableOpacity>
+                                <Text className={`text-base font-montserrat-bold ${theme.text}`}>
+                                    {showTimePicker ? 'Select Time' : 'Select Date'}
+                                </Text>
+                                <TouchableOpacity onPress={() => {
+                                    if (showTimePicker && selectedReminderIndex !== null) {
+                                        handleTimeChange({}, currentDate);
+                                    } else {
+                                        handleDateChange({}, currentDate);
+                                    }
+                                    setShowStartDatePicker(false);
+                                    setShowEndDatePicker(false);
+                                    setShowTimePicker(false);
+                                }}>
+                                    <Text className="text-primary-500 font-montserrat-medium">Done</Text>
+                                </TouchableOpacity>
+                            </View>
+
                             <DateTimePicker
-                                value={currentDate || new Date()}
+                                value={currentDate}
                                 mode={mode}
                                 display="spinner"
                                 onChange={onChange}
-                                textColor={isDark ? "white" : "black"}
+                                style={{ height: 200 }}
+                                textColor={isDarkMode ? 'white' : 'black'}
                             />
-                            <TouchableOpacity
-                                onPress={() => {
-                                    if (mode === "time" && onChange === handleReminderTimeChange) {
-                                        setShowReminderTimePicker(false);
-                                        addReminder();
-                                    } else if (mode === "date" && onChange === ((e, d) => handleDateChange(e, d, "start_date"))) {
-                                        setShowStartDatePicker(false);
-                                    } else if (mode === "date" && onChange === ((e, d) => handleDateChange(e, d, "end_date"))) {
-                                        setShowEndDatePicker(false);
-                                    }
-                                }}
-                                className="mt-5 bg-primary-500 py-4 rounded-xl"
-                            >
-                                <Text className="text-white text-center font-bold">Done</Text>
-                            </TouchableOpacity>
                         </View>
                     </View>
                 </Modal>
@@ -448,7 +525,7 @@ const HabitForm = ({ existingHabit, onSubmitSuccess, onCancel, isEditMode = fals
         } else {
             return (
                 <DateTimePicker
-                    value={currentDate || new Date()}
+                    value={currentDate}
                     mode={mode}
                     display="default"
                     onChange={onChange}
@@ -457,1048 +534,620 @@ const HabitForm = ({ existingHabit, onSubmitSuccess, onCancel, isEditMode = fals
         }
     };
 
-    // Modern styled components for the form UI
-    const FormField = ({ label, children, required = false, className = "" }) => (
-        <View className={`mb-6 ${className}`}>
-            <View className="flex-row items-center mb-2.5">
-                <Text className={`${isDark ? "text-gray-300" : "text-gray-700"} font-medium text-base`}>
-                    {label}
-                </Text>
-                {required && <Text className="text-red-500 ml-1.5">*</Text>}
-            </View>
-            {children}
-        </View>
-    );
-
-    const TabButton = ({ title, icon, isActive, onPress }) => (
-        <TouchableOpacity
-            onPress={onPress}
-            className={`flex-1 py-3.5 items-center justify-center rounded-lg ${
-                isActive
-                    ? (isDark ? 'bg-primary-900/30 border border-primary-700' : 'bg-primary-100 border border-primary-200')
-                    : (isDark ? 'bg-gray-800' : 'bg-gray-100')
-            }`}
-        >
-            {icon}
-            <Text className={`mt-1.5 text-xs font-medium ${
-                isActive
-                    ? (isDark ? 'text-primary-400' : 'text-primary-700')
-                    : (isDark ? 'text-gray-400' : 'text-gray-600')
-            }`}>
-                {title}
-            </Text>
-        </TouchableOpacity>
-    );
-
-    const StyledInput = ({
-                             value,
-                             onChangeText,
-                             placeholder,
-                             multiline = false,
-                             keyboardType = "default",
-                             blurOnSubmit = false, // Changed default to false
-                             onSubmitEditing = null
-                         }) => (
-        <TextInput
-            value={value}
-            onChangeText={(text) => {
-                console.log('[DEBUG] TextInput onChange', { field: placeholder, multiline });
-                onChangeText(text);
-            }}
-            placeholder={placeholder}
-            placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-            multiline={multiline}
-            numberOfLines={multiline ? 3 : 1}
-            keyboardType={keyboardType}
-            className={`p-4 rounded-lg ${
-                isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-            } border ${multiline ? "min-h-[100px] text-top" : ""}`}
-            blurOnSubmit={blurOnSubmit}
-            returnKeyType={multiline ? "default" : "next"}
-            onSubmitEditing={(event) => {
-                console.log('[DEBUG] TextInput onSubmitEditing', { multiline, field: placeholder });
-                if (onSubmitEditing) {
-                    onSubmitEditing(event);
-                }
-                // Do not dismiss keyboard on submit
-            }}
-            onBlur={() => {
-                console.log('[DEBUG] TextInput onBlur', { multiline, field: placeholder });
-            }}
-            onFocus={() => {
-                console.log('[DEBUG] TextInput onFocus', { multiline, field: placeholder });
-            }}
-        />
-    );
-
-    const StyledTrackingOption = ({ icon, label, description, active, onPress }) => (
-        <TouchableOpacity
-            onPress={onPress}
-            className={`p-5 rounded-lg border-2 mb-4 ${
-                active
-                    ? (isDark ? "border-primary-500 bg-primary-900/20" : "border-primary-500 bg-primary-50")
-                    : (isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white")
-            }`}
-        >
-            <View className="flex-row items-center mb-2">
-                <View className={`mr-4 p-2.5 rounded-full ${
-                    isDark ? "bg-gray-700" : "bg-gray-100"
-                }`}>
-                    {icon}
-                </View>
-                <Text className={`${isDark ? "text-white" : "text-gray-900"} font-bold text-base`}>
-                    {label}
-                </Text>
-                {active && (
-                    <View className="ml-auto">
-                        <Check size={18} color={isDark ? "#60A5FA" : "#3B82F6"} />
-                    </View>
-                )}
-            </View>
-            <Text className={`${isDark ? "text-gray-400" : "text-gray-600"} text-sm ml-12`}>
-                {description}
-            </Text>
-        </TouchableOpacity>
-    );
-
-    // Error toast component
-    const ErrorToast = () => (
-        showErrorToast && (
-            <View className="absolute top-6 left-5 right-5 bg-red-500 rounded-lg p-4 z-50 shadow-lg">
-                <Text className="text-white font-medium">{errorMessage}</Text>
-                <TouchableOpacity
-                    className="absolute top-2 right-2"
-                    onPress={() => setShowErrorToast(false)}
-                >
-                    <Text className="text-white text-lg">×</Text>
-                </TouchableOpacity>
-            </View>
-        )
-    );
-
-    // Success modal component
-    const SuccessModal = () => (
-        <Modal
-            visible={showSuccessModal}
-            transparent={true}
-            animationType="fade"
-        >
-            <View className="flex-1 justify-center items-center bg-black/50">
-                <View className={`w-4/5 p-6 rounded-2xl ${isDark ? "bg-gray-800" : "bg-white"} shadow-xl`}>
-                    <View className="items-center mb-5">
-                        <View className={`w-16 h-16 rounded-full ${isDark ? "bg-green-900" : "bg-green-100"} items-center justify-center mb-4`}>
-                            <Check size={32} color={isDark ? "#4ADE80" : "#22C55E"} />
-                        </View>
-                        <Text className={`text-xl font-bold text-center ${isDark ? "text-white" : "text-gray-900"}`}>
-                            {isEditMode ? "Updated Successfully!" : "Created Successfully!"}
-                        </Text>
-                    </View>
-                    <Text className={`text-center mb-6 ${isDark ? "text-gray-300" : "text-gray-700"}`}>
-                        {isEditMode
-                            ? "Your habit has been updated successfully."
-                            : "Your new habit has been created. Start building your streak today!"}
-                    </Text>
-                    <TouchableOpacity
-                        onPress={handleSuccessConfirmation}
-                        className={`${isDark ? "bg-primary-600" : "bg-primary-500"} py-4 rounded-xl`}
-                    >
-                        <Text className="text-white text-center font-bold">Got it</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </Modal>
-    );
-
-    // Dropdown modal component
-    const DropdownModal = ({ visible, options, onSelect, onClose, title }) => (
-        visible && (
-            <View className="absolute left-0 right-0 top-0 bottom-0 bg-black/50 z-50" onTouchStart={onClose}>
-                <View
-                    className={`mx-5 mt-20 rounded-xl ${isDark ? "bg-gray-800" : "bg-white"} shadow-lg overflow-hidden`}
-                    onTouchStart={(e) => e.stopPropagation()}
-                >
-                    {title && (
-                        <View className={`px-5 py-4 border-b ${isDark ? "border-gray-700" : "border-gray-200"}`}>
-                            <Text className={`${isDark ? "text-white" : "text-gray-900"} font-bold text-base`}>{title}</Text>
-                        </View>
-                    )}
-
-                    {options.map((option, index) => (
-                        <TouchableOpacity
-                            key={option.value}
-                            onPress={() => onSelect(option)}
-                            className={`px-5 py-4 ${index !== options.length - 1 ? `border-b ${isDark ? "border-gray-700" : "border-gray-200"}` : ''}`}
-                        >
-                            <View className="flex-row items-center">
-                                {option.icon && <View className="mr-4">{option.icon}</View>}
-                                <Text className={`${isDark ? "text-white" : "text-gray-900"}`}>{option.label}</Text>
-                            </View>
-                        </TouchableOpacity>
-                    ))}
-                </View>
-            </View>
-        )
-    );
-
     return (
-        <SafeAreaView className={`flex-1 ${isDark ? "bg-gray-900" : "bg-gray-50"}`}>
-            <ErrorToast />
-            <SuccessModal />
-
-            {/* Domain Picker Modal */}
-            <DropdownModal
-                visible={showDomainPicker}
-                title="Select Category"
-                options={domains.map(domain => ({
-                    label: domain.name,
-                    value: domain.domain_id,
-                    icon: <Text style={{ fontSize: 20 }}>{domain.icon}</Text>
-                }))}
-                onSelect={(option) => {
-                    setHabitData(prev => ({ ...prev, domain_id: option.value }));
-                    setSelectedDomain(domains.find(d => d.domain_id === option.value));
-                    setShowDomainPicker(false);
-                }}
-                onClose={() => setShowDomainPicker(false)}
-            />
-
-            {/* Difficulty Picker Modal */}
-            <DropdownModal
-                visible={showDifficultyPicker}
-                title="Select Difficulty"
-                options={[
-                    { label: "Very Easy", value: "VERY_EASY" },
-                    { label: "Easy", value: "EASY" },
-                    { label: "Medium", value: "MEDIUM" },
-                    { label: "Hard", value: "HARD" },
-                    { label: "Very Hard", value: "VERY_HARD" }
-                ]}
-                onSelect={(option) => {
-                    setHabitData(prev => ({ ...prev, difficulty: option.value }));
-                    setShowDifficultyPicker(false);
-                }}
-                onClose={() => setShowDifficultyPicker(false)}
-            />
-
-            {/* Frequency Type Picker Modal */}
-            <DropdownModal
-                visible={showFrequencyPicker}
-                title="Select Frequency Type"
-                options={[
-                    { label: "Daily", value: "DAILY" },
-                    { label: "Weekdays Only", value: "WEEKDAYS" },
-                    { label: "Weekends Only", value: "WEEKENDS" },
-                    { label: "Specific Days", value: "SPECIFIC_DAYS" },
-                    { label: "X Times per Week", value: "X_TIMES_WEEK" },
-                    { label: "X Times per Month", value: "X_TIMES_MONTH" },
-                    { label: "Every X Days", value: "INTERVAL" }
-                ]}
-                onSelect={(option) => {
-                    setHabitData(prev => ({ ...prev, frequency_type: option.value }));
-                    setShowFrequencyPicker(false);
-                }}
-                onClose={() => setShowFrequencyPicker(false)}
-            />
-
-            {/* Date Pickers */}
-            {renderDatePicker(
-                showStartDatePicker,
-                habitData.start_date,
-                (e, d) => handleDateChange(e, d, "start_date"),
-                "date"
-            )}
-
-            {renderDatePicker(
-                showEndDatePicker,
-                habitData.end_date || new Date(),
-                (e, d) => handleDateChange(e, d, "end_date"),
-                "date"
-            )}
-
-            {renderDatePicker(
-                showReminderTimePicker,
-                reminderTime,
-                handleReminderTimeChange,
-                "time"
-            )}
-
+        <View className={`flex-1 ${theme.bg}`}>
             {/* Header */}
-            <View className="px-5 py-4 flex-row justify-between items-center border-b border-gray-200 dark:border-gray-800">
-                <TouchableOpacity onPress={onCancel} className="p-2">
-                    <X size={24} color={isDark ? "#E5E7EB" : "#1F2937"} />
+            <View className={`px-4 py-3 flex-row justify-between items-center border-b ${theme.border}`}>
+                <TouchableOpacity
+                    onPress={onCancel}
+                    className={`p-2 rounded-full ${isDarkMode ? 'bg-gray-800' : 'bg-gray-200'}`}
+                >
+                    <X size={20} color={isDarkMode ? 'white' : 'black'} />
                 </TouchableOpacity>
-                <Text className={`text-lg font-bold ${isDark ? "text-white" : "text-gray-900"}`}>
-                    {isEditMode ? "Edit Habit" : "Create Habit"}
+
+                <Text className={`text-lg font-montserrat-bold ${theme.text}`}>
+                    {isEditMode ? 'Edit Habit' : 'New Habit'}
                 </Text>
+
                 <TouchableOpacity
                     onPress={handleSubmit}
                     disabled={isSubmitting}
-                    className="p-2"
+                    className={`px-4 py-1.5 rounded-full ${theme.primary}`}
                 >
                     {isSubmitting ? (
-                        <ActivityIndicator color={isDark ? "#60A5FA" : "#3B82F6"} />
+                        <ActivityIndicator size="small" color="white" />
                     ) : (
-                        <Text className={`${isDark ? "text-primary-400" : "text-primary-600"} font-bold`}>
-                            Save
-                        </Text>
+                        <Text className="text-white font-montserrat-medium">Save</Text>
                     )}
                 </TouchableOpacity>
             </View>
 
-            {/* Tab Navigation for Sections */}
-            <View className="px-5 flex-row space-x-3 my-4">
+            {/* Error message */}
+            {error && (
+                <View className="mx-4 mt-2 p-3 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                    <Text className="text-red-600 dark:text-red-400 font-montserrat">{error}</Text>
+                </View>
+            )}
+
+            {/* Tabs */}
+            <View className="flex-row px-4 py-3 space-x-2">
                 <TabButton
                     title="Basics"
-                    icon={<Info size={18} color={activeSection === "basic" ? (isDark ? "#60A5FA" : "#3B82F6") : (isDark ? "#9CA3AF" : "#6B7280")} />}
+                    icon={<Info size={18} className={activeSection === "basic" ? theme.activeTabText : theme.inactiveTabText} />}
                     isActive={activeSection === "basic"}
                     onPress={() => setActiveSection("basic")}
                 />
                 <TabButton
-                    title="Tracking"
-                    icon={<Check size={18} color={activeSection === "tracking" ? (isDark ? "#60A5FA" : "#3B82F6") : (isDark ? "#9CA3AF" : "#6B7280")} />}
-                    isActive={activeSection === "tracking"}
-                    onPress={() => setActiveSection("tracking")}
-                />
-                <TabButton
                     title="Schedule"
-                    icon={<Calendar size={18} color={activeSection === "schedule" ? (isDark ? "#60A5FA" : "#3B82F6") : (isDark ? "#9CA3AF" : "#6B7280")} />}
+                    icon={<CalendarCheck size={18} className={activeSection === "schedule" ? theme.activeTabText : theme.inactiveTabText} />}
                     isActive={activeSection === "schedule"}
                     onPress={() => setActiveSection("schedule")}
                 />
                 <TabButton
+                    title="Tracking"
+                    icon={<Check size={18} className={activeSection === "tracking" ? theme.activeTabText : theme.inactiveTabText} />}
+                    isActive={activeSection === "tracking"}
+                    onPress={() => setActiveSection("tracking")}
+                />
+                <TabButton
                     title="More"
-                    icon={<Settings size={18} color={activeSection === "more" ? (isDark ? "#60A5FA" : "#3B82F6") : (isDark ? "#9CA3AF" : "#6B7280")} />}
+                    icon={<Shield size={18} className={activeSection === "more" ? theme.activeTabText : theme.inactiveTabText} />}
                     isActive={activeSection === "more"}
                     onPress={() => setActiveSection("more")}
                 />
             </View>
 
-            {/* Content Area */}
-            <KeyboardAvoidingView
-                behavior={Platform.OS === "ios" ? "padding" : "height"}
-                className="flex-1"
-                keyboardVerticalOffset={Platform.OS === "ios" ? 90 : 0}
+            {/* Content */}
+            <ScrollView
+                className="flex-1 px-4"
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
             >
-                <TouchableWithoutFeedback
-                    onPress={(event) => {
-                        // IMPORTANT FIX: Don't dismiss keyboard when tapping on TextInput components
-                        const targetTag = event.target?._nativeTag;
-                        const targetClass = event.target?.className;
+                {/* Basic Information Section */}
+                {activeSection === "basic" && (
+                    <FormSection title="Basic Information">
+                        <FormField label="Habit Name" required>
+                            <TextInput
+                                value={habit.name}
+                                onChangeText={(text) => handleInputChange('name', text)}
+                                placeholder="What habit do you want to build?"
+                                placeholderTextColor={isDarkMode ? '#6B7280' : '#9CA3AF'}
+                                className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text}`}
+                            />
+                        </FormField>
 
-                        // Check if we're tapping on a text input or within one
-                        const isTextInput =
-                            (typeof targetClass === 'string' && targetClass.includes('TextInput')) ||
-                            (targetTag && typeof targetTag === 'number');
+                        <FormField label="Description">
+                            <TextInput
+                                value={habit.description}
+                                onChangeText={(text) => handleInputChange('description', text)}
+                                placeholder="Why is this habit important to you?"
+                                placeholderTextColor={isDarkMode ? '#6B7280' : '#9CA3AF'}
+                                className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text}`}
+                                multiline
+                                numberOfLines={3}
+                                style={{ textAlignVertical: 'top', minHeight: 80 }}
+                            />
+                        </FormField>
 
-                        console.log('[DEBUG] TouchableWithoutFeedback pressed', {
-                            isTextInput,
-                            target: event.target,
-                            timestamp: new Date().toISOString(),
-                            keyboardShown: keyboardShownRef.current
-                        });
-
-                        // Only dismiss if we're not tapping on a TextInput
-                        if (keyboardShownRef.current && !isTextInput) {
-                            dismissKeyboard();
-                        }
-                    }}
-                >
-                    <ScrollView
-                        ref={scrollViewRef}
-                        className="flex-1"
-                        contentContainerClassName="pb-24 px-5"
-                        keyboardShouldPersistTaps="always" // Changed from "handled" to "always"
-                        keyboardDismissMode="none" // Changed from "on-drag" to "none"
-                        showsVerticalScrollIndicator={false}
-                        onScroll={() => {
-                            console.log('[DEBUG] ScrollView onScroll');
-                        }}
-                    >
-                        {/* Basic Information Section */}
-                        {activeSection === "basic" && (
-                            <View className="pt-4">
-                                <FormField label="Habit Name" required>
-                                    <StyledInput
-                                        value={habitData.name}
-                                        onChangeText={(text) => handleTextChange(text, "name")}
-                                        placeholder="What habit do you want to build?"
-                                    />
-                                </FormField>
-
-                                <FormField label="Category" required>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            console.log('[DEBUG] Category picker opened');
-                                            setShowDomainPicker(true);
-                                        }}
-                                        className={`flex-row items-center justify-between p-4 rounded-lg ${
-                                            isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
-                                        } border`}
-                                    >
-                                        <View className="flex-row items-center">
-                                            {selectedDomain && (
-                                                <Text style={{ fontSize: 20 }} className="mr-3">{selectedDomain.icon}</Text>
-                                            )}
-                                            <Text className={isDark ? "text-white" : "text-gray-900"}>
-                                                {selectedDomain?.name || "Select a category"}
-                                            </Text>
-                                        </View>
-                                        <ChevronDown size={18} color={isDark ? "#E2E8F0" : "#4B5563"} />
-                                    </TouchableOpacity>
-                                </FormField>
-
-                                <FormField label="Description">
-                                    <StyledInput
-                                        value={habitData.description}
-                                        onChangeText={(text) => handleTextChange(text, "description")}
-                                        placeholder="Add some details about this habit"
-                                        multiline
-                                    />
-                                </FormField>
-
-                                <FormField label="Difficulty">
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            console.log('[DEBUG] Difficulty picker opened');
-                                            setShowDifficultyPicker(true);
-                                        }}
-                                        className={`flex-row items-center justify-between p-4 rounded-lg ${
-                                            isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
-                                        } border`}
-                                    >
-                                        <Text className={isDark ? "text-white" : "text-gray-900"}>
-                                            {habitData.difficulty === "VERY_EASY" ? "Very Easy" :
-                                                habitData.difficulty === "EASY" ? "Easy" :
-                                                    habitData.difficulty === "MEDIUM" ? "Medium" :
-                                                        habitData.difficulty === "HARD" ? "Hard" :
-                                                            habitData.difficulty === "VERY_HARD" ? "Very Hard" : "Medium"}
-                                        </Text>
-                                        <ChevronDown size={18} color={isDark ? "#E2E8F0" : "#4B5563"} />
-                                    </TouchableOpacity>
-                                </FormField>
-
-                                <FormField label="Tags">
-                                    <View className="flex-row flex-wrap mb-3">
-                                        {habitData.tags.map((tag, index) => (
+                        <FormField label="Domain/Category">
+                            <TouchableOpacity
+                                onPress={() => setShowDomainPicker(true)}
+                                className={`flex-row justify-between items-center px-3 py-2.5 rounded-lg ${theme.input}`}
+                            >
+                                <View className="flex-row items-center">
+                                    {habit.domain_id ? (
+                                        <>
                                             <View
-                                                key={index}
-                                                className={`flex-row items-center rounded-full px-3 py-1.5 mr-2 mb-2 ${
-                                                    isDark ? "bg-gray-700" : "bg-gray-100"
-                                                }`}
-                                            >
-                                                <Text className={isDark ? "text-white" : "text-gray-900"}>{tag}</Text>
-                                                <TouchableOpacity
-                                                    onPress={() => {
-                                                        console.log('[DEBUG] Tag removed:', tag);
-                                                        removeTag(tag);
-                                                    }}
-                                                    className="ml-1.5"
-                                                >
-                                                    <X size={14} color={isDark ? "#E2E8F0" : "#4B5563"} />
-                                                </TouchableOpacity>
-                                            </View>
-                                        ))}
-                                    </View>
-                                    <View className="flex-row">
-                                        <TextInput
-                                            value={currentTag}
-                                            onChangeText={(text) => {
-                                                console.log('[DEBUG] Tag input changed:', text);
-                                                setCurrentTag(text);
-                                            }}
-                                            placeholder="Add a tag"
-                                            placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-                                            className={`flex-1 p-4 rounded-l-lg border ${
-                                                isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                            }`}
-                                            onSubmitEditing={(event) => {
-                                                console.log('[DEBUG] Tag input submitted:', currentTag);
-                                                addTag();
-                                                // Don't dismiss keyboard after adding tag
-                                                return false;
-                                            }}
-                                            blurOnSubmit={false}
-                                            returnKeyType="done"
-                                        />
-                                        <TouchableOpacity
-                                            onPress={() => {
-                                                console.log('[DEBUG] Add tag button pressed');
-                                                addTag();
-                                            }}
-                                            className={`px-5 items-center justify-center rounded-r-lg ${
-                                                isDark ? "bg-primary-600" : "bg-primary-500"
-                                            }`}
-                                        >
-                                            <Plus size={20} color="white" />
-                                        </TouchableOpacity>
-                                    </View>
-                                </FormField>
-                            </View>
-                        )}
-
-                        {/* Tracking Section */}
-                        {activeSection === "tracking" && (
-                            <View className="pt-4">
-                                <Text className={`mb-4 font-bold text-lg ${isDark ? "text-white" : "text-gray-900"}`}>
-                                    How would you like to track this habit?
-                                </Text>
-
-                                <StyledTrackingOption
-                                    icon={<Check size={20} color={isDark ? "#60A5FA" : "#3B82F6"} />}
-                                    label="Simple Completion"
-                                    description="Mark as done when completed"
-                                    active={habitData.tracking_type === "BOOLEAN"}
-                                    onPress={() => {
-                                        console.log('[DEBUG] Tracking option changed to: BOOLEAN');
-                                        setHabitData(prev => ({ ...prev, tracking_type: "BOOLEAN" }));
-                                    }}
-                                />
-
-                                <StyledTrackingOption
-                                    icon={<Clock size={20} color={isDark ? "#60A5FA" : "#3B82F6"} />}
-                                    label="Duration"
-                                    description="Track how long you spend on this habit"
-                                    active={habitData.tracking_type === "DURATION"}
-                                    onPress={() => {
-                                        console.log('[DEBUG] Tracking option changed to: DURATION');
-                                        setHabitData(prev => ({ ...prev, tracking_type: "DURATION" }));
-                                    }}
-                                />
-
-                                <StyledTrackingOption
-                                    icon={<Tag size={20} color={isDark ? "#60A5FA" : "#3B82F6"} />}
-                                    label="Count"
-                                    description="Track how many times you complete this habit"
-                                    active={habitData.tracking_type === "COUNT"}
-                                    onPress={() => {
-                                        console.log('[DEBUG] Tracking option changed to: COUNT');
-                                        setHabitData(prev => ({ ...prev, tracking_type: "COUNT" }));
-                                    }}
-                                />
-
-                                <StyledTrackingOption
-                                    icon={<Info size={20} color={isDark ? "#60A5FA" : "#3B82F6"} />}
-                                    label="Numeric Value"
-                                    description="Track a specific value with units"
-                                    active={habitData.tracking_type === "NUMERIC"}
-                                    onPress={() => {
-                                        console.log('[DEBUG] Tracking option changed to: NUMERIC');
-                                        setHabitData(prev => ({ ...prev, tracking_type: "NUMERIC" }));
-                                    }}
-                                />
-
-                                {habitData.tracking_type === "DURATION" && (
-                                    <FormField label="Duration Goal" required>
-                                        <View className="flex-row">
-                                            <TextInput
-                                                value={habitData.duration_goal?.toString() || ""}
-                                                onChangeText={(text) => {
-                                                    console.log('[DEBUG] Duration goal changed:', text);
-                                                    handleTextChange(text.replace(/[^0-9]/g, ""), "duration_goal");
-                                                }}
-                                                keyboardType="numeric"
-                                                placeholder="e.g., 30"
-                                                placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-                                                className={`flex-1 p-4 mr-2 rounded-lg border ${
-                                                    isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                                }`}
-                                                returnKeyType="done"
-                                                blurOnSubmit={false}
-                                                onSubmitEditing={(event) => {
-                                                    console.log('[DEBUG] Duration goal input submitted');
-                                                    // Don't dismiss keyboard
-                                                    return false;
-                                                }}
+                                                className="w-4 h-4 rounded-full mr-2"
+                                                style={{ backgroundColor: habit.domain_color || '#22C55E' }}
                                             />
-                                            <TouchableOpacity
-                                                className={`px-4 rounded-lg flex-row items-center ${
-                                                    isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
-                                                } border`}
-                                                onPress={() => {
-                                                    console.log('[DEBUG] Duration units toggled');
-                                                    setHabitData(prev => ({
-                                                        ...prev,
-                                                        units: prev.units === "minutes" ? "hours" : "minutes"
-                                                    }));
-                                                }}
-                                            >
-                                                <Text className={isDark ? "text-white" : "text-gray-900"}>
-                                                    {habitData.units || "minutes"}
-                                                </Text>
-                                                <ChevronDown size={18} color={isDark ? "#E2E8F0" : "#4B5563"} className="ml-2" />
-                                            </TouchableOpacity>
-                                        </View>
-                                    </FormField>
-                                )}
-
-                                {habitData.tracking_type === "COUNT" && (
-                                    <FormField label="Count Goal" required>
-                                        <StyledInput
-                                            value={habitData.count_goal?.toString() || ""}
-                                            onChangeText={(text) => handleTextChange(text.replace(/[^0-9]/g, ""), "count_goal")}
-                                            placeholder="e.g., 8 glasses of water"
-                                            keyboardType="numeric"
-                                            blurOnSubmit={false}
-                                            returnKeyType="done"
-                                        />
-                                    </FormField>
-                                )}
-
-                                {habitData.tracking_type === "NUMERIC" && (
-                                    <FormField label="Numeric Goal with Units" required>
-                                        <View className="flex-row">
-                                            <TextInput
-                                                value={habitData.numeric_goal?.toString() || ""}
-                                                onChangeText={(text) => {
-                                                    console.log('[DEBUG] Numeric goal changed:', text);
-                                                    handleTextChange(text.replace(/[^0-9.]/g, ""), "numeric_goal");
-                                                }}
-                                                keyboardType="numeric"
-                                                placeholder="e.g., 5"
-                                                placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-                                                className={`flex-1 p-4 mr-2 rounded-lg border ${
-                                                    isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                                }`}
-                                                returnKeyType="next"
-                                                blurOnSubmit={false}
-                                            />
-                                            <TextInput
-                                                value={habitData.units}
-                                                onChangeText={(text) => {
-                                                    console.log('[DEBUG] Units changed:', text);
-                                                    handleTextChange(text, "units");
-                                                }}
-                                                placeholder="units"
-                                                placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-                                                className={`p-4 rounded-lg border w-1/3 ${
-                                                    isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                                }`}
-                                                returnKeyType="done"
-                                                blurOnSubmit={false}
-                                            />
-                                        </View>
-                                    </FormField>
-                                )}
-                            </View>
-                        )}
-
-                        {/* Schedule Section */}
-                        {activeSection === "schedule" && (
-                            <View className="pt-4">
-                                <FormField label="Frequency Type" required>
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            console.log('[DEBUG] Frequency picker opened');
-                                            setShowFrequencyPicker(true);
-                                        }}
-                                        className={`flex-row items-center justify-between p-4 rounded-lg ${
-                                            isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
-                                        } border`}
-                                    >
-                                        <Text className={isDark ? "text-white" : "text-gray-900"}>
-                                            {habitData.frequency_type === "DAILY" ? "Daily" :
-                                                habitData.frequency_type === "WEEKDAYS" ? "Weekdays Only" :
-                                                    habitData.frequency_type === "WEEKENDS" ? "Weekends Only" :
-                                                        habitData.frequency_type === "SPECIFIC_DAYS" ? "Specific Days" :
-                                                            habitData.frequency_type === "X_TIMES_WEEK" ? "X Times per Week" :
-                                                                habitData.frequency_type === "X_TIMES_MONTH" ? "X Times per Month" :
-                                                                    habitData.frequency_type === "INTERVAL" ? "Every X Days" : "Daily"}
+                                            <Text className={`font-montserrat ${theme.text}`}>
+                                                {habit.domain_name || 'Select a domain'}
+                                            </Text>
+                                        </>
+                                    ) : (
+                                        <Text className={`font-montserrat ${theme.textMuted}`}>
+                                            Select a domain (optional)
                                         </Text>
-                                        <ChevronDown size={18} color={isDark ? "#E2E8F0" : "#4B5563"} />
-                                    </TouchableOpacity>
-                                </FormField>
-
-                                {habitData.frequency_type === "SPECIFIC_DAYS" && (
-                                    <FormField label="Select Days" required>
-                                        <View className="flex-row justify-between">
-                                            {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
-                                                <TouchableOpacity
-                                                    key={index}
-                                                    onPress={() => {
-                                                        console.log('[DEBUG] Day selection toggled:', day, index);
-                                                        toggleDaySelection(index);
-                                                    }}
-                                                    className={`w-12 h-12 rounded-full items-center justify-center ${
-                                                        habitData.specific_days.includes(index)
-                                                            ? isDark ? "bg-primary-600" : "bg-primary-500"
-                                                            : isDark ? "bg-gray-700 border border-gray-600" : "bg-gray-50 border border-gray-300"
-                                                    }`}
-                                                >
-                                                    <Text
-                                                        className={
-                                                            habitData.specific_days.includes(index)
-                                                                ? "text-white font-bold"
-                                                                : isDark ? "text-gray-300" : "text-gray-700"
-                                                        }
-                                                    >
-                                                        {day}
-                                                    </Text>
-                                                </TouchableOpacity>
-                                            ))}
-                                        </View>
-                                    </FormField>
-                                )}
-
-                                {habitData.frequency_type === "X_TIMES_WEEK" && (
-                                    <FormField label="Times per Week" required>
-                                        <View className="flex-row items-center">
-                                            <TextInput
-                                                value={habitData.frequency_value?.toString() || ""}
-                                                onChangeText={(text) => {
-                                                    console.log('[DEBUG] Frequency value changed:', text);
-                                                    handleTextChange(text.replace(/[^0-9]/g, ""), "frequency_value");
-                                                }}
-                                                keyboardType="numeric"
-                                                placeholder="e.g., 3"
-                                                placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-                                                className={`p-4 rounded-lg border w-1/3 ${
-                                                    isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                                }`}
-                                                returnKeyType="done"
-                                                blurOnSubmit={false}
-                                            />
-                                            <Text className={`ml-3 ${isDark ? "text-gray-300" : "text-gray-700"}`}>times per week</Text>
-                                        </View>
-                                    </FormField>
-                                )}
-
-                                {habitData.frequency_type === "X_TIMES_MONTH" && (
-                                    <FormField label="Times per Month" required>
-                                        <View className="flex-row items-center">
-                                            <TextInput
-                                                value={habitData.frequency_value?.toString() || ""}
-                                                onChangeText={(text) => {
-                                                    console.log('[DEBUG] Frequency value changed:', text);
-                                                    handleTextChange(text.replace(/[^0-9]/g, ""), "frequency_value");
-                                                }}
-                                                keyboardType="numeric"
-                                                placeholder="e.g., 8"
-                                                placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-                                                className={`p-4 rounded-lg border w-1/3 ${
-                                                    isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                                }`}
-                                                returnKeyType="done"
-                                                blurOnSubmit={false}
-                                            />
-                                            <Text className={`ml-3 ${isDark ? "text-gray-300" : "text-gray-700"}`}>times per month</Text>
-                                        </View>
-                                    </FormField>
-                                )}
-
-                                {habitData.frequency_type === "INTERVAL" && (
-                                    <FormField label="Every X Days" required>
-                                        <View className="flex-row items-center">
-                                            <TextInput
-                                                value={habitData.frequency_interval?.toString() || ""}
-                                                onChangeText={(text) => {
-                                                    console.log('[DEBUG] Frequency interval changed:', text);
-                                                    handleTextChange(text.replace(/[^0-9]/g, ""), "frequency_interval");
-                                                }}
-                                                keyboardType="numeric"
-                                                placeholder="e.g., 3"
-                                                placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-                                                className={`p-4 rounded-lg border w-1/3 ${
-                                                    isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                                }`}
-                                                returnKeyType="done"
-                                                blurOnSubmit={false}
-                                            />
-                                            <Text className={`ml-3 ${isDark ? "text-gray-300" : "text-gray-700"}`}>days</Text>
-                                        </View>
-                                    </FormField>
-                                )}
-
-                                <View className="mt-4">
-                                    <FormField label="Start Date">
-                                        <TouchableOpacity
-                                            onPress={() => {
-                                                console.log('[DEBUG] Start date picker opened');
-                                                setShowStartDatePicker(true);
-                                            }}
-                                            className={`p-4 rounded-lg flex-row justify-between items-center border ${
-                                                isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                            }`}
-                                        >
-                                            <View className="flex-row items-center">
-                                                <Calendar size={18} color={isDark ? "#60A5FA" : "#3B82F6"} className="mr-3" />
-                                                <Text className={isDark ? "text-white" : "text-gray-900"}>
-                                                    {habitData.start_date.toDateString()}
-                                                </Text>
-                                            </View>
-                                            <ChevronDown size={18} color={isDark ? "#E2E8F0" : "#4B5563"} />
-                                        </TouchableOpacity>
-                                    </FormField>
-
-                                    <View className="flex-row justify-between items-center mt-5 mb-3">
-                                        <Text className={`${isDark ? "text-gray-300" : "text-gray-700"} font-medium text-base`}>
-                                            End Date (Optional)
-                                        </Text>
-                                        <Switch
-                                            value={!!habitData.end_date}
-                                            onValueChange={(value) => {
-                                                console.log('[DEBUG] End date toggle:', value);
-                                                setHabitData(prev => ({
-                                                    ...prev,
-                                                    end_date: value ? new Date(prev.start_date.getTime() + 30 * 24 * 60 * 60 * 1000) : null
-                                                }));
-                                            }}
-                                            trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
-                                            thumbColor="#FFFFFF"
-                                        />
-                                    </View>
-
-                                    {habitData.end_date && (
-                                        <TouchableOpacity
-                                            onPress={() => {
-                                                console.log('[DEBUG] End date picker opened');
-                                                setShowEndDatePicker(true);
-                                            }}
-                                            className={`p-4 rounded-lg flex-row justify-between items-center border mb-4 ${
-                                                isDark ? "bg-gray-700 text-white border-gray-600" : "bg-gray-50 text-gray-900 border-gray-200"
-                                            }`}
-                                        >
-                                            <View className="flex-row items-center">
-                                                <Calendar size={18} color={isDark ? "#60A5FA" : "#3B82F6"} className="mr-3" />
-                                                <Text className={isDark ? "text-white" : "text-gray-900"}>
-                                                    {habitData.end_date.toDateString()}
-                                                </Text>
-                                            </View>
-                                            <ChevronDown size={18} color={isDark ? "#E2E8F0" : "#4B5563"} />
-                                        </TouchableOpacity>
                                     )}
                                 </View>
+                                <ChevronDown size={18} className={theme.textMuted} />
+                            </TouchableOpacity>
+                        </FormField>
 
-                                <FormField label="Reminders" className="mt-2">
-                                    {habitData.reminders.map((reminder, index) => (
-                                        <View
+                        <FormField label="Difficulty">
+                            <TouchableOpacity
+                                onPress={() => setShowDifficultyPicker(true)}
+                                className={`flex-row justify-between items-center px-3 py-2.5 rounded-lg ${theme.input}`}
+                            >
+                                <Text className={`font-montserrat ${theme.text}`}>
+                                    {DIFFICULTY_LEVELS.find(d => d.value === habit.difficulty)?.label || 'Medium'}
+                                </Text>
+                                <ChevronDown size={18} className={theme.textMuted} />
+                            </TouchableOpacity>
+                        </FormField>
+
+                        <FormField label="Add to Favorites">
+                            <View className={`flex-row justify-between items-center px-3 py-2.5 rounded-lg ${theme.input}`}>
+                                <View className="flex-row items-center">
+                                    <Star size={18} className={`mr-2 ${habit.is_favorite ? 'text-amber-400' : theme.textMuted}`} />
+                                    <Text className={`font-montserrat ${theme.text}`}>
+                                        Show in favorites tab
+                                    </Text>
+                                </View>
+                                <Switch
+                                    value={habit.is_favorite}
+                                    onValueChange={(value) => handleInputChange('is_favorite', value)}
+                                    trackColor={{ false: isDarkMode ? '#374151' : '#D1D5DB', true: '#22C55E' }}
+                                    thumbColor="#FFFFFF"
+                                />
+                            </View>
+                        </FormField>
+                    </FormSection>
+                )}
+
+                {/* Schedule Section */}
+                {activeSection === "schedule" && (
+                    <FormSection title="Scheduling & Frequency">
+                        <FormField label="Frequency" required>
+                            <TouchableOpacity
+                                onPress={() => setShowFrequencyPicker(true)}
+                                className={`flex-row justify-between items-center px-3 py-2.5 rounded-lg ${theme.input}`}
+                            >
+                                <Text className={`font-montserrat ${theme.text}`}>
+                                    {FREQUENCY_TYPES.find(t => t.value === habit.frequency_type)?.label || 'Every Day'}
+                                </Text>
+                                <ChevronDown size={18} className={theme.textMuted} />
+                            </TouchableOpacity>
+                        </FormField>
+
+                        {/* Specific frequency options based on type */}
+                        {habit.frequency_type === 'SPECIFIC_DAYS' && (
+                            <FormField label="Select Days" required>
+                                <View className="flex-row justify-between py-2">
+                                    {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                                        <TouchableOpacity
                                             key={index}
-                                            className={`mb-3 p-4 rounded-lg border flex-row justify-between items-center ${
-                                                isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
+                                            onPress={() => toggleSpecificDay(index)}
+                                            className={`w-10 h-10 rounded-full items-center justify-center ${
+                                                (habit.specific_days || []).includes(index)
+                                                    ? 'bg-primary-500'
+                                                    : `${theme.input}`
                                             }`}
                                         >
+                                            <Text className={`font-montserrat-medium ${
+                                                (habit.specific_days || []).includes(index)
+                                                    ? 'text-white'
+                                                    : theme.text
+                                            }`}>
+                                                {day}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    ))}
+                                </View>
+                            </FormField>
+                        )}
+
+                        {habit.frequency_type === 'X_TIMES_WEEK' && (
+                            <FormField label="Times per Week" required>
+                                <View className="flex-row items-center">
+                                    <TextInput
+                                        value={String(habit.frequency_value || '')}
+                                        onChangeText={(text) => {
+                                            const value = parseInt(text);
+                                            if (!isNaN(value) && value > 0 && value <= 7) {
+                                                handleInputChange('frequency_value', value);
+                                            } else if (text === '') {
+                                                handleInputChange('frequency_value', '');
+                                            }
+                                        }}
+                                        keyboardType="numeric"
+                                        className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text} w-20 text-center`}
+                                    />
+                                    <Text className={`ml-3 font-montserrat ${theme.text}`}>
+                                        times per week
+                                    </Text>
+                                </View>
+                            </FormField>
+                        )}
+
+                        {habit.frequency_type === 'INTERVAL' && (
+                            <FormField label="Every X Days" required>
+                                <View className="flex-row items-center">
+                                    <TextInput
+                                        value={String(habit.frequency_value || '')}
+                                        onChangeText={(text) => {
+                                            const value = parseInt(text);
+                                            if (!isNaN(value) && value > 0) {
+                                                handleInputChange('frequency_value', value);
+                                            } else if (text === '') {
+                                                handleInputChange('frequency_value', '');
+                                            }
+                                        }}
+                                        keyboardType="numeric"
+                                        className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text} w-20 text-center`}
+                                    />
+                                    <Text className={`ml-3 font-montserrat ${theme.text}`}>
+                                        days
+                                    </Text>
+                                </View>
+                            </FormField>
+                        )}<FormField label="Start Date">
+                        <TouchableOpacity
+                            onPress={() => setShowStartDatePicker(true)}
+                            className={`flex-row justify-between items-center px-3 py-2.5 rounded-lg ${theme.input}`}
+                        >
+                            <View className="flex-row items-center">
+                                <Calendar size={18} className={`mr-2 ${theme.textSecondary}`} />
+                                <Text className={`font-montserrat ${theme.text}`}>
+                                    {habit.start_date
+                                        ? typeof habit.start_date === 'string'
+                                            ? habit.start_date
+                                            : formatDate(habit.start_date)
+                                        : 'Select start date'}
+                                </Text>
+                            </View>
+                            <ChevronRight size={18} className={theme.textMuted} />
+                        </TouchableOpacity>
+                    </FormField>
+
+                        <FormField label="End Date">
+                            <View className="flex-row justify-between items-center mb-2">
+                                <Text className={`text-sm font-montserrat ${theme.textMuted}`}>
+                                    Set an end date (optional)
+                                </Text>
+                                <Switch
+                                    value={!!habit.end_date}
+                                    onValueChange={(value) => {
+                                        handleInputChange('end_date', value ? new Date() : null);
+                                    }}
+                                    trackColor={{ false: isDarkMode ? '#374151' : '#D1D5DB', true: '#22C55E' }}
+                                    thumbColor="#FFFFFF"
+                                />
+                            </View>
+
+                            {habit.end_date && (
+                                <TouchableOpacity
+                                    onPress={() => setShowEndDatePicker(true)}
+                                    className={`flex-row justify-between items-center px-3 py-2.5 rounded-lg ${theme.input}`}
+                                >
+                                    <View className="flex-row items-center">
+                                        <Calendar size={18} className={`mr-2 ${theme.textSecondary}`} />
+                                        <Text className={`font-montserrat ${theme.text}`}>
+                                            {typeof habit.end_date === 'string'
+                                                ? habit.end_date
+                                                : formatDate(habit.end_date)}
+                                        </Text>
+                                    </View>
+                                    <ChevronRight size={18} className={theme.textMuted} />
+                                </TouchableOpacity>
+                            )}
+                        </FormField>
+
+                        <FormField label="Reminders">
+                            {(habit.reminders || []).length > 0 ? (
+                                <View className="mb-3">
+                                    {(habit.reminders || []).map((reminder, index) => (
+                                        <View
+                                            key={index}
+                                            className={`mb-2 p-3 rounded-lg border ${theme.border} flex-row justify-between items-center`}
+                                        >
                                             <View className="flex-row items-center">
-                                                <Bell size={18} color={isDark ? "#60A5FA" : "#3B82F6"} className="mr-3" />
-                                                <Text className={isDark ? "text-white" : "text-gray-900"}>
+                                                <Bell size={18} className={`mr-2 ${reminder.is_enabled ? 'text-primary-500' : theme.textSecondary}`} />
+                                                <Text className={`font-montserrat ${theme.text}`}>
                                                     {formatTime(reminder.time)}
                                                 </Text>
                                             </View>
-                                            <View className="flex-row">
+
+                                            <View className="flex-row items-center">
+                                                <Switch
+                                                    value={reminder.is_enabled !== false}
+                                                    onValueChange={() => toggleReminderEnabled(index)}
+                                                    trackColor={{ false: isDarkMode ? '#374151' : '#D1D5DB', true: '#22C55E' }}
+                                                    thumbColor="#FFFFFF"
+                                                    style={{ marginRight: 8 }}
+                                                />
+
                                                 <TouchableOpacity
                                                     onPress={() => {
-                                                        console.log('[DEBUG] Edit reminder:', index);
-                                                        setEditingReminderIndex(index);
-                                                        setReminderTime(new Date(reminder.time));
-                                                        setShowReminderTimePicker(true);
+                                                        setSelectedReminderIndex(index);
+                                                        setShowTimePicker(true);
                                                     }}
-                                                    className="mr-4"
+                                                    className="p-1 mr-1"
                                                 >
-                                                    <Edit2 size={18} color={isDark ? "#60A5FA" : "#3B82F6"} />
+                                                    <Clock size={16} className="text-primary-500" />
                                                 </TouchableOpacity>
+
                                                 <TouchableOpacity
-                                                    onPress={() => {
-                                                        console.log('[DEBUG] Delete reminder:', index);
-                                                        deleteReminder(index);
-                                                    }}
+                                                    onPress={() => removeReminder(index)}
+                                                    className="p-1"
                                                 >
-                                                    <Trash2 size={18} color={isDark ? "#F87171" : "#EF4444"} />
+                                                    <X size={16} className="text-red-500" />
                                                 </TouchableOpacity>
                                             </View>
                                         </View>
                                     ))}
+                                </View>
+                            ) : (
+                                <View className={`px-3 py-2.5 rounded-lg mb-2 ${theme.input}`}>
+                                    <Text className={`text-center font-montserrat ${theme.textMuted}`}>
+                                        No reminders set
+                                    </Text>
+                                </View>
+                            )}
 
-                                    <TouchableOpacity
-                                        onPress={() => {
-                                            console.log('[DEBUG] Add reminder button pressed');
-                                            setEditingReminderIndex(null);
-                                            setReminderTime(new Date());
-                                            setShowReminderTimePicker(true);
-                                        }}
-                                        className={`flex-row items-center justify-center p-4 rounded-lg border border-dashed ${
-                                            isDark ? "border-gray-600" : "border-gray-300"
-                                        }`}
-                                    >
-                                        <Plus size={18} color={isDark ? "#60A5FA" : "#3B82F6"} />
-                                        <Text className={`ml-2 ${isDark ? "text-primary-400" : "text-primary-600"} font-medium`}>
-                                            Add Reminder
+                            <TouchableOpacity
+                                onPress={() => {
+                                    setSelectedReminderIndex((habit.reminders || []).length);
+                                    setShowTimePicker(true);
+                                }}
+                                className={`flex-row items-center justify-center py-2 px-3 rounded-lg border ${theme.border} border-dashed`}
+                            >
+                                <Plus size={18} className="text-primary-500 mr-2" />
+                                <Text className="text-primary-500 font-montserrat-medium">
+                                    Add Reminder
+                                </Text>
+                            </TouchableOpacity>
+                        </FormField>
+                    </FormSection>
+                )}
+
+                {/* Tracking Section */}
+                {activeSection === "tracking" && (
+                    <FormSection title="Tracking Method">
+                        <FormField label="How would you like to track this habit?">
+                            <View className={`p-3 rounded-lg border ${theme.border} mb-4`}>
+                                <TouchableOpacity
+                                    onPress={() => setShowTrackingPicker(true)}
+                                    className="flex-row justify-between items-center"
+                                >
+                                    <View className="flex-row items-center">
+                                        {TRACKING_TYPES.find(t => t.value === habit.tracking_type)?.icon}
+                                        <Text className={`ml-2 font-montserrat ${theme.text}`}>
+                                            {TRACKING_TYPES.find(t => t.value === habit.tracking_type)?.label || 'Yes/No Completion'}
                                         </Text>
-                                    </TouchableOpacity>
-                                </FormField>
+                                    </View>
+                                    <ChevronDown size={18} className={theme.textMuted} />
+                                </TouchableOpacity>
                             </View>
-                        )}
 
-                        {/* More Settings Section */}
-                        {activeSection === "more" && (
-                            <View className="pt-4">
-                                <FormField label="Streak Management">
-                                    <View className={`p-4 rounded-lg border mb-4 ${
-                                        isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
-                                    }`}>
-                                        <View className="flex-row justify-between items-center">
-                                            <View className="flex-row items-center">
-                                                <Shield size={18} color={isDark ? "#60A5FA" : "#3B82F6"} className="mr-3" />
-                                                <Text className={`${isDark ? "text-white" : "text-gray-900"} font-medium`}>
-                                                    Enable Grace Period
-                                                </Text>
-                                            </View>
-                                            <Switch
-                                                value={habitData.grace_period_enabled}
-                                                onValueChange={(value) => {
-                                                    console.log('[DEBUG] Grace period enabled:', value);
-                                                    setHabitData(prev => ({ ...prev, grace_period_enabled: value }));
-                                                }}
-                                                trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
-                                                thumbColor="#FFFFFF"
-                                            />
-                                        </View>
-                                        <Text className={`mt-2 text-sm ${isDark ? "text-gray-400" : "text-gray-600"}`}>
-                                            Grace period allows you to maintain your streak even if you miss a day
-                                        </Text>
+                            <Text className={`text-sm font-montserrat mb-4 ${theme.textMuted}`}>
+                                {habit.tracking_type === 'BOOLEAN' && 'Simply mark the habit as complete when you finish it.'}
+                                {habit.tracking_type === 'DURATION' && 'Track how much time you spend on this habit.'}
+                                {habit.tracking_type === 'COUNT' && 'Track how many times or units you complete.'}
+                                {habit.tracking_type === 'NUMERIC' && 'Track a specific value with custom units.'}
+                            </Text>
+                        </FormField>
 
-                                        {habitData.grace_period_enabled && (
-                                            <View className="mt-3 flex-row items-center">
-                                                <TextInput
-                                                    value={habitData.grace_period_hours?.toString() || "24"}
-                                                    onChangeText={(text) => {
-                                                        console.log('[DEBUG] Grace period hours changed:', text);
-                                                        handleTextChange(text.replace(/[^0-9]/g, ""), "grace_period_hours");
-                                                    }}
-                                                    keyboardType="numeric"
-                                                    placeholder="e.g., 24"
-                                                    placeholderTextColor={isDark ? "#9CA3AF" : "#9CA3AF"}
-                                                    className={`p-3 rounded-lg border w-1/3 ${
-                                                        isDark ? "bg-gray-800 text-white border-gray-700" : "bg-white text-gray-900 border-gray-300"
-                                                    }`}
-                                                    returnKeyType="done"
-                                                    blurOnSubmit={false}
-                                                />
-                                                <Text className={`ml-3 ${isDark ? "text-gray-300" : "text-gray-700"}`}>hours</Text>
-                                            </View>
-                                        )}
-                                    </View>
-
-                                    <View className={`p-4 rounded-lg border mb-4 ${
-                                        isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
-                                    }`}>
-                                        <View className="flex-row justify-between items-center">
-                                            <View className="flex-row items-center">
-                                                <Umbrella size={18} color={isDark ? "#60A5FA" : "#3B82F6"} className="mr-3" />
-                                                <Text className={`${isDark ? "text-white" : "text-gray-900"} font-medium`}>
-                                                    Skip on Vacation
-                                                </Text>
-                                            </View>
-                                            <Switch
-                                                value={habitData.skip_on_vacation}
-                                                onValueChange={(value) => {
-                                                    console.log('[DEBUG] Skip on vacation:', value);
-                                                    setHabitData(prev => ({ ...prev, skip_on_vacation: value }));
-                                                }}
-                                                trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
-                                                thumbColor="#FFFFFF"
-                                            />
-                                        </View>
-                                        <Text className={`mt-2 text-sm ${isDark ? "text-gray-400" : "text-gray-600"}`}>
-                                            Maintain your streak when skipping during vacation mode
-                                        </Text>
-                                    </View>
-                                </FormField>
-
-                                <FormField label="Motivation">
-                                    <StyledInput
-                                        value={habitData.motivation_quote}
+                        {/* Target value fields based on tracking type */}
+                        {habit.tracking_type === 'DURATION' && (
+                            <FormField label="Duration Goal" required>
+                                <View className="flex-row items-center">
+                                    <TextInput
+                                        value={String(habit.target_duration || '')}
                                         onChangeText={(text) => {
-                                            console.log('[DEBUG] Motivation quote changed:', text);
-                                            handleTextChange(text, "motivation_quote");
+                                            const value = parseFloat(text);
+                                            if (!isNaN(value) && value > 0) {
+                                                handleInputChange('target_duration', value);
+                                            } else if (text === '') {
+                                                handleInputChange('target_duration', '');
+                                            }
                                         }}
-                                        placeholder="Add a motivational quote to keep you going"
-                                        multiline
+                                        keyboardType="numeric"
+                                        className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text} w-24 text-center`}
+                                        placeholder="0"
+                                        placeholderTextColor={isDarkMode ? '#6B7280' : '#9CA3AF'}
                                     />
-                                </FormField>
-
-                                <FormField label="Habit Building">
-                                    <View className="mb-3">
-                                        <Text className={`mb-2 text-sm ${isDark ? "text-gray-400" : "text-gray-600"}`}>
-                                            Cue (What triggers this habit?)
-                                        </Text>
-                                        <StyledInput
-                                            value={habitData.cue}
-                                            onChangeText={(text) => {
-                                                console.log('[DEBUG] Cue changed:', text);
-                                                handleTextChange(text, "cue");
-                                            }}
-                                            placeholder="e.g., After brushing teeth in the morning"
-                                        />
-                                    </View>
-
-                                    <View>
-                                        <Text className={`mb-2 text-sm ${isDark ? "text-gray-400" : "text-gray-600"}`}>
-                                            Reward (What will you gain?)
-                                        </Text>
-                                        <StyledInput
-                                            value={habitData.reward}
-                                            onChangeText={(text) => {
-                                                console.log('[DEBUG] Reward changed:', text);
-                                                handleTextChange(text, "reward");
-                                            }}
-                                            placeholder="e.g., More energy, better health"
-                                        />
-                                    </View>
-                                </FormField>
-
-                                <FormField label="Advanced Options">
-                                    <View className={`p-4 rounded-lg border mb-4 ${
-                                        isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
-                                    }`}>
-                                        <View className="flex-row justify-between items-center">
-                                            <View className="flex-row items-center">
-                                                <Bookmark size={18} color={isDark ? "#60A5FA" : "#3B82F6"} className="mr-3" />
-                                                <Text className={`${isDark ? "text-white" : "text-gray-900"} font-medium`}>
-                                                    Add to Favorites
-                                                </Text>
-                                            </View>
-                                            <Switch
-                                                value={habitData.is_favorite}
-                                                onValueChange={(value) => {
-                                                    console.log('[DEBUG] Add to favorites:', value);
-                                                    setHabitData(prev => ({ ...prev, is_favorite: value }));
-                                                }}
-                                                trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
-                                                thumbColor="#FFFFFF"
-                                            />
-                                        </View>
-                                    </View>
-
-                                    <View className={`p-4 rounded-lg border ${
-                                        isDark ? "bg-gray-700 border-gray-600" : "bg-gray-50 border-gray-200"
-                                    }`}>
-                                        <View className="flex-row justify-between items-center">
-                                            <View className="flex-row items-center">
-                                                <Shield size={18} color={isDark ? "#60A5FA" : "#3B82F6"} className="mr-3" />
-                                                <Text className={`${isDark ? "text-white" : "text-gray-900"} font-medium`}>
-                                                    Require Evidence
-                                                </Text>
-                                            </View>
-                                            <Switch
-                                                value={habitData.require_evidence}
-                                                onValueChange={(value) => {
-                                                    console.log('[DEBUG] Require evidence:', value);
-                                                    setHabitData(prev => ({ ...prev, require_evidence: value }));
-                                                }}
-                                                trackColor={{ false: isDark ? "#374151" : "#D1D5DB", true: "#3B82F6" }}
-                                                thumbColor="#FFFFFF"
-                                            />
-                                        </View>
-                                        <Text className={`mt-2 text-sm ${isDark ? "text-gray-400" : "text-gray-600"}`}>
-                                            You'll need to provide photo evidence when completing this habit
-                                        </Text>
-                                    </View>
-                                </FormField>
-                            </View>
+                                    <Text className={`ml-3 font-montserrat ${theme.text}`}>
+                                        minutes
+                                    </Text>
+                                </View>
+                            </FormField>
                         )}
-                    </ScrollView>
-                </TouchableWithoutFeedback>
-            </KeyboardAvoidingView>
-        </SafeAreaView>
+
+                        {habit.tracking_type === 'COUNT' && (
+                            <FormField label="Count Goal" required>
+                                <View className="flex-row items-center">
+                                    <TextInput
+                                        value={String(habit.target_value || '')}
+                                        onChangeText={(text) => {
+                                            const value = parseFloat(text);
+                                            if (!isNaN(value) && value > 0) {
+                                                handleInputChange('target_value', value);
+                                            } else if (text === '') {
+                                                handleInputChange('target_value', '');
+                                            }
+                                        }}
+                                        keyboardType="numeric"
+                                        className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text} w-24 text-center`}
+                                        placeholder="0"
+                                        placeholderTextColor={isDarkMode ? '#6B7280' : '#9CA3AF'}
+                                    />
+                                    <Text className={`ml-3 font-montserrat ${theme.text}`}>
+                                        count
+                                    </Text>
+                                </View>
+                            </FormField>
+                        )}
+
+                        {habit.tracking_type === 'NUMERIC' && (
+                            <FormField label="Value Goal" required>
+                                <View className="flex-row items-center">
+                                    <TextInput
+                                        value={String(habit.target_value || '')}
+                                        onChangeText={(text) => {
+                                            const value = parseFloat(text);
+                                            if (!isNaN(value) && value > 0) {
+                                                handleInputChange('target_value', value);
+                                            } else if (text === '') {
+                                                handleInputChange('target_value', '');
+                                            }
+                                        }}
+                                        keyboardType="numeric"
+                                        className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text} w-24 text-center mr-2`}
+                                        placeholder="0"
+                                        placeholderTextColor={isDarkMode ? '#6B7280' : '#9CA3AF'}
+                                    />
+
+                                    <TextInput
+                                        value={habit.units || ''}
+                                        onChangeText={(text) => handleInputChange('units', text)}
+                                        placeholder="units"
+                                        placeholderTextColor={isDarkMode ? '#6B7280' : '#9CA3AF'}
+                                        className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text} flex-1`}
+                                    />
+                                </View>
+                            </FormField>
+                        )}
+
+                        <FormField label="Points">
+                            <View className="flex-row items-center">
+                                <TextInput
+                                    value={String(habit.points_per_completion || '')}
+                                    onChangeText={(text) => {
+                                        const value = parseInt(text);
+                                        if (!isNaN(value) && value >= 0) {
+                                            handleInputChange('points_per_completion', value);
+                                        } else if (text === '') {
+                                            handleInputChange('points_per_completion', '');
+                                        }
+                                    }}
+                                    keyboardType="numeric"
+                                    className={`px-3 py-2.5 rounded-lg ${theme.input} font-montserrat ${theme.text} w-24 text-center`}
+                                    placeholder="5"
+                                    placeholderTextColor={isDarkMode ? '#6B7280' : '#9CA3AF'}
+                                />
+                                <Text className={`ml-3 font-montserrat ${theme.text}`}>
+                                    points per completion
+                                </Text>
+                            </View>
+                        </FormField>
+                    </FormSection>
+                )}
+
+                {/* Advanced Options Section */}
+                {activeSection === "more" && (
+                    <FormSection title="Advanced Options">
+                        <FormField label="Streak Protection">
+                            <View className={`p-3 rounded-lg border ${theme.border} mb-2`}>
+                                <View className="flex-row justify-between items-center">
+                                    <View className="flex-row items-center">
+                                        <Shield size={18} className={`mr-2 ${theme.textSecondary}`} />
+                                        <Text className={`font-montserrat ${theme.text}`}>
+                                            Enable Grace Period
+                                        </Text>
+                                    </View>
+                                    <Switch
+                                        value={habit.grace_period_enabled}
+                                        onValueChange={(value) => handleInputChange('grace_period_enabled', value)}
+                                        trackColor={{ false: isDarkMode ? '#374151' : '#D1D5DB', true: '#22C55E' }}
+                                        thumbColor="#FFFFFF"
+                                    />
+                                </View>
+
+                                <Text className={`mt-1 text-xs font-montserrat ${theme.textMuted}`}>
+                                    Allows you to complete the habit later without breaking your streak
+                                </Text>
+
+                                {habit.grace_period_enabled && (
+                                    <View className="mt-3 flex-row items-center">
+                                        <TextInput
+                                            value={String(habit.grace_period_hours || '')}
+                                            onChangeText={(text) => {
+                                                const value = parseInt(text);
+                                                if (!isNaN(value) && value > 0) {
+                                                    handleInputChange('grace_period_hours', value);
+                                                } else if (text === '') {
+                                                    handleInputChange('grace_period_hours', '');
+                                                }
+                                            }}
+                                            keyboardType="numeric"
+                                            className={`px-3 py-2 rounded-lg ${isDarkMode ? 'bg-gray-800' : 'bg-white'} font-montserrat ${theme.text} w-16 text-center border ${theme.border}`}
+                                        />
+                                        <Text className={`ml-2 font-montserrat ${theme.text}`}>hours</Text>
+                                    </View>
+                                )}
+                            </View>
+                        </FormField>
+                    </FormSection>
+                )}
+
+                <View className="h-20" />
+            </ScrollView>
+
+            {/* Modals */}
+            {renderDatePicker()}
+
+            <DropdownPicker
+                visible={showDomainPicker}
+                title="Select Domain"
+                options={[
+                    ...domains.map(domain => ({
+                        label: domain.name,
+                        value: domain.domain_id,
+                        icon: (
+                            <View
+                                className="w-5 h-5 rounded-full mr-2"
+                                style={{ backgroundColor: domain.color || '#22C55E' }}
+                            />
+                        )
+                    })),
+                    { label: 'Clear Selection', value: 'clear' }
+                ]}
+                onSelect={(option) => {
+                    if (option.value === 'clear') {
+                        clearDomain();
+                    } else {
+                        selectDomain(domains.find(d => d.domain_id === option.value));
+                    }
+                }}
+                onClose={() => setShowDomainPicker(false)}
+            />
+
+            <DropdownPicker
+                visible={showFrequencyPicker}
+                title="Select Frequency"
+                options={FREQUENCY_TYPES.map(type => ({
+                    label: type.label,
+                    value: type.value
+                }))}
+                onSelect={(option) => {
+                    handleInputChange('frequency_type', option.value);
+                    setShowFrequencyPicker(false);
+                }}
+                onClose={() => setShowFrequencyPicker(false)}
+            />
+
+            <DropdownPicker
+                visible={showDifficultyPicker}
+                title="Select Difficulty"
+                options={DIFFICULTY_LEVELS.map(level => ({
+                    label: level.label,
+                    value: level.value
+                }))}
+                onSelect={(option) => {
+                    handleInputChange('difficulty', option.value);
+                    setShowDifficultyPicker(false);
+                }}
+                onClose={() => setShowDifficultyPicker(false)}
+            />
+
+            <DropdownPicker
+                visible={showTrackingPicker}
+                title="Select Tracking Method"
+                options={TRACKING_TYPES.map(type => ({
+                    label: type.label,
+                    value: type.value,
+                    icon: type.icon
+                }))}
+                onSelect={(option) => {
+                    handleInputChange('tracking_type', option.value);
+                    setShowTrackingPicker(false);
+                }}
+                onClose={() => setShowTrackingPicker(false)}
+            />
+        </View>
     );
 };
 
-export default HabitForm;
+export default ModernHabitForm;

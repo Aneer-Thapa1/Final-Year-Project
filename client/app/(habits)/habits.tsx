@@ -197,7 +197,7 @@
                 case 'INTERVAL':
                     return `Every ${value} Days`;
                 default:
-                    return type ? type.replace('_', ' ') : 'Default Value'
+                    return type.replace('_', ' ');
             }
         };
 
@@ -303,7 +303,7 @@
             setIsOptionsModalVisible(false);
             router.push({
                 pathname: '(habits)/editHabit',
-                params: { habit: JSON.stringify(selectedHabit) }
+                params: { habitId: JSON.stringify(selectedHabit.habit_id) }
             });
         };
 
@@ -642,7 +642,7 @@
                                 <Text
                                     className={`text-sm mb-2 ${isDarkMode ? 'text-theme-text-secondary-dark' : 'text-theme-text-secondary-DEFAULT'}`}
                                 >
-                                    {formatFrequency(item.frequency_type || 'DAILY', item.frequency_value)}
+                                    {formatFrequency(item.frequency_type, item.frequency_value)}
                                 </Text>
 
                                 {/* Domain Name */}

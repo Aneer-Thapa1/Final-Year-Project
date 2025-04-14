@@ -13,6 +13,7 @@ const commentRoute = require('./commentRoute');
 const notificationRoute = require('./notificationRoute');
 const settingsRoute = require('./settingsRoute');
 const analyticsRoute = require('./analyticsRoute');
+const achievementsRoute = require('./achievementsRoute');
 
 const router = express.Router();
 
@@ -57,5 +58,8 @@ router.use('/settings', settingsRoute)
 
 // routes related to analytics (/api/analytics)
 router.use('/analytics', analyticsRoute)
+
+// routes related to achievements (/api/achievements)
+router.use('/achievements', achievementsRoute)
 
 module.exports = router;

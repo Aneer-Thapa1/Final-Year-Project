@@ -319,6 +319,13 @@ const getUserBlogs = async (req, res) => {
                 user_id: parseInt(user_id)
             },
             include: {
+                user: {
+                    select: {
+                        user_id: true,
+                        user_name: true,
+                        avatar: true
+                    }
+                },
                 category: {
                     select: {
                         category_id: true,

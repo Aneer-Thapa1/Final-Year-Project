@@ -9,6 +9,7 @@ import {
     setUserOnline,
     setUserOffline
 } from './chatSlice';
+import {API_BASE_URL} from "@/services/api";
 
 // Types
 interface TypingData {
@@ -38,7 +39,7 @@ interface MessageData {
 
 // Singleton socket instance
 let socket: Socket | null = null;
-const SERVER_URL = 'https://dbe9-2400-74e0-10-31cd-8def-8c40-96cf-23d2.ngrok-free.app';
+const SERVER_URL = API_BASE_URL;
 
 /**
  * Initialize the socket connection with the server

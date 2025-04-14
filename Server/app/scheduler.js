@@ -1,6 +1,5 @@
 const cron = require('node-cron');
 const streakController = require('./controllers/streakController');
-const achievementController = require('./controllers/achievementController');
 const { ReminderService } = require('./services/reminderService');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
@@ -187,22 +186,6 @@ async function createWeeklySummaryNotification(userId, completedCount, topHabits
     });
 }
 
-/**
- * Create an achievement notification
- */
-async function createAchievementNotification(userId, achievement) {
-    await createNotification({
-        user_id: userId,
-        title: 'Achievement Unlocked! 🏆',
-        content: `"${achievement.name}": ${achievement.description}${
-            achievement.points_reward ? ` (+${achievement.points_reward} points)` : ''
-        }`,
-        type: 'ACHIEVEMENT_UNLOCKED',
-        related_id: achievement.achievement_id,
-        action_url: '/achievements'
-    });
-}
-
 // Process streaks daily at midnight
 cron.schedule('0 0 * * *', async () => {
     const jobName = 'daily-streak-update';
@@ -226,117 +209,7 @@ cron.schedule('0 0 * * *', async () => {
     }
 });
 
-// Check achievements - Run daily at 1 AM after streak updates
-cron.schedule('0 1 * * *', async () => {
-    const jobName = 'daily-achievement-check';
-    logJobStatus(jobName, 'started');
-
-    try {
-        const startTime = Date.now();
-
-        // Get all active users
-        const users = await prisma.user.findMany({
-            where: {
-                onVacation: false
-            },
-            select: {
-                user_id: true,
-                user_name: true
-            }
-        });
-
-        let totalChecked = 0;
-        let totalAwarded = 0;
-
-        // Check achievements for each user
-        for (const user of users) {
-            try {
-                const result = await achievementController.checkAndAwardAchievements(user.user_id);
-                totalChecked += result.checked;
-                totalAwarded += result.awarded;
-            } catch (error) {
-                console.error(`Error checking achievements for user ${user.user_id}: ${error.message}`);
-            }
-        }
-
-        const duration = Date.now() - startTime;
-
-        logJobStatus(jobName, 'completed', {
-            duration: `${duration}ms`,
-            usersProcessed: users.length,
-            achievementsChecked: totalChecked,
-            newAchievementsAwarded: totalAwarded
-        });
-    } catch (error) {
-        logJobStatus(jobName, 'failed', {
-            error: error.message,
-            stack: error.stack
-        });
-    }
-});
-
-// Weekly full achievement backfill (every Monday at 3 AM) to catch any missed achievements
-cron.schedule('0 3 * * 1', async () => {
-    const jobName = 'weekly-achievement-backfill';
-    logJobStatus(jobName, 'started');
-
-    try {
-        const startTime = Date.now();
-
-        // Get all active users
-        const users = await prisma.user.findMany({
-            where: {
-                onVacation: false,
-                // Only process users who have been active in the last 30 days to save resources
-                lastActivity: {
-                    gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-                }
-            },
-            select: {
-                user_id: true,
-                user_name: true
-            }
-        });
-
-        let totalChecked = 0;
-        let totalAwarded = 0;
-        let processedUsers = 0;
-
-        // Check all achievements for each user (with force full check)
-        for (const user of users) {
-            try {
-                const result = await achievementController.performFullAchievementBackfill(user.user_id);
-                totalChecked += result.checked;
-                totalAwarded += result.awarded;
-                processedUsers++;
-
-                // Add a small delay to prevent database overload
-                if (processedUsers % 10 === 0) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
-            } catch (error) {
-                console.error(`Error performing achievement backfill for user ${user.user_id}: ${error.message}`);
-            }
-        }
-
-        const duration = Date.now() - startTime;
-
-        logJobStatus(jobName, 'completed', {
-            duration: `${duration}ms`,
-            usersProcessed: processedUsers,
-            totalUsers: users.length,
-            achievementsChecked: totalChecked,
-            newAchievementsAwarded: totalAwarded
-        });
-    } catch (error) {
-        logJobStatus(jobName, 'failed', {
-            error: error.message,
-            stack: error.stack
-        });
-    }
-});
-
-// Check for streak milestone achievements and events - Run after streak updates
+// Check for streak milestone notifications - Run after streak updates
 cron.schedule('5 0 * * *', async () => {
     const jobName = 'streak-milestone-check';
     logJobStatus(jobName, 'started');
@@ -344,7 +217,7 @@ cron.schedule('5 0 * * *', async () => {
     try {
         const startTime = Date.now();
 
-        // Important streak milestones to check for notifications (even if the achievement doesn't exist)
+        // Important streak milestones to check for notifications
         const milestones = [7, 14, 21, 30, 60, 90, 100, 180, 365];
 
         // Get all habits with their current streaks
@@ -385,9 +258,6 @@ cron.schedule('5 0 * * *', async () => {
                 });
 
                 notificationsSent++;
-
-                // Also check for streak-related achievements
-                await achievementController.checkAndAwardAchievements(habit.user_id);
             }
         }
 
@@ -725,9 +595,6 @@ cron.schedule('0 9 * * 0', async () => {
 
                 await createWeeklySummaryNotification(user.user_id, totalCompletions, topHabits);
                 reportsGenerated++;
-
-                // Check for weekly achievements
-                await achievementController.checkAndAwardAchievements(user.user_id);
             } catch (error) {
                 console.error(`Error generating weekly report for user ${user.user_id}: ${error.message}`);
             }
@@ -801,9 +668,6 @@ cron.schedule('0 22 * * *', async () => {
                     action_url: '/stats'
                 });
                 notificationsSent++;
-
-                // Check for achievements related to goal completion
-                await achievementController.checkAndAwardAchievements(user.user_id);
             }
         }
 
@@ -822,139 +686,29 @@ cron.schedule('0 22 * * *', async () => {
     }
 });
 
-// Monthly achievement check - Run on the 1st of each month
-cron.schedule('0 2 1 * *', async () => {
-    const jobName = 'monthly-achievement-check';
-    logJobStatus(jobName, 'started');
-
-    try {
-        const startTime = Date.now();
-
-        // Get all active users
-        const users = await prisma.user.findMany({
-            where: {
-                onVacation: false
-            },
-            select: {
-                user_id: true,
-                user_name: true
-            }
-        });
-
-        let achievementsAwarded = 0;
-
-        // Check monthly achievements for each user
-        for (const user of users) {
-            try {
-                // Specifically check for achievement types that are relevant to monthly reviews
-                const result = await achievementController.checkAndAwardAchievements(user.user_id);
-                achievementsAwarded += result.awarded;
-
-                // Get last month's stats
-                const today = new Date();
-                const lastMonth = new Date(today);
-                lastMonth.setMonth(lastMonth.getMonth() - 1);
-
-                // Check if user completed all scheduled habits last month (for Perfect Month achievement)
-                const lastMonthStart = new Date(lastMonth.getFullYear(), lastMonth.getMonth(), 1);
-                const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59);
-
-                const perfectMonth = await prisma.$transaction(async (prisma) => {
-                    // Get scheduled habit statuses
-                    const scheduledCount = await prisma.habitDailyStatus.count({
-                        where: {
-                            user_id: user.user_id,
-                            is_scheduled: true,
-                            date: {
-                                gte: lastMonthStart,
-                                lte: lastMonthEnd
-                            }
-                        }
-                    });
-
-                    // Get completed habit statuses
-                    const completedCount = await prisma.habitDailyStatus.count({
-                        where: {
-                            user_id: user.user_id,
-                            is_scheduled: true,
-                            is_completed: true,
-                            date: {
-                                gte: lastMonthStart,
-                                lte: lastMonthEnd
-                            }
-                        }
-                    });
-
-                    // If all scheduled habits were completed and there were at least 20 scheduled habits
-                    return scheduledCount >= 20 && scheduledCount === completedCount;
-                });
-
-                if (perfectMonth) {
-                    // Find the Perfect Month achievement
-                    const perfectMonthAchievement = await prisma.achievement.findFirst({
-                        where: {
-                            name: 'Perfect Month',
-                            criteria_type: 'PERFECT_MONTH'
-                        }
-                    });
-
-                    if (perfectMonthAchievement) {
-                        // Check if user already has this achievement
-                        const hasAchievement = await prisma.userAchievement.findFirst({
-                            where: {
-                                user_id: user.user_id,
-                                achievement_id: perfectMonthAchievement.achievement_id
-                            }
-                        });
-
-                        if (!hasAchievement) {
-                            // Award the achievement
-                            await achievementController.awardAchievement(user.user_id,
-                                perfectMonthAchievement.achievement_id
-                            );
-                            achievementsAwarded++;
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error(`Error checking monthly achievements for user ${user.user_id}: ${error.message}`);
-            }
-        }
-
-        const duration = Date.now() - startTime;
-
-        logJobStatus(jobName, 'completed', {
-            duration: `${duration}ms`,
-            usersProcessed: users.length,
-            achievementsAwarded: achievementsAwarded
-        });
-    } catch (error) {
-        logJobStatus(jobName, 'failed', {
-            error: error.message,
-            stack: error.stack
-        });
-    }
-});
-
-// Check for new user onboarding achievement backfill - Run for new users
+// New user welcome notification - every 30 minutes
 cron.schedule('*/30 * * * *', async () => {
-    const jobName = 'new-user-achievement-backfill';
+    const jobName = 'new-user-welcome';
     logJobStatus(jobName, 'started');
 
     try {
         const startTime = Date.now();
 
-        // Look for users created in the last 30 minutes who haven't had an achievement check yet
+        // Look for users created in the last 30 minutes who haven't received a welcome notification
         const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
 
         const newUsers = await prisma.user.findMany({
             where: {
-                registeredAt : {
+                registeredAt: {
                     gte: thirtyMinutesAgo
                 },
-                // Check if they have any achievements already to avoid rechecking
-                userAchievements: {
-                    none: {}
+                notifications: {
+                    none: {
+                        type: 'SYSTEM_MESSAGE',
+                        title: {
+                            contains: 'Welcome'
+                        }
+                    }
                 }
             },
             select: {
@@ -963,31 +717,22 @@ cron.schedule('*/30 * * * *', async () => {
             }
         });
 
-        let processedUsers = 0;
-        let totalAwarded = 0;
+        let welcomesSent = 0;
 
-        // Process each new user
+        // Send welcome notifications to new users
         for (const user of newUsers) {
             try {
-                // Perform a full achievement backfill for this new user
-                const result = await achievementController.performFullAchievementBackfill(user.user_id);
-                totalAwarded += result.awarded;
-                processedUsers++;
-
-                // Log that we've processed this new user
-                console.log(`Processed achievements for new user ${user.user_id}, awarded ${result.awarded} achievements`);
-
-                // Also create a welcome notification
+                // Create welcome notification
                 await createNotification({
                     user_id: user.user_id,
                     title: 'Welcome to HabitPulse! 👋',
-                    content: 'Start tracking your habits and earn achievements as you build positive routines. Check out your first achievements!',
+                    content: 'Start tracking your habits and build positive routines. We\'re excited to have you here!',
                     type: 'SYSTEM_MESSAGE',
-                    action_url: '/achievements'
+                    action_url: '/dashboard'
                 });
-
+                welcomesSent++;
             } catch (error) {
-                console.error(`Error processing achievements for new user ${user.user_id}: ${error.message}`);
+                console.error(`Error creating welcome notification for user ${user.user_id}: ${error.message}`);
             }
         }
 
@@ -995,8 +740,7 @@ cron.schedule('*/30 * * * *', async () => {
 
         logJobStatus(jobName, 'completed', {
             duration: `${duration}ms`,
-            newUsersProcessed: processedUsers,
-            achievementsAwarded: totalAwarded
+            welcomeNotificationsSent: welcomesSent
         });
     } catch (error) {
         logJobStatus(jobName, 'failed', {
@@ -1017,17 +761,6 @@ async function testStreakMilestoneNotification(userId, habitName, milestone, hab
         type: 'STREAK_MILESTONE',
         related_id: habitId,
         action_url: `/habits/${habitId}`
-    });
-}
-
-async function testAchievementNotification(userId, achievementName, description, points, achievementId) {
-    await createNotification({
-        user_id: userId,
-        title: 'Achievement Unlocked! 🏆',
-        content: `"${achievementName}": ${description}${points ? ` (+${points} points)` : ''}`,
-        type: 'ACHIEVEMENT_UNLOCKED',
-        related_id: achievementId,
-        action_url: '/achievements'
     });
 }
 
@@ -1112,144 +845,12 @@ async function testProgressUpdateNotification(userId, habitName, progressPercent
     });
 }
 
-/**
- * Achievement Backfill Functions
- */
-
-/**
- * Perform achievement backfill for a specific user
- * @param {number} userId - User ID to process achievements for
- * @return {Promise<Object>} - Results of the backfill process
- */
-async function performUserAchievementBackfill(userId) {
-    try {
-        console.log(`Starting achievement backfill for user ${userId}`);
-
-        // Check if user exists
-        const user = await prisma.user.findUnique({
-            where: { user_id: userId }
-        });
-
-        if (!user) {
-            throw new Error(`User with ID ${userId} not found`);
-        }
-
-        // Perform a full backfill of all achievements
-        const result = await achievementController.performFullAchievementBackfill(userId);
-
-        console.log(`Completed achievement backfill for user ${userId}. Awarded ${result.awarded} new achievements.`);
-
-        // Return detailed results
-        return {
-            success: true,
-            userId,
-            achievementsChecked: result.checked,
-            achievementsAwarded: result.awarded,
-            newAchievements: result.newAchievements
-        };
-    } catch (error) {
-        console.error(`Error performing achievement backfill for user ${userId}: ${error.message}`);
-        throw error;
-    }
-}
-
-/**
- * Perform achievement backfill for all users (admin-only function)
- * @param {number} batchSize - Number of users to process per batch (default: 50)
- * @param {boolean} activeOnly - Only process active users (default: true)
- * @return {Promise<Object>} - Results of the backfill process
- */
-async function performAllUsersAchievementBackfill(batchSize = 50, activeOnly = true) {
-    try {
-        console.log('Starting achievement backfill for all users');
-        const startTime = Date.now();
-
-        // Get user count for progress tracking
-        const where = activeOnly ? {
-            onVacation: false,
-            lastActive : {
-                gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
-            }
-        } : {};
-
-        const totalUserCount = await prisma.user.count({ where });
-        console.log(`Total users to process: ${totalUserCount}`);
-
-        let processedCount = 0;
-        let totalAwarded = 0;
-        let startCursor = null;
-
-        // Process users in batches to prevent memory issues
-        while (true) {
-            const usersQuery = {
-                where,
-                take: batchSize,
-                select: {
-                    user_id: true
-                },
-                orderBy: {
-                    user_id: 'asc'
-                }
-            };
-
-            if (startCursor) {
-                usersQuery.skip = 1;
-                usersQuery.cursor = {
-                    user_id: startCursor
-                };
-            }
-
-            const userBatch = await prisma.user.findMany(usersQuery);
-
-            if (userBatch.length === 0) {
-                break;
-            }
-
-            // Process each user in the batch
-            for (const user of userBatch) {
-                try {
-                    const result = await achievementController.performFullAchievementBackfill(user.user_id);
-                    totalAwarded += result.awarded;
-                } catch (error) {
-                    console.error(`Error processing user ${user.user_id}: ${error.message}`);
-                }
-            }
-
-            processedCount += userBatch.length;
-            startCursor = userBatch[userBatch.length - 1].user_id;
-
-            console.log(`Progress: ${processedCount}/${totalUserCount} users processed (${Math.round(processedCount / totalUserCount * 100)}%)`);
-
-            // Small delay to prevent database overload
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-
-        const duration = (Date.now() - startTime) / 1000;
-
-        console.log(`Completed achievement backfill for all users in ${duration} seconds`);
-        console.log(`Total achievements awarded: ${totalAwarded}`);
-
-        return {
-            success: true,
-            usersProcessed: processedCount,
-            totalAchievementsAwarded: totalAwarded,
-            durationSeconds: duration
-        };
-    } catch (error) {
-        console.error(`Error performing bulk achievement backfill: ${error.message}`);
-        throw error;
-    }
-}
-
 // Export these functions for testing purposes
 module.exports = {
     testStreakMilestoneNotification,
-    testAchievementNotification,
     testFriendRequestNotification,
     testChallengeInviteNotification,
     testQuoteOfTheDayNotification,
     testGoalReminderNotification,
-    testProgressUpdateNotification,
-    performUserAchievementBackfill,
-    performAllUsersAchievementBackfill
+    testProgressUpdateNotification
 };
