@@ -243,7 +243,6 @@ const Login = () => {
 
                 // Dispatch to Redux with flattened structure
                 dispatch(loginSuccess(userData));
-                console.log("here")
                 // Navigate after delay
                 setTimeout(() => {
                     router.replace('/(tabs)');

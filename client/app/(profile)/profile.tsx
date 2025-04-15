@@ -103,9 +103,7 @@ const Profile = () => {
         setBlogs(prevBlogs => prevBlogs.filter(blog => blog.blog_id !== blogId));
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     };
-
-    console.log(blogs)
-
+    
     // Handle blog update
     const handleBlogUpdated = (updatedBlog) => {
         setBlogs(prevBlogs =>

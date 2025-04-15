@@ -130,6 +130,8 @@ export default function ProfileScreen() {
         }
     };
 
+
+
     // Navigate to edit profile
     const handleEditProfile = () => {
         router.push('/(app)/edit-profile');
@@ -631,16 +633,7 @@ export default function ProfileScreen() {
 
                                         <TouchableOpacity
                                             className={`h-9 w-9 rounded-full ${isDark ? 'bg-gray-600' : 'bg-white'} items-center justify-center`}
-                                            onPress={() => {
-                                                // Navigate to chat with this friend
-                                                router.push({
-                                                    pathname: `/(chat)/direct`,
-                                                    params: {
-                                                        recipientId: friend.user_id,
-                                                        name: friend.user_name
-                                                    }
-                                                });
-                                            }}
+                                            onPress={handleMessage}
                                         >
                                             <MessageCircle size={16} color={isDark ? "#E5E7EB" : "#4B5563"} />
                                         </TouchableOpacity>
