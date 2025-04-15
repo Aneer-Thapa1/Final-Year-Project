@@ -49,7 +49,6 @@ const userSlice = createSlice({
             try {
                 // Safely extract user data with optional chaining
                 const userData = action.payload;
-console.log(userData);
                 if (!userData) {
                     console.error('Invalid user data structure');
                     return state; // Prevent state mutation if no user data

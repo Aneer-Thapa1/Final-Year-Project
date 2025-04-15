@@ -161,7 +161,8 @@ const Header = React.memo(() => {
             ])
         ).start()
 
-        console.log(userDetails.user_name)
+
+        console.log(userDetails)
         // Notification shake animation
         const shakeAnimation = Animated.sequence([
             Animated.timing(notificationShake, {
