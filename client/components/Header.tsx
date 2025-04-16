@@ -162,7 +162,6 @@ const Header = React.memo(() => {
         ).start()
 
 
-        console.log(userDetails)
         // Notification shake animation
         const shakeAnimation = Animated.sequence([
             Animated.timing(notificationShake, {
@@ -251,10 +250,10 @@ const Header = React.memo(() => {
                                     >
                                         <Text className={`text-white ${Platform.OS === 'ios' ? 'font-montserrat-bold' : 'font-montserrat-extrabold'} text-xs`}>3</Text>
                                     </Animated.View>
-                                </TouchableOpacity>
+                                </TouchableOpacity>r
 
                                 <TouchableOpacity
-                                    onPress={() => router.push('/chat')}
+                                    onPress={() => router.push('(chat)/chat')}
                                     className={`p-2 ml-2 rounded-xl ${Platform.OS === 'android' ? 'shadow' : ''}`}
                                 >
                                     <View className={`w-10 h-10 rounded-full items-center justify-center ${isDark ? 'bg-secondary-800' : 'bg-secondary-100'}`}>

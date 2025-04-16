@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import * as mime from 'react-native-mime-types';
 
-export const API_BASE_URL = 'https://0791-2400-74e0-10-31cd-d1ba-7f1f-2794-d31.ngrok-free.app';
+export const API_BASE_URL = 'https://7139-2407-5200-300-f53-1806-ad81-f655-9313.ngrok-free.app';
 
 // Set up a basic configuration for making API requests
 const api = axios.create({
@@ -12,7 +12,7 @@ const api = axios.create({
         'Content-Type': 'application/json', // Tell the server we're sending JSON data
     },
 });
-
++
 // Before sending a request, add the user's token if they are logged in
 api.interceptors.request.use(async (config) => {
     const token = await AsyncStorage.getItem('token');

@@ -1921,7 +1921,7 @@ const addGroupChatParticipants = async (req, res) => {
     try {
         const { roomId } = req.params;
         const { participants } = req.body;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         // Validate input
         if (!participants || participants.length === 0) {
@@ -1980,8 +1980,15 @@ const addGroupChatParticipants = async (req, res) => {
             select: { user_id: true, user_name: true }
         });
 
+        const user = await prisma.user.findUnique({
+            where: {
+                user_id: userId
+            }
+        })
+
+
         // Create system message about new participants
-        const systemMessageContent = `${req.user.user_name} added ${
+        const systemMessageContent = `${user.user_name} added ${
             addedUsers.map(u => u.user_name).join(', ')
         } to the group`;
 
@@ -2046,7 +2053,7 @@ const removeGroupChatParticipants = async (req, res) => {
     try {
         const { roomId } = req.params;
         const { participants } = req.body;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         // Validate input
         if (!participants || participants.length === 0) {
@@ -2181,7 +2188,7 @@ function generateDefaultGroupAvatar(groupName) {
 const getGroupChatParticipants = async (req, res) => {
     try {
         const { roomId } = req.params;
-        const userId = req.user.user_id;
+        const userId = parseInt(req.user);
 
         // Check if user is a participant
         const isParticipant = await prisma.chatParticipant.findUnique({
