@@ -35,6 +35,7 @@ import {
     markMessagesAsRead,
     updateTypingStatus
 } from '../../services/chatServices';
+import { API_BASE_URL } from '../../services/api';
 
 // Import socket service directly
 import socketService, { getSocket } from '../../store/slices/socketService';
@@ -114,8 +115,6 @@ export default function ChatDetailScreen() {
         };
     }, []);
 
-    console.log(currentUser)
-
     // Load initial data and set current user ID
     useEffect(() => {
         // If currentUser is available from Redux, store the ID in component state
@@ -166,6 +165,19 @@ export default function ChatDetailScreen() {
             return () => clearTimeout(timeoutId);
         }
     }, [messages]);
+
+    // Get properly formatted avatar URL
+    const getAvatarUrl = (avatarPath) => {
+        if (!avatarPath) return null;
+
+        // Check if it's already a full URL
+        if (avatarPath.startsWith('http://') || avatarPath.startsWith('https://')) {
+            return avatarPath;
+        }
+
+        // Generate full URL using API base URL
+        return `${API_BASE_URL}${avatarPath}`;
+    };
 
     // Set up socket event listeners
     const setupSocketListeners = () => {
@@ -695,21 +707,18 @@ export default function ChatDetailScreen() {
 
                     <View className="flex-row items-center">
                         {/* Avatar or Group Icon */}
-                        {roomDetails?.avatar ? (
+                        {roomDetails?.avatar || (isDirect && otherUser?.avatar) ? (
                             <Image
-                                source={{ uri: roomDetails.avatar }}
-                                className="h-10 w-10 rounded-full"
-                            />
-                        ) : isDirect && otherUser?.avatar ? (
-                            <Image
-                                source={{ uri: otherUser.avatar }}
+                                source={{
+                                    uri: roomDetails?.avatar
+                                        ? getAvatarUrl(roomDetails.avatar)
+                                        : getAvatarUrl(otherUser?.avatar)
+                                }}
                                 className="h-10 w-10 rounded-full"
                             />
                         ) : (
                             <View className={`h-10 w-10 rounded-full items-center justify-center ${
-                                isDirect
-                                    ? 'bg-primary-500'
-                                    : 'bg-amber-500'
+                                isDirect ? 'bg-primary-500' : 'bg-amber-500'
                             }`}>
                                 <Text className="text-white text-lg font-montserrat-bold">
                                     {getDisplayName()[0]?.toUpperCase() || (isDirect ? 'C' : 'G')}
@@ -759,11 +768,9 @@ export default function ChatDetailScreen() {
                         onPress={() => {
                             // Navigate to chat info/settings
                             router.push({
-                                pathname: isDirect
-                                    ? `/(chat)/info/${otherUser?.user_id}`
-                                    : `/(chat)/info/${roomId}`,
+                                pathname: `/(chat)/info/`,
                                 params: {
-                                    name: getDisplayName() || ''
+                                    roomId: roomId || ''
                                 }
                             });
                         }}
@@ -805,8 +812,8 @@ export default function ChatDetailScreen() {
                         style={{ flex: 1 }}
                     />
 
-                    {/*/!* Scroll to Top Button *!/*/}
-                    {/*<ScrollToTopButton />*/}
+                    {/* Scroll to Top Button */}
+                    {messages.length > 10 && <ScrollToTopButton />}
 
                     {/* Typing Indicator at Bottom */}
                     {typingUsers.length > 0 && <TypingIndicator />}

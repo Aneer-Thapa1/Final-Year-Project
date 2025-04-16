@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'next/navigation'; // or 'expo-router' depending on your setup
 
 // Async function to load user data from AsyncStorage
 export const loadUser = createAsyncThunk('user/loadUser', async (_, { rejectWithValue }) => {
@@ -18,6 +19,54 @@ export const loadUser = createAsyncThunk('user/loadUser', async (_, { rejectWith
         return rejectWithValue('Failed to load user data');
     }
 });
+
+// Async function to update user data
+export const updateUser = createAsyncThunk(
+    'user/updateUser',
+    async (userData, { rejectWithValue }) => {
+        try {
+            // Get current user data from storage
+            const currentUserData = await AsyncStorage.getItem('user');
+
+            if (!currentUserData) {
+                return rejectWithValue('No user data found');
+            }
+
+            // Merge current data with new data
+            const updatedUser = {
+                ...JSON.parse(currentUserData),
+                ...userData
+            };
+
+            // Update AsyncStorage
+            await AsyncStorage.setItem('user', JSON.stringify(updatedUser));
+
+            return updatedUser;
+        } catch (error) {
+            console.error('Update user error:', error);
+            return rejectWithValue('Failed to update user data');
+        }
+    }
+);
+
+// Async function to handle logout with redirect
+export const logoutUser = createAsyncThunk(
+    'user/logoutUser',
+    async (_, { dispatch }) => {
+        try {
+            // Clear storage
+            await AsyncStorage.multiRemove(['user', 'token']);
+
+            // Dispatch regular logout action
+            dispatch(logout());
+
+            return true;
+        } catch (error) {
+            console.error('Logout error:', error);
+            return false;
+        }
+    }
+);
 
 // Define the initial state for the user slice
 const initialState = {
@@ -112,13 +161,10 @@ const userSlice = createSlice({
             state.loading = false;
         },
 
-        // Action: Logout the user
+        // Action: Logout the user (without redirect)
         logout(state) {
             // Reset to initial state
             Object.assign(state, initialState);
-
-            // Clear storage
-            AsyncStorage.multiRemove(['user', 'token']);
         },
 
         // Action: Update user profile
@@ -156,6 +202,7 @@ const userSlice = createSlice({
     },
     extraReducers: (builder) => {
         builder
+            // Load user cases
             .addCase(loadUser.pending, (state) => {
                 state.loading = true;
             })
@@ -178,6 +225,40 @@ const userSlice = createSlice({
             .addCase(loadUser.rejected, (state, action) => {
                 state.loading = false;
                 state.error = action.payload;
+            })
+
+            // Update user cases
+            .addCase(updateUser.pending, (state) => {
+                state.loading = true;
+            })
+            .addCase(updateUser.fulfilled, (state, action) => {
+                const userData = action.payload;
+
+                // Update state with new user data
+                Object.keys(userData).forEach(key => {
+                    if (state.hasOwnProperty(key)) {
+                        state[key] = userData[key];
+                    }
+                });
+
+                state.loading = false;
+            })
+            .addCase(updateUser.rejected, (state, action) => {
+                state.loading = false;
+                state.error = action.payload;
+            })
+
+            // Logout user cases
+            .addCase(logoutUser.pending, (state) => {
+                state.loading = true;
+            })
+            .addCase(logoutUser.fulfilled, (state) => {
+                // State will be reset by the regular logout action
+                state.loading = false;
+            })
+            .addCase(logoutUser.rejected, (state) => {
+                state.loading = false;
+                // Don't change authenticated state on logout failure
             });
     },
 });

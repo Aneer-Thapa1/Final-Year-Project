@@ -22,7 +22,6 @@ interface UserStatusData {
     userId: string;
     timestamp: string;
 }
-
 interface MessageData {
     room_id: number | string;
     message_id: string;
