@@ -78,7 +78,7 @@ export const checkAuthStatus = async () => {
 
 
         if (response) {
-            return response;
+            return response.data.user;
         } else {
             await AsyncStorage.removeItem('token'); // Clear invalid token
             return null;

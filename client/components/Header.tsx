@@ -28,7 +28,7 @@ const quotes = [
     { text: "Discipline is the bridge between goals and accomplishment.", author: "Jim Rohn" },
     { text: "First we make our habits, then our habits make us.", author: "Charles C. Noble" },
     { text: "Chains of habit are too light to be felt until they are too heavy to be broken.", author: "Warren Buffett" },
-    { text: "You’ll never change your life until you change something you do daily.", author: "John C. Maxwell" },
+    { text: "You'll never change your life until you change something you do daily.", author: "John C. Maxwell" },
     { text: "Success doesn't come from what you do occasionally, it comes from what you do consistently.", author: "Marie Forleo" },
     { text: "Discipline is choosing between what you want now and what you want most.", author: "Abraham Lincoln" },
     { text: "Good habits are worth being fanatical about.", author: "John Irving" },
@@ -43,7 +43,7 @@ const quotes = [
 
     // Growth & Mindset
     { text: "Every strike brings me closer to the next home run.", author: "Babe Ruth" },
-    { text: "Don’t be afraid to give up the good to go for the great.", author: "John D. Rockefeller" },
+    { text: "Don't be afraid to give up the good to go for the great.", author: "John D. Rockefeller" },
     { text: "Push yourself, because no one else is going to do it for you.", author: "Unknown" },
     { text: "Opportunities don't happen. You create them.", author: "Chris Grosser" },
     { text: "Success usually comes to those who are too busy to be looking for it.", author: "Henry David Thoreau" },
@@ -58,18 +58,18 @@ const quotes = [
     { text: "Strength does not come from winning. Your struggles develop your strengths.", author: "Arnold Schwarzenegger" },
     { text: "Fall seven times, stand up eight.", author: "Japanese Proverb" },
     { text: "Doubt kills more dreams than failure ever will.", author: "Suzy Kassem" },
-    { text: "Don’t count the days, make the days count.", author: "Muhammad Ali" },
+    { text: "Don't count the days, make the days count.", author: "Muhammad Ali" },
     { text: "I am not a product of my circumstances. I am a product of my decisions.", author: "Stephen R. Covey" },
-    { text: "You miss 100% of the shots you don’t take.", author: "Wayne Gretzky" },
+    { text: "You miss 100% of the shots you don't take.", author: "Wayne Gretzky" },
     { text: "Discipline is the silent force at work that breeds success.", author: "Unknown" },
 
     // Purpose & Focus
     { text: "Clarity precedes success.", author: "Robin Sharma" },
     { text: "When your why is strong enough, you will find your how.", author: "Unknown" },
     { text: "If you want to change the world, change yourself.", author: "Mahatma Gandhi" },
-    { text: "Don’t let what you cannot do interfere with what you can do.", author: "John Wooden" },
-    { text: "If you spend too much time thinking about a thing, you’ll never get it done.", author: "Bruce Lee" },
-    { text: "It always seems impossible until it’s done.", author: "Nelson Mandela" },
+    { text: "Don't let what you cannot do interfere with what you can do.", author: "John Wooden" },
+    { text: "If you spend too much time thinking about a thing, you'll never get it done.", author: "Bruce Lee" },
+    { text: "It always seems impossible until it's done.", author: "Nelson Mandela" },
     { text: "You don't have to be great to start, but you have to start to be great.", author: "Zig Ziglar" },
     { text: "Be not afraid of going slowly. Be afraid only of standing still.", author: "Chinese Proverb" },
 
@@ -210,6 +210,20 @@ const Header = React.memo(() => {
         outputRange: [0.6, 1]
     })
 
+    // Fixed the username rendering to properly handle all conditions
+    const username = () => {
+        if (userDetails?.user?.user_name) return userDetails.user.user_name;
+        if (userDetails?.user_name) return userDetails.user_name;
+        return "User"; // Default fallback
+    };
+
+    // Fixed the avatar source to properly handle all conditions
+    const avatarSource = () => {
+        if (userDetails?.user?.avatar) return userDetails.user.avatar;
+        if (userDetails?.avatar) return userDetails.avatar;
+        return fallbackAvatar;
+    };
+
     return (
         <View className={`mb-${Platform.OS === 'ios' ? '10' : '5'} relative`}>
             <View className={`${isDark ? 'bg-theme-card-dark' : 'bg-white'} ${Platform.OS === 'ios' ? 'rounded-b-[60px]' : 'rounded-b-[30px]'} ${Platform.OS === 'android' ? 'shadow-lg' : ''}`}>
@@ -221,11 +235,11 @@ const Header = React.memo(() => {
                                 className={`flex-row items-center gap-3 ${Platform.OS === 'android' ? 'p-1' : ''}`}
                             >
                                 <Image
-                                    source={userDetails?.user?.avatar || fallbackAvatar || userDetails?.avatar }
+                                    source={avatarSource()}
                                     className="w-9 h-9 rounded-full"
                                 />
                                 <Text className={`text-xl ${Platform.OS === 'ios' ? 'font-montserrat-medium' : 'font-montserrat-bold'} ${isDark ? 'text-theme-text-primary-dark' : 'text-theme-text-primary'}`}>
-                                    Hi, {userDetails?.user?.user_name || userDetails?.user_name}
+                                    Hi, {username()}
                                 </Text>
                             </TouchableOpacity>
 
@@ -250,7 +264,7 @@ const Header = React.memo(() => {
                                     >
                                         <Text className={`text-white ${Platform.OS === 'ios' ? 'font-montserrat-bold' : 'font-montserrat-extrabold'} text-xs`}>3</Text>
                                     </Animated.View>
-                                </TouchableOpacity>r
+                                </TouchableOpacity>
 
                                 <TouchableOpacity
                                     onPress={() => router.push('(chat)/chat')}
