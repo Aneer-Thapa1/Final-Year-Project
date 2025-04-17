@@ -72,21 +72,23 @@ import {
 import {
     getUserAnalytics,
     getHabitAnalytics,
-    getStreakAnalysis,
-    getHabitDomains,
-    getTimePatterns,
-    getCompletionHeatmap,
-    getAIInsights,
+    getContributionHeatmap,
+    getHabitProgressAnalytics,
+    getMoodAnalytics,
+    getDashboardAnalytics,
+    getPersonalizedInsights,
+    getProgressMilestones,
     getStreakMilestones,
     getPointsBreakdown,
     exportAnalytics,
-    getHabitSuggestions,
-    getPerformanceBenchmark,
-    getHabitComparisons
+    getHabitComparisons,
+    getHabitDomains,
+    getTimePatterns
 } from '../../services/analyticsService';
 
 // Import habit service
 import { getUserHabits, getHabitDetails } from '../../services/habitService';
+import {useSelector} from "react-redux";
 
 // Constants for layout and styling
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -125,6 +127,8 @@ const Analytics = () => {
     const scrollViewRef = useRef(null);
     const insightAnimation = useRef(new Animated.Value(0)).current;
 
+    const userDetails = useSelector((state) => state.user)
+
     // State management
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
@@ -149,6 +153,9 @@ const Analytics = () => {
     const [benchmarks, setBenchmarks] = useState(null);
     const [suggestions, setSuggestions] = useState([]);
     const [streakMilestones, setStreakMilestones] = useState([]);
+    const [personalizedInsights, setPersonalizedInsights] = useState(null);
+    const [upcomingMilestones, setUpcomingMilestones] = useState(null);
+    const [heatmapData, setHeatmapData] = useState(null);
 
     // UI controls
     const [showTooltip, setShowTooltip] = useState(false);
@@ -320,18 +327,14 @@ const Analytics = () => {
                 setDomains(domainsResponse.data);
             }
 
-            // Fetch streak milestones
-            const milestonesResponse = await getStreakMilestones('all', true);
-            if (milestonesResponse) {
-                setStreakMilestones(milestonesResponse);
-            }
-
             // Fetch analytics data
             await Promise.all([
                 fetchOverallAnalytics(),
                 fetchHabitAnalytics(),
                 fetchInsights(),
-                fetchHabitSuggestions()
+                fetchHeatmapData(),
+                fetchPersonalizedInsights(),
+                fetchProgressMilestones()
             ]);
 
         } catch (error) {
@@ -403,18 +406,16 @@ const Analytics = () => {
         });
     };
 
+
+
     // Fetch overall analytics data
     const fetchOverallAnalytics = async () => {
         try {
-            const analyticsData = await getUserAnalytics(period, true);
-            if (analyticsData) {
-                setAnalytics(analyticsData);
+            const dashboardData = await getDashboardAnalytics(userDetails.userId);
+            if (dashboardData) {
+                setAnalytics(dashboardData);
 
-                // Fetch benchmarks for comparison
-                const benchmarkData = await getPerformanceBenchmark(null, 'completion', 'average');
-                if (benchmarkData) {
-                    setBenchmarks(benchmarkData);
-                }
+
             }
         } catch (error) {
             console.error('Error fetching overall analytics:', error);
@@ -428,10 +429,10 @@ const Analytics = () => {
 
         try {
             setLoadingHabit(true);
-            const result = await getHabitAnalytics(selectedHabit, period, true, 50, true);
+            const result = await getHabitProgressAnalytics(selectedHabit, period);
 
-            if (result && result.success && result.data) {
-                setHabitAnalytics(result.data);
+            if (result) {
+                setHabitAnalytics(result);
             }
         } catch (error) {
             console.error('Error fetching habit analytics:', error);
@@ -440,31 +441,152 @@ const Analytics = () => {
         }
     };
 
-    // Fetch AI insights
-    const fetchInsights = async () => {
+    // Fetch heatmap data
+    const fetchHeatmapData = async () => {
         try {
-            const insightsData = await getAIInsights(selectedHabit);
-            if (insightsData && insightsData.length > 0) {
-                setInsights(insightsData);
-            } else {
-                // Generate placeholder insights if API doesn't return any
-                generateFallbackInsights();
+            const heatmap = await getContributionHeatmap(userDetails.user_id, period === 'year' ? 'year' : 'quarter');
+            if (heatmap) {
+                setHeatmapData(heatmap);
             }
         } catch (error) {
-            console.error('Error fetching AI insights:', error);
+            console.error('Error fetching heatmap data:', error);
+        }
+    };
+
+
+
+    // Fetch personalized insights
+    const fetchPersonalizedInsights = async () => {
+        try {
+            const insights = await getPersonalizedInsights(userDetails.userId);
+            if (insights) {
+                setPersonalizedInsights(insights);
+
+                // Prepare insights for the insights panel
+                const formattedInsights = [];
+
+                // Strengths
+                if (insights.strengths && insights.strengths.length > 0) {
+                    insights.strengths.forEach(strength => {
+                        formattedInsights.push({
+                            id: `strength-${formattedInsights.length}`,
+                            title: `${strength.type === 'domain' ? strength.name : 'Strong'} Performance`,
+                            description: strength.message,
+                            type: 'positive',
+                            icon: <Sparkles size={20} className="text-success-500" />,
+                            action: "View Details"
+                        });
+                    });
+                }
+
+                // Improvement areas
+                if (insights.improvements && insights.improvements.length > 0) {
+                    insights.improvements.forEach(improvement => {
+                        formattedInsights.push({
+                            id: `improvement-${formattedInsights.length}`,
+                            title: `Improvement Opportunity`,
+                            description: improvement.message,
+                            type: 'warning',
+                            icon: <Target size={20} className="text-warning-500" />,
+                            action: "See How"
+                        });
+                    });
+                }
+
+                // Suggestions
+                if (insights.suggestions && insights.suggestions.length > 0) {
+                    insights.suggestions.forEach(suggestion => {
+                        let icon = <Lightbulb size={20} className="text-primary-500" />;
+
+                        if (suggestion.type === 'streak') {
+                            icon = <Flame size={20} className="text-accent-500" />;
+                        } else if (suggestion.type === 'time') {
+                            icon = <Clock size={20} className="text-secondary-500" />;
+                        }
+
+                        formattedInsights.push({
+                            id: `suggestion-${formattedInsights.length}`,
+                            title: suggestion.type === 'streak' ? 'Streak Opportunity' :
+                                suggestion.type === 'time' ? 'Optimal Timing' : 'Smart Suggestion',
+                            description: suggestion.message,
+                            type: 'suggestion',
+                            icon: icon,
+                            action: "Apply"
+                        });
+                    });
+                }
+
+                // Add insights to the insights panel
+                if (formattedInsights.length > 0) {
+                    setInsights(formattedInsights);
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching personalized insights:', error);
             generateFallbackInsights();
         }
     };
 
-    // Fetch habit suggestions
-    const fetchHabitSuggestions = async () => {
+    // Fetch progress milestones
+    const fetchProgressMilestones = async () => {
         try {
-            const suggestionsData = await getHabitSuggestions();
-            if (suggestionsData && suggestionsData.length > 0) {
-                setSuggestions(suggestionsData);
+            const milestones = await getProgressMilestones();
+            if (milestones) {
+                setUpcomingMilestones(milestones);
+
+                // Fetch streak milestones for the achievements section
+                const streakMilestonesData = [];
+
+                if (milestones.streakMilestones && milestones.streakMilestones.length > 0) {
+                    milestones.streakMilestones.forEach(milestone => {
+                        streakMilestonesData.push({
+                            milestone: milestone.nextMilestone,
+                            label: `${milestone.nextMilestone}-Day Streak`,
+                            completed: false,
+                            progress: Math.round((milestone.currentStreak / milestone.nextMilestone) * 100),
+                            count: 0,
+                            points: milestone.nextMilestone * 10 // Example points calculation
+                        });
+                    });
+                }
+
+                // Add completed milestones from achievements
+                if (milestones.stats && milestones.stats.totalCurrentStreakDays > 0) {
+                    const completedMilestones = [7, 14, 21, 30, 60, 90];
+                    completedMilestones.forEach(days => {
+                        if (milestones.stats.totalCurrentStreakDays >= days) {
+                            streakMilestonesData.push({
+                                milestone: days,
+                                label: `${days}-Day Streak`,
+                                completed: true,
+                                progress: 100,
+                                count: 1,
+                                points: days * 10
+                            });
+                        }
+                    });
+                }
+
+                setStreakMilestones(streakMilestonesData);
             }
         } catch (error) {
-            console.error('Error fetching habit suggestions:', error);
+            console.error('Error fetching progress milestones:', error);
+        }
+    };
+
+    // Fetch AI insights
+    const fetchInsights = async () => {
+        try {
+            // If we already have personalized insights, don't fetch additional AI insights
+            if (insights && insights.length > 0) {
+                return;
+            }
+
+            // Generate placeholder insights if we don't have personalized insights
+            generateFallbackInsights();
+        } catch (error) {
+            console.error('Error fetching AI insights:', error);
+            generateFallbackInsights();
         }
     };
 
@@ -616,7 +738,7 @@ const Analytics = () => {
     // Refetch data when period changes
     useEffect(() => {
         if (!loading && habits.length > 0) {
-            Promise.all([fetchOverallAnalytics(), fetchHabitAnalytics()]);
+            Promise.all([fetchOverallAnalytics(), fetchHabitAnalytics(), fetchHeatmapData()]);
         }
     }, [period, habits.length, loading]);
 
@@ -629,7 +751,7 @@ const Analytics = () => {
 
     // Prepare chart data for day of week completion
     const weekdayCompletionData = useMemo(() => {
-        if (!analytics || !analytics.completion_by_day) {
+        if (!analytics || !analytics.summary || !analytics.weekStatus) {
             return {
                 labels: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
                 datasets: [{ data: [0, 0, 0, 0, 0, 0, 0] }]
@@ -637,9 +759,11 @@ const Analytics = () => {
         }
 
         return {
-            labels: analytics.completion_by_day.map(day => day.day.substring(0, 3)),
+            labels: analytics.weekStatus.map(day => day.name.substring(0, 3)),
             datasets: [{
-                data: analytics.completion_by_day.map(day => day.completion_rate || 0),
+                data: analytics.weekStatus.map(day =>
+                    day.total > 0 ? Math.round((day.completed / day.total) * 100) : 0
+                ),
                 color: (opacity = 1) => `rgba(34, 197, 94, ${opacity})`,
                 strokeWidth: 2,
             }]
@@ -714,8 +838,6 @@ const Analytics = () => {
             acc[weekLabel].push(item.streak);
             return acc;
         }, {});
-
-        // Continuing from the previous code...
 
         // Convert to chart format
         const labels = Object.keys(weekData);
@@ -1260,1010 +1382,430 @@ const Analytics = () => {
                         trendValue={Math.abs(overallStats.completionTrend)}
                     />
                     <StatsCard
-                        title="Total Habits"
-                        value={overallStats.totalHabits}
+                        title="Consistency Score"
+                        value={`${overallStats.consistencyScore}`}
                         icon={<Activity size={20} className="text-success-500" />}
-                        subtitle={`${overallStats.activeHabits} active now`}
-                        colorClass="success"
+                        subtitle="Out of 100"
+                        colorClass={getConsistencyColor(overallStats.consistencyScore)}
                     />
                     <StatsCard
-                        title="Points Earned"
-                        value={overallStats.pointsEarned}
-                        icon={<Zap size={20} className="text-secondary-500" />}
-                        subtitle="All time total"
+                        title="Total Completions"
+                        value={overallStats.totalCompletions}
+                        icon={<CheckCircle size={20} className="text-secondary-500" />}
+                        subtitle={`Active habits: ${overallStats.activeHabits}`}
                         colorClass="secondary"
                     />
                 </ScrollView>
 
+                {/* Period Selector */}
+                <PeriodSelector />
+
                 {/* View Mode Selector */}
                 <ViewModeSelector />
 
-                {/* Period Selector for both modes */}
-                <PeriodSelector />
+                {/* Habit Selector (only show in habit-specific view mode) */}
+                {viewMode === 'habit' && <HabitSelector />}
 
-                {/* Loading indicator when refreshing data */}
-                {refreshing && (
-                    <View className="h-20 justify-center items-center">
+                {/* Loading indicators while data updates */}
+                {loading && (
+                    <View className="items-center py-8">
                         <ActivityIndicator size="large" color={isDark ? '#4ade80' : '#22c55e'} />
+                        <Text className="mt-4 font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
+                            Loading data...
+                        </Text>
                     </View>
                 )}
 
-                {/* Content based on view mode */}
-                {viewMode === 'overall' ? (
-                    // OVERALL VIEW
+                {/* Main Analytics Content */}
+                {!loading && (
                     <>
-                        {/* Performance Overview */}
+                        {/* Performance Section */}
                         <CollapsibleSection
-                            title="Performance Overview"
-                            icon={<Activity size={20} className="text-primary-500" />}
+                            title="Performance"
+                            icon={<TrendingUp size={24} className="text-primary-500 dark:text-primary-400" />}
                             isExpanded={expandedSection === 'performance'}
                             onToggle={() => toggleSection('performance')}
                         >
-                            <View className="flex-row justify-between bg-theme-background dark:bg-theme-background-dark rounded-lg p-4 mb-4">
-                                <View className="items-center">
-                                    <Text className="text-2xl font-montserrat-bold text-success-500 dark:text-success-dark">
-                                        {analytics?.stats?.completion_rate || 0}%
-                                    </Text>
-                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mt-1">
-                                        Completion Rate
-                                    </Text>
-                                </View>
-
-                                <View className="w-px h-4/5 self-center bg-theme-border dark:bg-theme-border-dark" />
-
-                                <View className="items-center">
-                                    <Text className="text-2xl font-montserrat-bold text-primary-500 dark:text-primary-400">
-                                        {analytics?.stats?.points_earned || 0}
-                                    </Text>
-                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mt-1">
-                                        Points Earned
-                                    </Text>
-                                </View>
-
-                                <View className="w-px h-4/5 self-center bg-theme-border dark:bg-theme-border-dark" />
-
-                                <View className="items-center">
-                                    <Text className="text-2xl font-montserrat-bold text-accent-500 dark:text-accent-400">
-                                        {overallStats.consistencyScore}
-                                    </Text>
-                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mt-1">
-                                        Consistency Score
-                                    </Text>
-                                </View>
-                            </View>
-
-                            {/* Benchmark comparison if available */}
-                            {benchmarks && (
-                                <View className="bg-theme-background dark:bg-theme-background-dark rounded-lg p-4 mb-4">
-                                    <Text className="text-sm font-montserrat-medium text-theme-text-primary dark:text-theme-text-primary-dark mb-2">
-                                        How You Compare
-                                    </Text>
-
-                                    <View className="flex-row items-center">
-                                        <View className="flex-1">
-                                            <View className="h-1.5 bg-theme-card dark:bg-theme-card-dark rounded-full overflow-hidden">
-                                                <View
-                                                    className="h-full bg-primary-500 dark:bg-primary-400"
-                                                    style={{ width: `${analytics?.stats?.completion_rate || 0}%` }}
-                                                />
-                                            </View>
-                                            <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mt-1">
-                                                You: {analytics?.stats?.completion_rate || 0}%
-                                            </Text>
-                                        </View>
-
-                                        <View className="mx-2 w-px h-10 bg-theme-border dark:bg-theme-border-dark" />
-
-                                        <View className="flex-1">
-                                            <View className="h-1.5 bg-theme-card dark:bg-theme-card-dark rounded-full overflow-hidden">
-                                                <View
-                                                    className="h-full bg-secondary-500 dark:bg-secondary-400"
-                                                    style={{ width: `${benchmarks.average_completion || 0}%` }}
-                                                />
-                                            </View>
-                                            <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mt-1">
-                                                Average: {benchmarks.average_completion || 0}%
-                                            </Text>
-                                        </View>
-                                    </View>
-                                </View>
-                            )}
-
-                            <View className="flex-row flex-wrap">
-                                <MetricCard
-                                    title="Completed"
-                                    value={analytics?.stats?.completed_days || 0}
-                                    suffix="days"
-                                    icon={<Check size={16} className="text-success-500 dark:text-success-dark" />}
-                                    colorClass="success"
-                                />
-
-                                <MetricCard
-                                    title="Missed"
-                                    value={analytics?.stats?.missed_days || 0}
-                                    suffix="days"
-                                    icon={<X size={16} className="text-error-500 dark:text-error-dark" />}
-                                    colorClass="error"
-                                />
-
-                                <MetricCard
-                                    title="Longest Streak"
-                                    value={analytics?.stats?.longest_streak || 0}
-                                    suffix="days"
-                                    icon={<Flame size={16} className="text-accent-500 dark:text-accent-400" />}
-                                    colorClass="accent"
-                                />
-
-                                <MetricCard
-                                    title="Active Habits"
-                                    value={overallStats.activeHabits}
-                                    suffix={`/${overallStats.totalHabits}`}
-                                    icon={<Activity size={16} className="text-primary-500 dark:text-primary-400" />}
-                                    colorClass="primary"
-                                />
-                            </View>
-                        </CollapsibleSection>
-
-                        {/* Domain Performance */}
-                        {domains.length > 0 && (
-                            <CollapsibleSection
-                                title="Domain Performance"
-                                icon={<BarChart2 size={20} className="text-primary-500" />}
-                                isExpanded={expandedSection === 'domains'}
-                                onToggle={() => toggleSection('domains')}
-                            >
-                                <View className="mb-4">
-                                    <BarChart
-                                        data={domainPerformanceData}
-                                        width={SCREEN_WIDTH - 40}
-                                        height={220}
-                                        chartConfig={getChartConfig()}
-                                        style={{ borderRadius: 16, marginVertical: 8 }}
-                                        fromZero={true}
-                                        showValuesOnTopOfBars={true}
-                                        withInnerLines={false}
-                                        yAxisSuffix="%"
-                                        segments={5}
-                                    />
-                                </View>
-
-                                <Text className="text-base font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark mt-2 mb-3">
-                                    Domain Statistics
-                                </Text>
-
-                                {domains.slice(0, 5).map((domain, index) => (
-                                    <View
-                                        key={index}
-                                        className={`bg-theme-background dark:bg-theme-background-dark rounded-lg p-3 mb-2.5 border-l-4`}
-                                        style={{
-                                            borderColor: domain.color ||
-                                                (DOMAIN_ICONS[domain.name]?.color || '#22c55e')
-                                        }}
-                                    >
-                                        <View className="flex-row justify-between items-center">
-                                            <View className="flex-row items-center">
-                                                <View className="p-1.5 rounded-md mr-2" style={{
-                                                    backgroundColor: DOMAIN_ICONS[domain.name]?.bgColor || '#dcfce7'
-                                                }}>
-                                                    {DOMAIN_ICONS[domain.name]?.icon || <Sparkles size={20} color="#22c55e" />}
-                                                </View>
-                                                <Text className="font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark text-base">
-                                                    {domain.name}
-                                                </Text>
-                                            </View>
-                                            <View className="flex-row items-center">
-                                                <Flame size={14} className="text-accent-500 dark:text-accent-400" />
-                                                <Text className="text-xs text-accent-600 dark:text-accent-300 ml-1 font-montserrat-medium">
-                                                    {domain.stats?.avg_streak?.toFixed(1) || 0} avg streak
-                                                </Text>
-                                            </View>
-                                        </View>
-
-                                        <View className="flex-row mt-3">
-                                            <View className="flex-1">
-                                                <Text className="text-xs text-theme-text-muted dark:text-theme-text-muted-dark font-montserrat">
-                                                    Total Habits
-                                                </Text>
-                                                <Text className="font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark text-sm">
-                                                    {domain.stats?.total_habits || 0}
-                                                </Text>
-                                            </View>
-
-                                            <View className="flex-1">
-                                                <Text className="text-xs text-theme-text-muted dark:text-theme-text-muted-dark font-montserrat">
-                                                    Completion Today
-                                                </Text>
-                                                <Text className="font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark text-sm">
-                                                    {domain.stats?.completed_today || 0}/{domain.stats?.scheduled_today || 0}
-                                                </Text>
-                                            </View>
-
-                                            <View className="flex-1">
-                                                <Text className="text-xs text-theme-text-muted dark:text-theme-text-muted-dark font-montserrat">
-                                                    Points
-                                                </Text>
-                                                <Text className="font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark text-sm">
-                                                    {domain.stats?.total_points || 0}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                    </View>
-                                ))}
-                            </CollapsibleSection>
-                        )}
-
-                        {/* Completion by Time */}
-                        <CollapsibleSection
-                            title="Completion Patterns"
-                            icon={<Clock size={20} className="text-primary-500" />}
-                            isExpanded={expandedSection === 'timePatterns'}
-                            onToggle={() => toggleSection('timePatterns')}
-                        >
-                            {/* Time view selector buttons */}
-                            <View className="flex-row mb-4">
-                                <TouchableOpacity
-                                    onPress={() => setSelectedTimeView('weekday')}
-                                    className={`flex-1 py-2 ${
-                                        selectedTimeView === 'weekday'
-                                            ? 'border-b-2 border-primary-500 dark:border-primary-400'
-                                            : 'border-b border-theme-border dark:border-theme-border-dark'
-                                    }`}
-                                >
-                                    <Text className={`text-center font-montserrat-medium ${
-                                        selectedTimeView === 'weekday'
-                                            ? 'text-primary-600 dark:text-primary-400'
-                                            : 'text-theme-text-muted dark:text-theme-text-muted-dark'
-                                    }`}>
-                                        By Day of Week
-                                    </Text>
-                                </TouchableOpacity>
-
-                                <TouchableOpacity
-                                    onPress={() => setSelectedTimeView('time_of_day')}
-                                    className={`flex-1 py-2 ${
-                                        selectedTimeView === 'time_of_day'
-                                            ? 'border-b-2 border-primary-500 dark:border-primary-400'
-                                            : 'border-b border-theme-border dark:border-theme-border-dark'
-                                    }`}
-                                >
-                                    <Text className={`text-center font-montserrat-medium ${
-                                        selectedTimeView === 'time_of_day'
-                                            ? 'text-primary-600 dark:text-primary-400'
-                                            : 'text-theme-text-muted dark:text-theme-text-muted-dark'
-                                    }`}>
-                                        By Time of Day
-                                    </Text>
-                                </TouchableOpacity>
-                            </View>
-
-                            {selectedTimeView === 'weekday' ? (
-                                // Weekday completion chart
+                            {viewMode === 'overall' ? (
                                 <>
-                                    <View>
-                                        <BarChart
-                                            data={weekdayCompletionData}
-                                            width={SCREEN_WIDTH - 40}
-                                            height={220}
-                                            chartConfig={getChartConfig()}
-                                            style={{ borderRadius: 16, marginVertical: 8 }}
-                                            fromZero={true}
-                                            showValuesOnTopOfBars={true}
-                                            withInnerLines={false}
-                                            yAxisSuffix="%"
+                                    <View className="mb-6">
+                                        <SectionTitle
+                                            icon={<BarChart2 size={20} className="text-primary-500" />}
+                                            title="Completion Rate by Day"
                                         />
+                                        <View className="mt-2">
+                                            <BarChart
+                                                data={weekdayCompletionData}
+                                                width={SCREEN_WIDTH - 48}
+                                                height={220}
+                                                yAxisSuffix="%"
+                                                chartConfig={getChartConfig()}
+                                                style={{
+                                                    borderRadius: 16,
+                                                    marginVertical: 8,
+                                                }}
+                                                fromZero={true}
+                                                showValuesOnTopOfBars={true}
+                                            />
+                                        </View>
                                     </View>
 
-                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mt-3 mb-3">
-                                        This chart shows your completion rate for each day of the week across all habits.
-                                        Identify your strongest and weakest days to optimize your habit schedule.
-                                    </Text>
-
-                                    {/* Day-by-day breakdown */}
-                                    {analytics && analytics.completion_by_day && (
+                                    <View className="mb-6">
+                                        <SectionTitle
+                                            icon={<PieChartIcon size={20} className="text-secondary-500" />}
+                                            title="Domain Performance"
+                                        />
                                         <View className="mt-2">
-                                            {analytics.completion_by_day.map((day, index) => {
-                                                // Find best and worst days
-                                                const rates = analytics.completion_by_day.map(d => d.completion_rate);
-                                                const maxRate = Math.max(...rates);
-                                                const minRate = Math.min(...rates.filter(r => r > 0));
-
-                                                const isBest = day.completion_rate === maxRate && day.completion_rate > 0;
-                                                const isWorst = day.completion_rate === minRate && day.completion_rate > 0;
-
-                                                return (
-                                                    <View
-                                                        key={index}
-                                                        className={`flex-row items-center justify-between py-2 ${
-                                                            index < analytics.completion_by_day.length - 1 ? 'border-b border-theme-border dark:border-theme-border-dark' : ''
-                                                        }`}
-                                                    >
-                                                        <Text className={`text-theme-text-primary dark:text-theme-text-primary-dark ${
-                                                            isBest || isWorst ? 'font-montserrat-bold' : 'font-montserrat'
-                                                        }`}>
-                                                            {day.day}
-                                                        </Text>
-
-                                                        <View className="flex-1 px-3">
-                                                            <View className="h-1.5 bg-theme-background dark:bg-theme-background-dark rounded-full overflow-hidden">
-                                                                <View className={`h-full ${
-                                                                    isBest ? 'bg-success-500 dark:bg-success-dark' :
-                                                                        isWorst ? 'bg-error-500 dark:bg-error-dark' :
-                                                                            'bg-primary-500 dark:bg-primary-400'
-                                                                }`} style={{ width: `${day.completion_rate}%` }} />
-                                                            </View>
-                                                        </View>
-
-                                                        <View className="flex-row items-center">
-                                                            <Text className={`font-montserrat-semibold ${
-                                                                isBest ? 'text-success-600 dark:text-success-dark' :
-                                                                    isWorst ? 'text-error-600 dark:text-error-dark' :
-                                                                        'text-theme-text-primary dark:text-theme-text-primary-dark'
-                                                            }`}>
-                                                                {day.completion_rate}%
-                                                            </Text>
-
-                                                            {isBest && (
-                                                                <Trophy size={14} className="text-accent-500 dark:text-accent-400 ml-1" />
-                                                            )}
-                                                        </View>
-                                                    </View>
-                                                );
-                                            })}
+                                            <BarChart
+                                                data={domainPerformanceData}
+                                                width={SCREEN_WIDTH - 48}
+                                                height={220}
+                                                yAxisSuffix="%"
+                                                chartConfig={{
+                                                    ...getChartConfig(),
+                                                    color: (opacity = 1) => isDark ? `rgba(168, 85, 247, ${opacity})` : `rgba(168, 85, 247, ${opacity})`,
+                                                    fillShadowGradient: isDark ? '#a855f7' : '#a855f7',
+                                                }}
+                                                style={{
+                                                    borderRadius: 16,
+                                                    marginVertical: 8,
+                                                }}
+                                                fromZero={true}
+                                                showValuesOnTopOfBars={true}
+                                            />
                                         </View>
-                                    )}
+                                    </View>
+
+                                    <View className="mb-4">
+                                        <SectionTitle
+                                            icon={<Calendar size={20} className="text-accent-500" />}
+                                            title="Habit Contribution"
+                                        />
+                                        <View className="mt-2">
+                                            {heatmapData ? (
+                                                <ContributionGraph
+                                                    values={heatmapData}
+                                                    endDate={new Date()}
+                                                    numDays={84}
+                                                    width={SCREEN_WIDTH - 48}
+                                                    height={220}
+                                                    chartConfig={getHeatmapConfig()}
+                                                    style={{
+                                                        borderRadius: 16,
+                                                        marginVertical: 8,
+                                                    }}
+                                                    tooltipDataAttrs={(value) => {
+                                                        return {
+                                                            'data-tip': `${value.date}: ${value.count} habits completed`,
+                                                        };
+                                                    }}
+                                                />
+                                            ) : (
+                                                <View className="h-[220] justify-center items-center">
+                                                    <ActivityIndicator size="small" color={isDark ? '#4ade80' : '#22c55e'} />
+                                                </View>
+                                            )}
+                                        </View>
+                                    </View>
                                 </>
                             ) : (
-                                // Time of day patterns
                                 <>
-                                    {analytics && analytics.time_patterns && analytics.time_patterns.length > 0 ? (
-                                        analytics.time_patterns.map((segment, index) => {
-                                            // Find the most productive time period
-                                            const mostProductiveIndex = analytics.time_patterns.reduce(
-                                                (maxIndex, current, i, arr) =>
-                                                    current.count > arr[maxIndex].count ? i : maxIndex,
-                                                0
-                                            );
+                                    {loadingHabit ? (
+                                        <View className="h-[220] justify-center items-center">
+                                            <ActivityIndicator size="small" color={isDark ? '#4ade80' : '#22c55e'} />
+                                        </View>
+                                    ) : habitAnalytics ? (
+                                        <>
+                                            {/* Habit-specific metrics */}
+                                            <View className="flex-row flex-wrap mb-6">
+                                                <MetricCard
+                                                    title="Current Streak"
+                                                    value={habitAnalytics.current_streak || 0}
+                                                    icon={<Flame size={16} className="text-accent-500" />}
+                                                    suffix="days"
+                                                    colorClass="accent"
+                                                    trend={habitAnalytics.streak_trend > 0 ? 'up' : (habitAnalytics.streak_trend < 0 ? 'down' : 'neutral')}
+                                                />
+                                                <MetricCard
+                                                    title="Best Streak"
+                                                    value={habitAnalytics.best_streak || 0}
+                                                    icon={<Trophy size={16} className="text-warning-500" />}
+                                                    suffix="days"
+                                                    colorClass="warning"
+                                                />
+                                                <MetricCard
+                                                    title="Completion Rate"
+                                                    value={`${habitAnalytics.completion_rate || 0}%`}
+                                                    icon={<CheckCircle size={16} className="text-success-500" />}
+                                                    colorClass="success"
+                                                    trend={habitAnalytics.completion_trend > 0 ? 'up' : (habitAnalytics.completion_trend < 0 ? 'down' : 'neutral')}
+                                                />
+                                                <MetricCard
+                                                    title="Total Completions"
+                                                    value={habitAnalytics.total_completions || 0}
+                                                    icon={<CheckCircle size={16} className="text-primary-500" />}
+                                                    colorClass="primary"
+                                                />
+                                            </View>
 
-                                            const isMostProductive = index === mostProductiveIndex && segment.count > 0;
-
-                                            return (
-                                                <View key={index} className={`mb-3 ${
-                                                    isMostProductive ? 'bg-primary-50 dark:bg-primary-900 dark:bg-opacity-20 rounded-lg p-2' : ''
-                                                }`}>
-                                                    <View className="flex-row justify-between items-center mb-1">
-                                                        <View className="flex-row items-center">
-                                                            <Text className={`${
-                                                                isMostProductive ? 'font-montserrat-semibold text-primary-700 dark:text-primary-300' : 'font-montserrat text-theme-text-primary dark:text-theme-text-primary-dark'
-                                                            }`}>
-                                                                {segment.name}
-                                                            </Text>
-                                                            {isMostProductive && (
-                                                                <View className="bg-primary-100 dark:bg-primary-800 px-1.5 py-0.5 rounded ml-2">
-                                                                    <Text className="text-xs font-montserrat-medium text-primary-700 dark:text-primary-300">
-                                                                        Most Productive
-                                                                    </Text>
-                                                                </View>
-                                                            )}
-                                                        </View>
-                                                        <Text className={`font-montserrat-semibold ${
-                                                            isMostProductive ? 'text-primary-700 dark:text-primary-300' : 'text-theme-text-muted dark:text-theme-text-muted-dark'
-                                                        }`}>
-                                                            {segment.count} ({segment.rate || 0}%)
-                                                        </Text>
-                                                    </View>
-                                                    <View className="h-2 bg-theme-background dark:bg-theme-background-dark rounded-full overflow-hidden">
-                                                        <View
-                                                            className={`h-full ${
-                                                                isMostProductive ? 'bg-primary-500 dark:bg-primary-400' : 'bg-primary-400 dark:bg-primary-700'
-                                                            }`}
-                                                            style={{ width: `${segment.rate || 0}%` }}
-                                                        />
-                                                    </View>
+                                            <View className="mb-6">
+                                                <SectionTitle
+                                                    icon={<BarChart2 size={20} className="text-primary-500" />}
+                                                    title="Completion by Day of Week"
+                                                />
+                                                <View className="mt-2">
+                                                    <BarChart
+                                                        data={habitWeekdayData}
+                                                        width={SCREEN_WIDTH - 48}
+                                                        height={220}
+                                                        yAxisSuffix="%"
+                                                        chartConfig={getChartConfig()}
+                                                        style={{
+                                                            borderRadius: 16,
+                                                            marginVertical: 8,
+                                                        }}
+                                                        fromZero={true}
+                                                        showValuesOnTopOfBars={true}
+                                                    />
                                                 </View>
-                                            );
-                                        })
+                                            </View>
+
+                                            <View className="mb-6">
+                                                <SectionTitle
+                                                    icon={<TrendingUp size={20} className="text-secondary-500" />}
+                                                    title="Streak Progression"
+                                                />
+                                                <View className="mt-2">
+                                                    <LineChart
+                                                        data={streakProgressionData}
+                                                        width={SCREEN_WIDTH - 48}
+                                                        height={220}
+                                                        chartConfig={{
+                                                            ...getChartConfig(),
+                                                            color: (opacity = 1) => isDark ? `rgba(236, 72, 153, ${opacity})` : `rgba(236, 72, 153, ${opacity})`,
+                                                            fillShadowGradient: isDark ? '#ec4899' : '#ec4899',
+                                                        }}
+                                                        style={{
+                                                            borderRadius: 16,
+                                                            marginVertical: 8,
+                                                        }}
+                                                        bezier
+                                                    />
+                                                </View>
+                                            </View>
+                                        </>
                                     ) : (
-                                        <View className="items-center py-8">
-                                            <Clock size={32} className="text-theme-text-muted dark:text-theme-text-muted-dark mb-2" />
-                                            <Text className="text-theme-text-muted dark:text-theme-text-muted-dark text-center font-montserrat">
-                                                Not enough data to show time patterns yet.
-                                                Continue logging your habits!
+                                        <View className="py-10 items-center">
+                                            <Text className="text-theme-text-muted dark:text-theme-text-muted-dark font-montserrat-medium">
+                                                Select a habit to view detailed analytics
                                             </Text>
                                         </View>
                                     )}
-
-                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mt-3">
-                                        This shows when you typically complete your habits throughout the day.
-                                        Knowing your most productive times can help you schedule habits more effectively.
-                                    </Text>
                                 </>
                             )}
                         </CollapsibleSection>
 
-                        {/* Activity Calendar */}
-                        {analytics && analytics.monthly_distribution && analytics.monthly_distribution.length > 0 && (
-                            <CollapsibleSection
-                                title="Activity Calendar"
-                                icon={<Calendar size={20} className="text-primary-500" />}
-                                isExpanded={expandedSection === 'calendar'}
-                                onToggle={() => toggleSection('calendar')}
-                            >
-                                <View className="my-2.5">
-                                    <ContributionGraph
-                                        values={analytics.monthly_distribution}
-                                        endDate={new Date()}
-                                        numDays={90}
-                                        width={SCREEN_WIDTH - 40}
-                                        height={220}
-                                        chartConfig={getHeatmapConfig()}
-                                        tooltipDataAttrs={(value) => ({ 'aria-label': `${value.date}: ${value.count} habits` })}
-                                        squareSize={16}
-                                        style={{ borderRadius: 16 }}
-                                    />
+                        {/* Time Patterns Section */}
+                        <CollapsibleSection
+                            title="Time Patterns"
+                            icon={<Clock size={24} className="text-secondary-500 dark:text-secondary-400" />}
+                            isExpanded={expandedSection === 'timepatterns'}
+                            onToggle={() => toggleSection('timepatterns')}
+                        >
+                            <View className="mb-4">
+                                <View className="flex-row mb-4">
+                                    <TouchableOpacity
+                                        onPress={() => setSelectedTimeView('weekday')}
+                                        className={`flex-1 py-2 ${selectedTimeView === 'weekday' ? 'border-b-2 border-secondary-500' : ''}`}
+                                    >
+                                        <Text className={`text-center font-montserrat-medium ${
+                                            selectedTimeView === 'weekday'
+                                                ? 'text-secondary-700 dark:text-secondary-300'
+                                                : 'text-theme-text-muted dark:text-theme-text-muted-dark'
+                                        }`}>
+                                            Day of Week
+                                        </Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        onPress={() => setSelectedTimeView('time_of_day')}
+                                        className={`flex-1 py-2 ${selectedTimeView === 'time_of_day' ? 'border-b-2 border-secondary-500' : ''}`}
+                                    >
+                                        <Text className={`text-center font-montserrat-medium ${
+                                            selectedTimeView === 'time_of_day'
+                                                ? 'text-secondary-700 dark:text-secondary-300'
+                                                : 'text-theme-text-muted dark:text-theme-text-muted-dark'
+                                        }`}>
+                                            Time of Day
+                                        </Text>
+                                    </TouchableOpacity>
                                 </View>
 
-                                <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mt-2">
-                                    This calendar shows your habit activity over time. Darker colors indicate more habits completed on that day.
-                                </Text>
-
-                                {/* Current streak indicator */}
-                                {analytics.streaks && analytics.streaks.current_streak > 0 && (
-                                    <View className="mt-4 bg-accent-50 dark:bg-accent-900 dark:bg-opacity-20 rounded-lg p-3 flex-row items-center">
-                                        <View className="bg-accent-100 dark:bg-accent-800 p-2 rounded-full mr-3">
-                                            <Flame size={20} className="text-accent-500 dark:text-accent-400" />
-                                        </View>
-                                        <View className="flex-1">
-                                            <Text className="font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                Current Streak: {analytics.streaks.current_streak} days
-                                            </Text>
-                                            <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                Started on {formatDate(analytics.streaks.streak_start_date)}
-                                            </Text>
-                                        </View>
-                                    </View>
-                                )}
-                            </CollapsibleSection>
-                        )}
-
-                        {/* Streak Milestones */}
-                        {streakMilestones && streakMilestones.length > 0 && (
-                            <CollapsibleSection
-                                title="Streak Milestones"
-                                icon={<Award size={20} className="text-primary-500" />}
-                                isExpanded={expandedSection === 'streaks'}
-                                onToggle={() => toggleSection('streaks')}
-                            >
-                                {streakMilestones.map((milestone, index) => (
-                                    <AchievementCard key={milestone.milestone} milestone={milestone} index={index} />
-                                ))}
-
-                                <TouchableOpacity
-                                    className="mt-2 flex-row items-center justify-center py-3 bg-theme-background dark:bg-theme-background-dark rounded-lg"
-                                >
-                                    <Trophy size={16} className="text-accent-500 dark:text-accent-400 mr-2" />
-                                    <Text className="font-montserrat-medium text-theme-text-primary dark:text-theme-text-primary-dark">
-                                        View All Achievements
-                                    </Text>
-                                </TouchableOpacity>
-                            </CollapsibleSection>
-                        )}
-
-                        {/* Habit Suggestions */}
-                        {suggestions && suggestions.length > 0 && (
-                            <CollapsibleSection
-                                title="Suggested Habits"
-                                icon={<Lightbulb size={20} className="text-primary-500" />}
-                                isExpanded={expandedSection === 'suggestions'}
-                                onToggle={() => toggleSection('suggestions')}
-                            >
-                                <Text className="text-sm font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark mb-4">
-                                    Based on your current habits and performance, here are some suggestions to enhance your routine:
-                                </Text>
-
-                                {suggestions.map((suggestion, index) => (
-                                    <MotiView
-                                        key={index}
-                                        from={{ opacity: 0, translateY: 20 }}
-                                        animate={{ opacity: 1, translateY: 0 }}
-                                        transition={{ delay: index * 100, type: 'timing', duration: 300 }}
-                                        className="bg-theme-card dark:bg-theme-card-dark rounded-lg p-4 mb-3 border border-theme-border dark:border-theme-border-dark"
-                                    >
-                                        <View className="flex-row">
-                                            <View
-                                                className="p-2 rounded-lg mr-3"
-                                                style={{
-                                                    backgroundColor: DOMAIN_ICONS[suggestion.domain]?.bgColor || '#f0fdf4'
-                                                }}
-                                            >
-                                                {DOMAIN_ICONS[suggestion.domain]?.icon || <Sparkles size={20} color="#22c55e" />}
-                                            </View>
-                                            <View className="flex-1">
-                                                <Text className="text-base font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                    {suggestion.name}
-                                                </Text>
-                                                <Text className="text-xs font-montserrat-medium text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                    {suggestion.domain} • {suggestion.frequency || 'Daily'}
-                                                </Text>
-                                                <Text className="text-sm font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark mt-2">
-                                                    {suggestion.description}
-                                                </Text>
-                                            </View>
-                                        </View>
-                                        <TouchableOpacity className="mt-3 self-end bg-primary-500 dark:bg-primary-600 px-4 py-2 rounded-lg">
-                                            <Text className="text-white font-montserrat-semibold">Add Habit</Text>
-                                        </TouchableOpacity>
-                                    </MotiView>
-                                ))}
-                            </CollapsibleSection>
-                        )}
-                    </>
-                ) : (
-                    // HABIT-SPECIFIC VIEW
-                    <>
-                        {/* Habit Selector */}
-                        <HabitSelector />
-
-                        {/* Loading indicator when switching habits */}
-                        {loadingHabit ? (
-                            <View className="h-40 justify-center items-center">
-                                <ActivityIndicator size="large" color={isDark ? '#4ade80' : '#22c55e'} />
-                                <Text className="mt-2 font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                    Loading habit data...
-                                </Text>
-                            </View>
-                        ) : habitAnalytics ? (
-                            <>
-                                {/* Habit Header with Key Metrics */}
-                                <View className="bg-theme-card dark:bg-theme-card-dark rounded-xl p-4 mb-4">
-                                    <View className="flex-row justify-between items-start mb-3">
-                                        <View className="flex-1">
-                                            <Text className="text-lg font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                {habitAnalytics.name}
-                                            </Text>
-                                            {habitAnalytics.domain && (
-                                                <View className="flex-row items-center mt-1">
-                                                    <View className="w-2 h-2 rounded-full mr-1.5"
-                                                          style={{
-                                                              backgroundColor: habitAnalytics.domain.color ||
-                                                                  (DOMAIN_ICONS[habitAnalytics.domain.name]?.color || '#22c55e')
-                                                          }}
-                                                    />
-                                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                        {habitAnalytics.domain.name}
+                                {selectedTimeView === 'weekday' ? (
+                                    <View>
+                                        {/* Weekday visualization */}
+                                        <Text className="mb-2 text-sm font-montserrat-medium text-theme-text-secondary dark:text-theme-text-secondary-dark">
+                                            Your most productive days
+                                        </Text>
+                                        <View className="flex-row flex-wrap">
+                                            {analytics && analytics.weekStatus ? (
+                                                analytics.weekStatus
+                                                    .sort((a, b) => {
+                                                        const rateA = a.total > 0 ? (a.completed / a.total) * 100 : 0;
+                                                        const rateB = b.total > 0 ? (b.completed / b.total) * 100 : 0;
+                                                        return rateB - rateA;
+                                                    })
+                                                    .map((day, index) => {
+                                                        const completionRate = day.total > 0 ? Math.round((day.completed / day.total) * 100) : 0;
+                                                        return (
+                                                            <View key={day.name} className="w-1/3 p-1">
+                                                                <MotiView
+                                                                    from={{ opacity: 0, scale: 0.9 }}
+                                                                    animate={{ opacity: 1, scale: 1 }}
+                                                                    transition={{ delay: index * 100, type: 'timing', duration: 400 }}
+                                                                    className="bg-theme-card dark:bg-theme-card-dark rounded-lg p-3 items-center"
+                                                                >
+                                                                    <Text className="text-xs font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
+                                                                        {day.name.substring(0, 3)}
+                                                                    </Text>
+                                                                    <View className="my-2 h-1.5 w-full bg-theme-background dark:bg-theme-background-dark rounded-full overflow-hidden">
+                                                                        <View
+                                                                            className={`h-full rounded-full ${
+                                                                                completionRate >= 80 ? 'bg-success-500' :
+                                                                                    completionRate >= 60 ? 'bg-success-500' :
+                                                                                        completionRate >= 40 ? 'bg-warning-500' :
+                                                                                            completionRate >= 20 ? 'bg-warning-500' :
+                                                                                                'bg-error-500'
+                                                                            }`}
+                                                                            style={{ width: `${completionRate}%` }}
+                                                                        />
+                                                                    </View>
+                                                                    <Text className="text-xs font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark">
+                                                                        {completionRate}%
+                                                                    </Text>
+                                                                </MotiView>
+                                                            </View>
+                                                        );
+                                                    })
+                                            ) : (
+                                                <View className="py-4 w-full items-center">
+                                                    <Text className="text-theme-text-muted dark:text-theme-text-muted-dark">
+                                                        No data available
                                                     </Text>
                                                 </View>
                                             )}
                                         </View>
-
-                                        <View className="bg-primary-100 dark:bg-primary-900 p-2.5 rounded-lg">
-                                            <Flame size={24} className="text-primary-500 dark:text-primary-400" />
+                                    </View>
+                                ) : (
+                                    <View>
+                                        {/* Time of day visualization */}
+                                        <Text className="mb-2 text-sm font-montserrat-medium text-theme-text-secondary dark:text-theme-text-secondary-dark">
+                                            Your most productive times
+                                        </Text>
+                                        <View className="flex-row flex-wrap">
+                                            {TIME_PERIODS.map((period, index) => {
+                                                // Generate random percentages for demonstration
+                                                // In a real app, this would come from the analytics data
+                                                const completionRate = Math.floor(Math.random() * 100);
+                                                return (
+                                                    <View key={period.id} className="w-1/2 p-1">
+                                                        <MotiView
+                                                            from={{ opacity: 0, scale: 0.9 }}
+                                                            animate={{ opacity: 1, scale: 1 }}
+                                                            transition={{ delay: index * 100, type: 'timing', duration: 400 }}
+                                                            className="bg-theme-card dark:bg-theme-card-dark rounded-lg p-3"
+                                                        >
+                                                            <View className="flex-row items-center mb-1">
+                                                                {period.icon}
+                                                                <Text className="ml-1.5 text-xs font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
+                                                                    {period.name}
+                                                                </Text>
+                                                            </View>
+                                                            <Text className="text-xs text-theme-text-muted dark:text-theme-text-muted-dark mb-2">
+                                                                {period.timeRange}
+                                                            </Text>
+                                                            <View className="h-1.5 w-full bg-theme-background dark:bg-theme-background-dark rounded-full overflow-hidden">
+                                                                <View
+                                                                    className={`h-full rounded-full ${
+                                                                        completionRate >= 80 ? 'bg-success-500' :
+                                                                            completionRate >= 60 ? 'bg-success-500' :
+                                                                                completionRate >= 40 ? 'bg-warning-500' :
+                                                                                    completionRate >= 20 ? 'bg-warning-500' :
+                                                                                        'bg-error-500'
+                                                                    }`}
+                                                                    style={{ width: `${completionRate}%` }}
+                                                                />
+                                                            </View>
+                                                            <Text className="mt-1 text-xs font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark">
+                                                                {completionRate}% completion
+                                                            </Text>
+                                                        </MotiView>
+                                                    </View>
+                                                );
+                                            })}
                                         </View>
                                     </View>
+                                )}
+                            </View>
+                        </CollapsibleSection>
 
-                                    {/* Date range for the analysis */}
-                                    {habitAnalytics.date_range && (
-                                        <View className="bg-primary-50 dark:bg-primary-900 dark:bg-opacity-20 rounded-md py-1 px-2 mb-3">
-                                            <Text className="text-xs font-montserrat text-primary-700 dark:text-primary-300">
-                                                Analysis Period: {formatDate(habitAnalytics.date_range.start)} - {formatDate(habitAnalytics.date_range.end)}
-                                            </Text>
-                                        </View>
-                                    )}
-
-                                    <View className="flex-row justify-between">
-                                        <View className="items-center">
-                                            <Text className="text-xl font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                {habitAnalytics.streaks?.current_streak || 0}
-                                            </Text>
-                                            <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                Current Streak
-                                            </Text>
-                                        </View>
-
-                                        <View className="items-center">
-                                            <Text className="text-xl font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                {habitAnalytics.streaks?.longest_streak || 0}
-                                            </Text>
-                                            <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                Longest Streak
-                                            </Text>
-                                        </View>
-
-                                        <View className="items-center">
-                                            <Text className="text-xl font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                {habitAnalytics.stats?.completion_rate || 0}%
-                                            </Text>
-                                            <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                Completion Rate
-                                            </Text>
-                                        </View>
+                        {/* Achievements Section */}
+                        <CollapsibleSection
+                            title="Achievements"
+                            icon={<Award size={24} className="text-accent-500 dark:text-accent-400" />}
+                            isExpanded={expandedSection === 'achievements'}
+                            onToggle={() => toggleSection('achievements')}
+                        >
+                            {streakMilestones && streakMilestones.length > 0 ? (
+                                <View className="mb-4">
+                                    <SectionTitle
+                                        icon={<Trophy size={20} className="text-accent-500" />}
+                                        title="Streak Milestones"
+                                    />
+                                    <View className="mt-2">
+                                        {streakMilestones.map((milestone, index) => (
+                                            <AchievementCard
+                                                key={`milestone-${milestone.milestone}`}
+                                                milestone={milestone}
+                                                index={index}
+                                            />
+                                        ))}
                                     </View>
                                 </View>
-
-                                {/* Habit Sections */}
-                                {/* Streak Progression */}
-                                <CollapsibleSection
-                                    title="Streak Progression"
-                                    icon={<TrendingUp size={20} className="text-primary-500" />}
-                                    isExpanded={expandedSection === 'habitStreak'}
-                                    onToggle={() => toggleSection('habitStreak')}
-                                >
-                                    <View className="mb-3">
-                                        <LineChart
-                                            data={streakProgressionData}
-                                            width={SCREEN_WIDTH - 40}
-                                            height={220}
-                                            chartConfig={getChartConfig()}
-                                            style={{ borderRadius: 16 }}
-                                            bezier
-                                        />
-                                    </View>
-
-                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mb-4">
-                                        This chart shows how your streak has progressed over time. Look for patterns to understand what helps you maintain consistency.
+                            ) : (
+                                <View className="py-8 items-center">
+                                    <Crown size={32} className="text-theme-text-muted dark:text-theme-text-muted-dark mb-2" />
+                                    <Text className="text-center text-theme-text-muted dark:text-theme-text-muted-dark font-montserrat">
+                                        Keep building your streaks to unlock achievements!
                                     </Text>
+                                </View>
+                            )}
+                        </CollapsibleSection>
 
-                                    {/* Streak stats */}
-                                    <View className="flex-row flex-wrap">
-                                        <MetricCard
-                                            title="Current Streak"
-                                            value={habitAnalytics.streaks?.current_streak || 0}
-                                            suffix="days"
-                                            icon={<Flame size={16} className="text-accent-500 dark:text-accent-400" />}colorClass="accent"
-                                        />
-
-                                        <MetricCard
-                                            title="Longest Streak"
-                                            value={habitAnalytics.streaks?.longest_streak || 0}
-                                            suffix="days"
-                                            icon={<Trophy size={16} className="text-success-500 dark:text-success-400" />}
-                                            colorClass="success"
-                                        />
-
-                                        <MetricCard
-                                            title="Average Streak"
-                                            value={habitAnalytics.streaks?.average_streak?.toFixed(1) || 0}
-                                            suffix="days"
-                                            icon={<Hash size={16} className="text-primary-500 dark:text-primary-400" />}
-                                            colorClass="primary"
-                                        />
-
-                                        <MetricCard
-                                            title="Streak Breaks"
-                                            value={habitAnalytics.streaks?.streak_breaks || 0}
-                                            suffix="times"
-                                            icon={<X size={16} className="text-error-500 dark:text-error-400" />}
-                                            colorClass="error"
-                                        />
-                                    </View>
-                                </CollapsibleSection>
-
-                                {/* Completion Rate by Day */}
-                                <CollapsibleSection
-                                    title="Completion by Day"
-                                    icon={<Calendar size={20} className="text-primary-500" />}
-                                    isExpanded={expandedSection === 'habitDayCompletion'}
-                                    onToggle={() => toggleSection('habitDayCompletion')}
+                        {/* Export and Share Section */}
+                        <View className="mt-2 mb-8">
+                            <View className="flex-row">
+                                <TouchableOpacity
+                                    onPress={handleExportAnalytics}
+                                    className="flex-1 mr-2 flex-row justify-center items-center bg-theme-card dark:bg-theme-card-dark py-3 px-4 rounded-lg border border-theme-border dark:border-theme-border-dark"
                                 >
-                                    <View className="mb-3">
-                                        <BarChart
-                                            data={habitWeekdayData}
-                                            width={SCREEN_WIDTH - 40}
-                                            height={220}
-                                            chartConfig={getChartConfig()}
-                                            style={{ borderRadius: 16 }}
-                                            fromZero={true}
-                                            showValuesOnTopOfBars={true}
-                                            withInnerLines={false}
-                                            yAxisSuffix="%"
-                                        />
-                                    </View>
-
-                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark mb-4">
-                                        This chart shows your completion rate for each day of the week for this habit.
-                                        You can use this to identify which days might need more attention.
+                                    <Download size={18} className="text-primary-600 dark:text-primary-400 mr-2" />
+                                    <Text className="font-montserrat-semibold text-primary-600 dark:text-primary-400">
+                                        Export Data
                                     </Text>
+                                </TouchableOpacity>
 
-                                    {/* Scheduled vs. Completed days */}
-                                    {habitAnalytics.day_analysis && (
-                                        <View className="bg-theme-background dark:bg-theme-background-dark rounded-lg p-4">
-                                            <Text className="text-sm font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark mb-3">
-                                                Scheduled vs. Completed
-                                            </Text>
-
-                                            {habitAnalytics.day_analysis.map((day, index) => (
-                                                <View key={index} className="flex-row items-center justify-between mb-2">
-                                                    <Text className="w-24 font-montserrat text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                        {day.day}
-                                                    </Text>
-
-                                                    <View className="flex-1 mr-2">
-                                                        <View className="h-2.5 bg-theme-card dark:bg-theme-card-dark rounded-full overflow-hidden">
-                                                            <View
-                                                                className="h-full bg-primary-500 dark:bg-primary-400"
-                                                                style={{ width: `${(day.completions / day.scheduled) * 100}%` }}
-                                                            />
-                                                        </View>
-                                                    </View>
-
-                                                    <Text className="text-xs font-montserrat-medium text-theme-text-secondary dark:text-theme-text-secondary-dark">
-                                                        {day.completions}/{day.scheduled}
-                                                    </Text>
-                                                </View>
-                                            ))}
-                                        </View>
-                                    )}
-                                </CollapsibleSection>
-
-                                {/* Time of Day Analysis */}
-                                {habitAnalytics.time_patterns && habitAnalytics.time_patterns.length > 0 && (
-                                    <CollapsibleSection
-                                        title="Optimal Time of Day"
-                                        icon={<Clock size={20} className="text-primary-500" />}
-                                        isExpanded={expandedSection === 'habitTimePatterns'}
-                                        onToggle={() => toggleSection('habitTimePatterns')}
-                                    >
-                                        <Text className="text-sm font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark mb-3">
-                                            Here's when you tend to complete this habit most successfully:
-                                        </Text>
-
-                                        {habitAnalytics.time_patterns.map((timePattern, index) => {
-                                            const isBestTime = timePattern.is_optimal;
-
-                                            return (
-                                                <View key={index} className={`p-3 mb-2 rounded-lg ${
-                                                    isBestTime
-                                                        ? 'bg-primary-50 dark:bg-primary-900 dark:bg-opacity-20 border border-primary-200 dark:border-primary-800'
-                                                        : 'bg-theme-background dark:bg-theme-background-dark'
-                                                }`}>
-                                                    <View className="flex-row justify-between items-center">
-                                                        <View className="flex-row items-center">
-                                                            <View className={`p-1.5 rounded-md mr-2 ${
-                                                                isBestTime
-                                                                    ? 'bg-primary-100 dark:bg-primary-800'
-                                                                    : 'bg-theme-card dark:bg-theme-card-dark'
-                                                            }`}>
-                                                                {TIME_PERIODS.find(t => t.name === timePattern.name)?.icon ||
-                                                                    <Clock size={16} className="text-primary-500 dark:text-primary-400" />}
-                                                            </View>
-                                                            <Text className={`font-montserrat-medium ${
-                                                                isBestTime
-                                                                    ? 'text-primary-700 dark:text-primary-300'
-                                                                    : 'text-theme-text-primary dark:text-theme-text-primary-dark'
-                                                            }`}>
-                                                                {timePattern.name}
-                                                            </Text>
-                                                        </View>
-
-                                                        <Text className={`text-sm font-montserrat-semibold ${
-                                                            isBestTime
-                                                                ? 'text-primary-700 dark:text-primary-300'
-                                                                : 'text-theme-text-secondary dark:text-theme-text-secondary-dark'
-                                                        }`}>
-                                                            {timePattern.count} completions
-                                                        </Text>
-                                                    </View>
-
-                                                    <View className="h-1.5 bg-theme-card dark:bg-theme-card-dark rounded-full overflow-hidden mt-2">
-                                                        <View
-                                                            className={`h-full ${
-                                                                isBestTime
-                                                                    ? 'bg-primary-500 dark:bg-primary-400'
-                                                                    : 'bg-primary-300 dark:bg-primary-700'
-                                                            }`}
-                                                            style={{ width: `${timePattern.rate}%` }}
-                                                        />
-                                                    </View>
-
-                                                    {isBestTime && (
-                                                        <Text className="text-xs font-montserrat text-primary-700 dark:text-primary-300 mt-2">
-                                                            This is your optimal time for this habit. You're {timePattern.success_rate}% more likely to complete it during this period.
-                                                        </Text>
-                                                    )}
-                                                </View>
-                                            );
-                                        })}
-
-                                        <TouchableOpacity className="mt-3 flex-row items-center justify-center p-3 bg-primary-50 dark:bg-primary-900 dark:bg-opacity-20 rounded-lg">
-                                            <Clock size={16} className="text-primary-600 dark:text-primary-400 mr-2" />
-                                            <Text className="font-montserrat-medium text-primary-600 dark:text-primary-400">
-                                                Adjust Reminder Times
-                                            </Text>
-                                        </TouchableOpacity>
-                                    </CollapsibleSection>
-                                )}
-
-                                {/* Comparison with Previous Period */}
-                                {habitAnalytics.comparison && (
-                                    <CollapsibleSection
-                                        title="Period Comparison"
-                                        icon={<BarChart2 size={20} className="text-primary-500" />}
-                                        isExpanded={expandedSection === 'habitComparison'}
-                                        onToggle={() => toggleSection('habitComparison')}
-                                    >
-                                        <Text className="text-sm font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark mb-4">
-                                            Comparing your performance with the previous {period}:
-                                        </Text>
-
-                                        <View className="bg-theme-background dark:bg-theme-background-dark rounded-lg p-4 mb-3">
-                                            {/* Completion Rate Comparison */}
-                                            <View className="mb-4">
-                                                <View className="flex-row justify-between mb-1">
-                                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                        Completion Rate
-                                                    </Text>
-                                                    <View className="flex-row items-center">
-                                                        <Text className={`text-xs font-montserrat-medium mr-1 ${
-                                                            habitAnalytics.comparison.completion_rate_change > 0
-                                                                ? 'text-success-600 dark:text-success-dark'
-                                                                : habitAnalytics.comparison.completion_rate_change < 0
-                                                                    ? 'text-error-600 dark:text-error-dark'
-                                                                    : 'text-theme-text-muted dark:text-theme-text-muted-dark'
-                                                        }`}>
-                                                            {habitAnalytics.comparison.completion_rate_change > 0 ? '+' : ''}
-                                                            {habitAnalytics.comparison.completion_rate_change}%
-                                                        </Text>
-                                                        {habitAnalytics.comparison.completion_rate_change > 0 ? (
-                                                            <ArrowUp size={12} className="text-success-500 dark:text-success-dark" />
-                                                        ) : habitAnalytics.comparison.completion_rate_change < 0 ? (
-                                                            <ArrowDown size={12} className="text-error-500 dark:text-error-dark" />
-                                                        ) : null}
-                                                    </View>
-                                                </View>
-
-                                                <View className="flex-row items-center">
-                                                    <Text className="w-16 text-xs font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark">
-                                                        Current:
-                                                    </Text>
-                                                    <View className="flex-1 h-2 bg-theme-card dark:bg-theme-card-dark rounded-full overflow-hidden mr-2">
-                                                        <View
-                                                            className="h-full bg-primary-500 dark:bg-primary-400"
-                                                            style={{ width: `${habitAnalytics.stats.completion_rate}%` }}
-                                                        />
-                                                    </View>
-                                                    <Text className="text-xs font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark w-9 text-right">
-                                                        {habitAnalytics.stats.completion_rate}%
-                                                    </Text>
-                                                </View>
-
-                                                <View className="flex-row items-center mt-1">
-                                                    <Text className="w-16 text-xs font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark">
-                                                        Previous:
-                                                    </Text>
-                                                    <View className="flex-1 h-2 bg-theme-card dark:bg-theme-card-dark rounded-full overflow-hidden mr-2">
-                                                        <View
-                                                            className="h-full bg-secondary-500 dark:bg-secondary-400"
-                                                            style={{ width: `${habitAnalytics.comparison.previous_completion_rate}%` }}
-                                                        />
-                                                    </View>
-                                                    <Text className="text-xs font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark w-9 text-right">
-                                                        {habitAnalytics.comparison.previous_completion_rate}%
-                                                    </Text>
-                                                </View>
-                                            </View>
-
-                                            {/* Streak Comparison */}
-                                            <View className="mb-4">
-                                                <View className="flex-row justify-between mb-1">
-                                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                        Max Streak
-                                                    </Text>
-                                                    <View className="flex-row items-center">
-                                                        <Text className={`text-xs font-montserrat-medium mr-1 ${
-                                                            habitAnalytics.comparison.streak_change > 0
-                                                                ? 'text-success-600 dark:text-success-dark'
-                                                                : habitAnalytics.comparison.streak_change < 0
-                                                                    ? 'text-error-600 dark:text-error-dark'
-                                                                    : 'text-theme-text-muted dark:text-theme-text-muted-dark'
-                                                        }`}>
-                                                            {habitAnalytics.comparison.streak_change > 0 ? '+' : ''}
-                                                            {habitAnalytics.comparison.streak_change} days
-                                                        </Text>
-                                                        {habitAnalytics.comparison.streak_change > 0 ? (
-                                                            <ArrowUp size={12} className="text-success-500 dark:text-success-dark" />
-                                                        ) : habitAnalytics.comparison.streak_change < 0 ? (
-                                                            <ArrowDown size={12} className="text-error-500 dark:text-error-dark" />
-                                                        ) : null}
-                                                    </View>
-                                                </View>
-
-                                                <View className="flex-row justify-between">
-                                                    <View className="items-center p-2 bg-theme-card dark:bg-theme-card-dark rounded-lg flex-1 mr-2">
-                                                        <Text className="text-lg font-montserrat-bold text-accent-500 dark:text-accent-400">
-                                                            {habitAnalytics.streaks.current_streak}
-                                                        </Text>
-                                                        <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                            Current
-                                                        </Text>
-                                                    </View>
-
-                                                    <View className="items-center p-2 bg-theme-card dark:bg-theme-card-dark rounded-lg flex-1">
-                                                        <Text className="text-lg font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                            {habitAnalytics.comparison.previous_max_streak || 0}
-                                                        </Text>
-                                                        <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                            Previous
-                                                        </Text>
-                                                    </View>
-                                                </View>
-                                            </View>
-
-                                            {/* Total Completions Comparison */}
-                                            <View>
-                                                <View className="flex-row justify-between mb-1">
-                                                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                        Total Completions
-                                                    </Text>
-                                                    <View className="flex-row items-center">
-                                                        <Text className={`text-xs font-montserrat-medium mr-1 ${
-                                                            habitAnalytics.comparison.completion_count_change > 0
-                                                                ? 'text-success-600 dark:text-success-dark'
-                                                                : habitAnalytics.comparison.completion_count_change < 0
-                                                                    ? 'text-error-600 dark:text-error-dark'
-                                                                    : 'text-theme-text-muted dark:text-theme-text-muted-dark'
-                                                        }`}>
-                                                            {habitAnalytics.comparison.completion_count_change > 0 ? '+' : ''}
-                                                            {habitAnalytics.comparison.completion_count_change}
-                                                        </Text>
-                                                        {habitAnalytics.comparison.completion_count_change > 0 ? (
-                                                            <ArrowUp size={12} className="text-success-500 dark:text-success-dark" />
-                                                        ) : habitAnalytics.comparison.completion_count_change < 0 ? (
-                                                            <ArrowDown size={12} className="text-error-500 dark:text-error-dark" />
-                                                        ) : null}
-                                                    </View>
-                                                </View>
-
-                                                <View className="flex-row justify-between">
-                                                    <View className="items-center p-2 bg-theme-card dark:bg-theme-card-dark rounded-lg flex-1 mr-2">
-                                                        <Text className="text-lg font-montserrat-bold text-primary-600 dark:text-primary-400">
-                                                            {habitAnalytics.stats.completed_days}
-                                                        </Text>
-                                                        <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                            Current
-                                                        </Text>
-                                                    </View>
-
-                                                    <View className="items-center p-2 bg-theme-card dark:bg-theme-card-dark rounded-lg flex-1">
-                                                        <Text className="text-lg font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                            {habitAnalytics.comparison.previous_completed_days || 0}
-                                                        </Text>
-                                                        <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                                                            Previous
-                                                        </Text>
-                                                    </View>
-                                                </View>
-                                            </View>
-                                        </View>
-                                    </CollapsibleSection>
-                                )}
-                            </>
-                        ) : (
-                            <View className="p-8 items-center bg-theme-card dark:bg-theme-card-dark rounded-xl">
-                                <Flame size={40} className="text-theme-text-muted dark:text-theme-text-muted-dark opacity-40 mb-3" />
-                                <Text className="text-center text-lg font-montserrat-semibold text-theme-text-primary dark:text-theme-text-primary-dark mb-2">
-                                    Select a habit
-                                </Text>
-                                <Text className="text-center text-theme-text-muted dark:text-theme-text-muted-dark font-montserrat">
-                                    Choose a habit from the list above to see detailed analytics
-                                </Text>
+                                <TouchableOpacity
+                                    className="flex-1 ml-2 flex-row justify-center items-center bg-primary-500 dark:bg-primary-600 py-3 px-4 rounded-lg"
+                                >
+                                    <Share2 size={18} className="text-white mr-2" />
+                                    <Text className="font-montserrat-semibold text-white">
+                                        Share Progress
+                                    </Text>
+                                </TouchableOpacity>
                             </View>
-                        )}
+                        </View>
                     </>
                 )}
-
-                {/* Floating Action Button for Share/Export */}
-                <TouchableOpacity
-                    className="absolute bottom-4 right-4 bg-primary-500 dark:bg-primary-600 p-3 rounded-full shadow-lg"
-                    style={{
-                        shadowColor: isDark ? '#000' : '#166534',
-                        shadowOffset: { width: 0, height: 4 },
-                        shadowOpacity: 0.3,
-                        shadowRadius: 4,
-                        elevation: 5
-                    }}
-                    onPress={handleExportAnalytics}
-                >
-                    <Share2 size={24} className="text-white" />
-                </TouchableOpacity>
             </ScrollView>
         </SafeAreaView>
     );

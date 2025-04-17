@@ -4,14 +4,16 @@ import {useSelector} from 'react-redux'
 // Helper function to get current user ID
 const getCurrentUserId = () => {
     const userDetails = useSelector((state) => state.user)
-    return userDetails?.user?.user_id || userDetails?.user?.user?.user_id
-
+    return userDetails?.user_id || userDetails?.user?.user?.user_id
 };
+
 
 // Get user analytics based on timeframe
 export const getUserAnalytics = async (timeframe = 'week') => {
     try {
         const userId = getCurrentUserId();
+
+        console.log(userId)
         const response = await fetchData(`/api/analytics/getUserAnalytics/${userId}?timeframe=${timeframe}`);
 
         if (response && response.success && response.data) {
@@ -126,14 +128,13 @@ export const getHabitAnalytics = async (habitId, timeframe = 'month', includeStr
 // ENHANCED ANALYTICS ENDPOINTS
 
 // Get GitHub-style contribution heatmap
-export const getContributionHeatmap = async (timeRange = 'year', habitId = null) => {
+export const getContributionHeatmap = async (userId, timeRange = 'year', habitId = null) => {
     try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/contribution-heatmap/${userId}?timeRange=${timeRange}`;
-
-        if (habitId) {
-            url += `&habitId=${habitId}`;
-        }
+        let url = `/api/analytics/contribution-heatmap`;
+        //
+        // if (habitId) {
+        //     url += `&habitId=${habitId}`;
+        // }
 
         const response = await fetchData(url);
 
@@ -150,9 +151,9 @@ export const getContributionHeatmap = async (timeRange = 'year', habitId = null)
 };
 
 // Get detailed habit progress analytics
-export const getHabitProgressAnalytics = async (habitId, timeRange = 'all') => {
+export const getHabitProgressAnalytics = async ( habitId, timeRange = 'all') => {
     try {
-        const url = `/api/analytics/habit-progress/${habitId}?timeRange=${timeRange}`;
+        const url = `/api/analytics/habit-progress/${habitId}`;
 
         const response = await fetchData(url);
 
@@ -193,10 +194,10 @@ export const getMoodAnalytics = async (timeRange = 'month', habitId = null) => {
 };
 
 // Get comprehensive dashboard analytics
-export const getDashboardAnalytics = async () => {
+export const getDashboardAnalytics = async (userId) => {
     try {
-        const userId = getCurrentUserId();
-        const url = `/api/analytics/dashboard-analytics/${userId}`;
+
+        const url = `/api/analytics/dashboard-analytics`;
 
         const response = await fetchData(url);
 
@@ -209,6 +210,46 @@ export const getDashboardAnalytics = async () => {
     } catch (error) {
         console.error('Error in getDashboardAnalytics:', error);
         throw error.response?.data?.error || 'Failed to fetch dashboard analytics data';
+    }
+};
+
+// NEW ANALYTICS ENDPOINTS
+
+// Get personalized insights and improvement suggestions
+export const getPersonalizedInsights = async (userId) => {
+    try {
+        const url = `/api/analytics/personalized-insights`;
+
+        const response = await fetchData(url);
+
+        if (response && response.success && response.data) {
+            return response.data;
+        } else {
+            console.warn('Unexpected API response format in getPersonalizedInsights:', response);
+            return null;
+        }
+    } catch (error) {
+        console.error('Error in getPersonalizedInsights:', error);
+        throw error.response?.data?.error || 'Failed to fetch personalized insights';
+    }
+};
+
+// Get progress milestones and achievement predictions
+export const getProgressMilestones = async () => {
+    try {
+        const url = `/api/analytics/progress-milestones`;
+
+        const response = await fetchData(url);
+
+        if (response && response.success && response.data) {
+            return response.data;
+        } else {
+            console.warn('Unexpected API response format in getProgressMilestones:', response);
+            return null;
+        }
+    } catch (error) {
+        console.error('Error in getProgressMilestones:', error);
+        throw error.response?.data?.error || 'Failed to fetch progress milestones';
     }
 };
 
@@ -331,8 +372,8 @@ export const getTimePatterns = async (habitId = null, timeframe = 'month') => {
 // Get habit domains with analytics data
 export const getHabitDomains = async () => {
     try {
-        const userId = getCurrentUserId();
-        const response = await fetchData(`/api/habits/domains/${userId}?with_stats=true`);
+
+        const response = await fetchData(`/api/habit/allDomains`);
 
         if (response && response.success) {
             return response;

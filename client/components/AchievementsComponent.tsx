@@ -4,6 +4,7 @@ import { MotiView, MotiText, AnimatePresence } from 'moti'
 import { Trophy, Zap, BookOpen, Clock, Target, CheckCircle, Award, TrendingUp, Star, Layers, Shield, HeartPulse, Brain, Coffee, Moon, Users, Calendar } from 'lucide-react-native'
 import * as Haptics from 'expo-haptics'
 import { getUserAchievements, getUpcomingAchievements, getAchievementStats } from '../services/achievementService'
+import AchievementBadge from "@/components/AchievementBadge";
 
 const AchievementsComponent = ({ isDark }) => {
     // If isDark is not passed as prop, use system setting
@@ -342,15 +343,11 @@ const AchievementsComponent = ({ isDark }) => {
                                     className="p-6"
                                 >
                                     <View className="flex-row items-center mb-4">
-                                        <Image
-                                            source={badgeImage}
-                                            className="h-16 w-16 mr-5"
-                                            resizeMode="contain"
-                                            style={{
-                                                opacity: isUnlocked ? 1 : 0.5
-                                            }}
+                                        <AchievementBadge
+                                            achievement={achievement}
+                                            unlocked={isUnlocked}
+                                            size="large"
                                         />
-
                                         <View className="flex-1">
                                             <Text className={`font-bold text-lg mb-2
                                                 ${isUnlocked ?

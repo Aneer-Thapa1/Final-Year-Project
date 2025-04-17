@@ -3,7 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 import * as mime from 'react-native-mime-types';
 
-export const API_BASE_URL = 'https://7139-2407-5200-300-f53-1806-ad81-f655-9313.ngrok-free.app';
+export const API_BASE_URL = 'https://de30-2400-74e0-10-31cd-cd70-5e80-a63d-2fc2.ngrok-free.app';
 
 // Set up a basic configuration for making API requests
 const api = axios.create({
