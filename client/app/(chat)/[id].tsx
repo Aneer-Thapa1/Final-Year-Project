@@ -477,7 +477,7 @@ export default function ChatDetailScreen() {
         } catch (error) {
             console.error('Error sending message:', error);
             Alert.alert('Error', 'Failed to send message');
-
+            const tempId = `temp-${Date.now()}`;
             // Update the temporary message to show error status
             setMessages(prev =>
                 prev.map(msg =>

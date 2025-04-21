@@ -1,41 +1,69 @@
+// analytics.controller.js
+
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-const enhancedAnalyticsController = {
+/**
+ * Analytics Controller
+ * Provides data visualization and insights for the HabitPulse app
+ */
+const AnalyticsController = {
     /**
-     * Get contribution graph data similar to GitHub's activity heatmap
-     * Shows user's habit completions for each day with intensity levels
+     * Get user's habit completion heatmap (similar to GitHub contributions)
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
      */
-    getContributionHeatmap: async (req, res) => {
+    getHabitHeatmap: async (req, res) => {
         try {
-            const { userId } = req.params;
-            const { timeRange = 'year', habitId } = req.query;
+            // Get user ID from authenticated token
+            const userId = req.user;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
 
-            // Calculate date range - GitHub shows a full year by default
-            const endDate = new Date();
-            endDate.setHours(23, 59, 59, 999);
+            // Get query parameters with validation
+            const { timeRange = 'month', habitId } = req.query;
 
-            let startDate;
-            if (timeRange === 'year') {
-                // Last 365 days
-                startDate = new Date();
-                startDate.setDate(startDate.getDate() - 365);
-                startDate.setHours(0, 0, 0, 0);
-            } else if (timeRange === 'quarter') {
-                // Last 90 days
-                startDate = new Date();
-                startDate.setDate(startDate.getDate() - 90);
-                startDate.setHours(0, 0, 0, 0);
-            } else if (timeRange === 'month') {
-                // Last 30 days
-                startDate = new Date();
-                startDate.setDate(startDate.getDate() - 30);
-                startDate.setHours(0, 0, 0, 0);
-            } else {
+            // Validate time range
+            if (!['week', 'month', 'quarter', 'year'].includes(timeRange)) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Invalid timeRange parameter. Use "year", "quarter", or "month"'
+                    message: 'Invalid timeRange parameter. Use "week", "month", "quarter", or "year"'
                 });
+            }
+
+            // Parse habit ID if provided
+            let parsedHabitId = null;
+            if (habitId) {
+                parsedHabitId = parseInt(habitId);
+                if (isNaN(parsedHabitId)) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid habitId parameter. Must be a number.'
+                    });
+                }
+            }
+
+            // Calculate date range based on timeRange
+            const endDate = new Date();
+            const startDate = new Date();
+
+            switch(timeRange) {
+                case 'week':
+                    startDate.setDate(endDate.getDate() - 7);
+                    break;
+                case 'month':
+                    startDate.setMonth(endDate.getMonth() - 1);
+                    break;
+                case 'quarter':
+                    startDate.setMonth(endDate.getMonth() - 3);
+                    break;
+                case 'year':
+                    startDate.setFullYear(endDate.getFullYear() - 1);
+                    break;
             }
 
             // Build query for habit logs
@@ -48,17 +76,23 @@ const enhancedAnalyticsController = {
                 }
             };
 
-            // Filter by specific habit if requested
-            if (habitId) {
-                where.habit_id = parseInt(habitId);
+            // Add habit filter if provided
+            if (parsedHabitId) {
+                where.habit_id = parsedHabitId;
             }
 
-            // Get all completed habit logs in the time range
+            // Get completed habit logs in time range
             const habitLogs = await prisma.habitLog.findMany({
                 where,
                 select: {
                     completed_at: true,
-                    habit_id: true
+                    habit_id: true,
+                    habit: {
+                        select: {
+                            name: true,
+                            color: true
+                        }
+                    }
                 }
             });
 
@@ -74,7 +108,8 @@ const enhancedAnalyticsController = {
                     date: dateKey,
                     count: 0,
                     level: 0,
-                    isToday: dateKey === today
+                    isToday: dateKey === today,
+                    habits: []
                 };
                 currentDate.setDate(currentDate.getDate() + 1);
             }
@@ -84,11 +119,19 @@ const enhancedAnalyticsController = {
                 const dateKey = new Date(log.completed_at).toISOString().split('T')[0];
                 if (contributionMap[dateKey]) {
                     contributionMap[dateKey].count++;
+
+                    // Add habit details if available
+                    if (log.habit) {
+                        contributionMap[dateKey].habits.push({
+                            id: log.habit_id,
+                            name: log.habit.name,
+                            color: log.habit.color || '#4285F4'
+                        });
+                    }
                 }
             });
 
             // Calculate intensity levels (0-4) based on counts
-            // Find the max count to normalize levels
             const values = Object.values(contributionMap);
             const maxCount = Math.max(...values.map(v => v.count));
 
@@ -155,7 +198,7 @@ const enhancedAnalyticsController = {
             const contributionDays = sortedDates.filter(day => day.count > 0).length;
             const completionRate = totalDays > 0 ? (contributionDays / totalDays) * 100 : 0;
 
-            res.status(200).json({
+            return res.status(200).json({
                 success: true,
                 data: {
                     weeks,
@@ -170,399 +213,32 @@ const enhancedAnalyticsController = {
             });
 
         } catch (error) {
-            console.error('Error generating contribution heatmap:', error);
-            res.status(500).json({
+            console.error('Error generating habit heatmap:', error);
+            return res.status(500).json({
                 success: false,
-                message: 'Failed to generate contribution heatmap data',
-                error: error.message
+                message: 'Failed to generate habit heatmap data',
+                error: error.message || 'Server error'
             });
         }
     },
 
     /**
-     * Get habit progress analytics over time
-     * Shows habit consistency, streak data, and completion rate changes
-     */
-    getHabitProgressAnalytics: async (req, res) => {
-        try {
-            const { habitId } = req.params;
-            const { timeRange = 'all' } = req.query;
-
-            // Validate habit ID and get habit details
-            const habit = await prisma.habit.findUnique({
-                where: {
-                    habit_id: parseInt(habitId)
-                },
-                include: {
-                    domain: true
-                }
-            });
-
-            if (!habit) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Habit not found'
-                });
-            }
-
-            // Calculate date range
-            const endDate = new Date();
-            endDate.setHours(23, 59, 59, 999);
-
-            let startDate;
-            if (timeRange === 'month') {
-                startDate = new Date();
-                startDate.setMonth(startDate.getMonth() - 1);
-                startDate.setHours(0, 0, 0, 0);
-            } else if (timeRange === 'quarter') {
-                startDate = new Date();
-                startDate.setMonth(startDate.getMonth() - 3);
-                startDate.setHours(0, 0, 0, 0);
-            } else if (timeRange === 'year') {
-                startDate = new Date();
-                startDate.setFullYear(startDate.getFullYear() - 1);
-                startDate.setHours(0, 0, 0, 0);
-            } else {
-                // Use habit start date for 'all'
-                startDate = new Date(habit.start_date);
-                startDate.setHours(0, 0, 0, 0);
-            }
-
-            // Get all logs for this habit
-            const habitLogs = await prisma.habitLog.findMany({
-                where: {
-                    habit_id: parseInt(habitId),
-                    completed_at: {
-                        gte: startDate,
-                        lte: endDate
-                    }
-                },
-                orderBy: {
-                    completed_at: 'asc'
-                }
-            });
-
-            // Get habit streak data
-            const streak = await prisma.habitStreak.findFirst({
-                where: {
-                    habit_id: parseInt(habitId)
-                }
-            });
-
-            // Get habit daily statuses (scheduled vs completed)
-            const habitStatuses = await prisma.habitDailyStatus.findMany({
-                where: {
-                    habit_id: parseInt(habitId),
-                    date: {
-                        gte: startDate,
-                        lte: endDate
-                    }
-                },
-                orderBy: {
-                    date: 'asc'
-                }
-            });
-
-            // Calculate completion and consistency metrics
-            const analysisData = calculateHabitAnalysisData(habit, habitLogs, habitStatuses, startDate, endDate);
-
-            // Format progress charts data based on timeRange
-            let progressChartData = [];
-            let consistencyData = [];
-
-            if (timeRange === 'month' || timeRange === 'quarter') {
-                // Group by day for shorter time ranges
-                progressChartData = formatDailyProgressData(habitLogs, habitStatuses, startDate, endDate);
-                consistencyData = formatDailyConsistencyData(habitLogs, habitStatuses, startDate, endDate);
-            } else {
-                // Group by week for longer time ranges
-                progressChartData = formatWeeklyProgressData(habitLogs, habitStatuses, startDate, endDate);
-                consistencyData = formatWeeklyConsistencyData(habitLogs, habitStatuses, startDate, endDate);
-            }
-
-            // Create streak history array if available
-            const streakHistory = streak && streak.streak_history ?
-                JSON.parse(streak.streak_history) : generateDefaultStreakHistory();
-
-            // Calculate time of day distribution
-            const timeOfDayData = calculateTimeOfDayDistribution(habitLogs);
-
-            // Calculate duration stats if applicable
-            const durationStats = calculateDurationStats(habit, habitLogs);
-
-            // Calculate completion time trend (how long it takes to complete)
-            const completionTimeTrend = calculateCompletionTimeTrend(habitLogs, timeRange);
-
-            // Build final response
-            res.status(200).json({
-                success: true,
-                data: {
-                    habitDetails: {
-                        id: habit.habit_id,
-                        name: habit.name,
-                        description: habit.description || '',
-                        color: habit.color || habit.domain.color || '#4285F4',
-                        icon: habit.icon || 'calendar',
-                        domain: habit.domain.name,
-                        domainColor: habit.domain.color,
-                        difficulty: habit.difficulty,
-                        frequency: formatFrequencyText(habit),
-                        tracking_type: habit.tracking_type,
-                        duration_goal: habit.duration_goal,
-                        count_goal: habit.count_goal,
-                        numeric_goal: habit.numeric_goal,
-                        units: habit.units
-                    },
-                    streakData: {
-                        current: streak ? streak.current_streak : 0,
-                        longest: streak ? streak.longest_streak : 0,
-                        history: streakHistory,
-                        lastCompleted: streak ? streak.last_completed : null
-                    },
-                    analysisData,
-                    progressChartData,
-                    consistencyData,
-                    timeOfDayData,
-                    durationStats,
-                    completionTimeTrend,
-                    timeRange,
-                    dateRange: {
-                        start: startDate.toISOString(),
-                        end: endDate.toISOString()
-                    }
-                }
-            });
-
-        } catch (error) {
-            console.error('Error generating habit progress analytics:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Failed to generate habit progress analytics',
-                error: error.message
-            });
-        }
-    },
-
-    /**
-     * Get mood analysis data for habit completions
-     * Analyzes user mood trends when completing habits
-     */
-    getMoodAnalytics: async (req, res) => {
-        try {
-            const { userId } = req.params;
-            const { habitId, timeRange = 'month' } = req.query;
-
-            // Calculate date range
-            const endDate = new Date();
-            endDate.setHours(23, 59, 59, 999);
-
-            let startDate;
-            if (timeRange === 'week') {
-                startDate = new Date();
-                startDate.setDate(startDate.getDate() - 7);
-                startDate.setHours(0, 0, 0, 0);
-            } else if (timeRange === 'month') {
-                startDate = new Date();
-                startDate.setMonth(startDate.getMonth() - 1);
-                startDate.setHours(0, 0, 0, 0);
-            } else if (timeRange === 'quarter') {
-                startDate = new Date();
-                startDate.setMonth(startDate.getMonth() - 3);
-                startDate.setHours(0, 0, 0, 0);
-            } else if (timeRange === 'year') {
-                startDate = new Date();
-                startDate.setFullYear(startDate.getFullYear() - 1);
-                startDate.setHours(0, 0, 0, 0);
-            } else {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Invalid timeRange parameter. Use "week", "month", "quarter", or "year"'
-                });
-            }
-
-            // Build where clause
-            const where = {
-                user_id: parseInt(userId),
-                completed: true,
-                completed_at: {
-                    gte: startDate,
-                    lte: endDate
-                },
-                mood: {
-                    not: null
-                }
-            };
-
-            // Add habit filter if specified
-            if (habitId) {
-                where.habit_id = parseInt(habitId);
-            }
-
-            // Get all logs with mood data
-            const moodLogs = await prisma.habitLog.findMany({
-                where,
-                select: {
-                    log_id: true,
-                    habit_id: true,
-                    completed_at: true,
-                    mood: true,
-                    habit: {
-                        select: {
-                            name: true,
-                            color: true,
-                            domain: {
-                                select: {
-                                    name: true,
-                                    color: true
-                                }
-                            }
-                        }
-                    }
-                },
-                orderBy: {
-                    completed_at: 'asc'
-                }
-            });
-
-            // Get counts of logs with and without mood
-            const totalLogsCount = await prisma.habitLog.count({
-                where: {
-                    user_id: parseInt(userId),
-                    completed: true,
-                    completed_at: {
-                        gte: startDate,
-                        lte: endDate
-                    },
-                    ...(habitId ? { habit_id: parseInt(habitId) } : {})
-                }
-            });
-
-            // If no mood data available
-            if (moodLogs.length === 0) {
-                return res.status(200).json({
-                    success: true,
-                    data: {
-                        moodAvailable: false,
-                        totalLogs: totalLogsCount,
-                        logsWithMood: 0,
-                        message: 'No mood data available for the selected time period'
-                    }
-                });
-            }
-
-            // Calculate average mood by day
-            const moodByDay = {};
-            const dayFormat = new Intl.DateTimeFormat('en', { weekday: 'short' });
-
-            moodLogs.forEach(log => {
-                const date = new Date(log.completed_at);
-                const day = dayFormat.format(date);
-
-                if (!moodByDay[day]) {
-                    moodByDay[day] = { day, totalMood: 0, count: 0, averageMood: 0 };
-                }
-
-                moodByDay[day].totalMood += log.mood;
-                moodByDay[day].count++;
-            });
-
-            // Calculate average moods
-            Object.values(moodByDay).forEach(dayData => {
-                dayData.averageMood = dayData.count > 0 ?
-                    Math.round((dayData.totalMood / dayData.count) * 10) / 10 : 0;
-            });
-
-            // Get mood distribution
-            const moodDistribution = {
-                1: 0, 2: 0, 3: 0, 4: 0, 5: 0
-            };
-
-            moodLogs.forEach(log => {
-                if (log.mood >= 1 && log.mood <= 5) {
-                    moodDistribution[log.mood]++;
-                }
-            });
-
-            // Calculate mood trends over time
-            const moodTrend = calculateMoodTrend(moodLogs, timeRange);
-
-            // Calculate mood by habit (if no specific habit was requested)
-            let moodByHabit = [];
-            if (!habitId) {
-                const habitMoodMap = {};
-
-                moodLogs.forEach(log => {
-                    const habitId = log.habit_id;
-
-                    if (!habitMoodMap[habitId]) {
-                        habitMoodMap[habitId] = {
-                            habit_id: habitId,
-                            name: log.habit.name,
-                            color: log.habit.color || log.habit.domain.color || '#4285F4',
-                            domain: log.habit.domain.name,
-                            totalMood: 0,
-                            count: 0,
-                            averageMood: 0
-                        };
-                    }
-
-                    habitMoodMap[habitId].totalMood += log.mood;
-                    habitMoodMap[habitId].count++;
-                });
-
-                // Calculate average mood per habit
-                moodByHabit = Object.values(habitMoodMap).map(habitData => ({
-                    ...habitData,
-                    averageMood: habitData.count > 0 ?
-                        Math.round((habitData.totalMood / habitData.count) * 10) / 10 : 0
-                })).sort((a, b) => b.averageMood - a.averageMood);
-            }
-
-            // Build response
-            res.status(200).json({
-                success: true,
-                data: {
-                    moodAvailable: true,
-                    totalLogs: totalLogsCount,
-                    logsWithMood: moodLogs.length,
-                    moodCompletionRate: (moodLogs.length / totalLogsCount) * 100,
-                    averageMood: moodLogs.length > 0 ?
-                        Math.round((moodLogs.reduce((sum, log) => sum + log.mood, 0) / moodLogs.length) * 10) / 10 : 0,
-                    moodDistribution,
-                    moodByDay: Object.values(moodByDay).sort((a, b) => {
-                        // Sort by day of week (Sunday first)
-                        const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-                        return days.indexOf(a.day) - days.indexOf(b.day);
-                    }),
-                    moodTrend,
-                    moodByHabit,
-                    timeRange,
-                    dateRange: {
-                        start: startDate.toISOString(),
-                        end: endDate.toISOString()
-                    }
-                }
-            });
-
-        } catch (error) {
-            console.error('Error generating mood analytics:', error);
-            res.status(500).json({
-                success: false,
-                message: 'Failed to generate mood analytics',
-                error: error.message
-            });
-        }
-    },
-
-    /**
-     * Get aggregated analytics for user dashboard
-     * Combines multiple analytics endpoints for a comprehensive dashboard view
+     * Get analytics dashboard for user's home screen
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
      */
     getDashboardAnalytics: async (req, res) => {
         try {
-            const { userId } = req.params;
+            // Get user ID from authentication
+            const userId = req.user;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
 
-            // Get current streak and overall stats
+            // Get user data with streaks
             const user = await prisma.user.findUnique({
                 where: { user_id: parseInt(userId) },
                 select: {
@@ -572,8 +248,7 @@ const enhancedAnalyticsController = {
                     currentDailyStreak: true,
                     longestDailyStreak: true,
                     totalHabitsCreated: true,
-                    totalHabitsCompleted: true,
-                    timezone: true
+                    totalHabitsCompleted: true
                 }
             });
 
@@ -584,23 +259,23 @@ const enhancedAnalyticsController = {
                 });
             }
 
-            // Calculate date ranges for different timeframes
+            // Calculate date ranges
             const now = new Date();
 
-            // Today
+            // Today's range
             const todayStart = new Date(now);
             todayStart.setHours(0, 0, 0, 0);
 
-            // This week (Sunday to Saturday)
+            // This week's range (Sunday to Saturday)
             const weekStart = new Date(now);
-            weekStart.setDate(now.getDate() - now.getDay()); // Sunday
+            weekStart.setDate(now.getDate() - now.getDay()); // Go to Sunday
             weekStart.setHours(0, 0, 0, 0);
 
             const weekEnd = new Date(weekStart);
             weekEnd.setDate(weekStart.getDate() + 6); // Saturday
             weekEnd.setHours(23, 59, 59, 999);
 
-            // This month
+            // This month's range
             const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
             const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
@@ -659,23 +334,6 @@ const enhancedAnalyticsController = {
                 }
             });
 
-            // Get last 30 days completion data for trend
-            const thirtyDaysAgo = new Date(now);
-            thirtyDaysAgo.setDate(now.getDate() - 30);
-
-            const completionTrend = await prisma.habitLog.groupBy({
-                by: ['completed_at'],
-                where: {
-                    user_id: parseInt(userId),
-                    completed: true,
-                    completed_at: {
-                        gte: thirtyDaysAgo,
-                        lte: now
-                    }
-                },
-                _count: true
-            });
-
             // Calculate today's progress
             const todayScheduled = todayStatuses.filter(status => status.is_scheduled).length;
             const todayCompleted = todayStatuses.filter(status => status.is_completed).length;
@@ -684,7 +342,7 @@ const enhancedAnalyticsController = {
             // Calculate this week's progress
             const weekCompleted = weekLogs.filter(log => log.completed).length;
 
-            // Expected completions this week (estimated)
+            // Expected completions this week
             let weeklyExpected = 0;
             habits.forEach(habit => {
                 weeklyExpected += calculateExpectedWeeklyCompletions(habit);
@@ -695,14 +353,8 @@ const enhancedAnalyticsController = {
             // Calculate this month's points
             const monthPointsTotal = monthPoints.reduce((sum, log) => sum + log.points, 0);
 
-            // Format completion trend data
-            const trendData = formatCompletionTrendData(completionTrend);
-
-            // Build domain distribution data
+            // Calculate domain distribution
             const domainData = calculateDomainDistribution(habits, weekLogs);
-
-            // Build completed vs missed data for the week
-            const weekStatusData = calculateWeekStatusData(habits, weekLogs, weekStart, weekEnd);
 
             // Get habits with longest streaks
             const topStreakHabits = habits
@@ -717,8 +369,7 @@ const enhancedAnalyticsController = {
                     longest_streak: h.streak?.longest_streak || 0
                 }));
 
-            // Build final response
-            res.status(200).json({
+            return res.status(200).json({
                 success: true,
                 data: {
                     user: {
@@ -726,8 +377,7 @@ const enhancedAnalyticsController = {
                         name: user.user_name,
                         totalPoints: user.points_gained,
                         currentStreak: user.currentDailyStreak,
-                        longestStreak: user.longestDailyStreak,
-                        timezone: user.timezone
+                        longestStreak: user.longestDailyStreak
                     },
                     summary: {
                         todayProgress,
@@ -745,8 +395,6 @@ const enhancedAnalyticsController = {
                         byDomain: domainData,
                         topStreaks: topStreakHabits
                     },
-                    completionTrend: trendData,
-                    weekStatus: weekStatusData,
                     dateRanges: {
                         today: todayStart.toISOString(),
                         weekStart: weekStart.toISOString(),
@@ -759,18 +407,387 @@ const enhancedAnalyticsController = {
 
         } catch (error) {
             console.error('Error generating dashboard analytics:', error);
-            res.status(500).json({
+            return res.status(500).json({
                 success: false,
                 message: 'Failed to generate dashboard analytics',
-                error: error.message
+                error: error.message || 'Server error'
+            });
+        }
+    },
+
+    /**
+     * Get detailed analytics for a specific habit
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
+     */
+    getHabitAnalytics: async (req, res) => {
+        try {
+            // Get user ID from authentication
+            const userId = req.user;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            // Parse habitId from request parameters
+            const { habitId } = req.params;
+            if (!habitId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Habit ID is required'
+                });
+            }
+
+            // Validate habitId is a number
+            const habitIdNum = parseInt(habitId);
+            if (isNaN(habitIdNum)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid habit ID format'
+                });
+            }
+
+            // Get timeRange with validation
+            const { timeRange = 'month' } = req.query;
+            if (!['week', 'month', 'quarter', 'year', 'all'].includes(timeRange)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid timeRange parameter. Use "week", "month", "quarter", "year", or "all"'
+                });
+            }
+
+            // Validate habit exists and belongs to user
+            const habit = await prisma.habit.findFirst({
+                where: {
+                    habit_id: habitIdNum,
+                    user_id: parseInt(userId)
+                },
+                include: {
+                    domain: true
+                }
+            });
+
+            if (!habit) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Habit not found or you do not have access to it'
+                });
+            }
+
+            // Calculate date range
+            const endDate = new Date();
+            let startDate;
+
+            if (timeRange === 'week') {
+                startDate = new Date();
+                startDate.setDate(startDate.getDate() - 7);
+            } else if (timeRange === 'month') {
+                startDate = new Date();
+                startDate.setMonth(startDate.getMonth() - 1);
+            } else if (timeRange === 'quarter') {
+                startDate = new Date();
+                startDate.setMonth(startDate.getMonth() - 3);
+            } else if (timeRange === 'year') {
+                startDate = new Date();
+                startDate.setFullYear(startDate.getFullYear() - 1);
+            } else {
+                // Use habit start date for 'all'
+                startDate = new Date(habit.start_date);
+            }
+
+            // Get habit logs
+            const habitLogs = await prisma.habitLog.findMany({
+                where: {
+                    habit_id: habitIdNum,
+                    completed_at: {
+                        gte: startDate,
+                        lte: endDate
+                    }
+                },
+                orderBy: {
+                    completed_at: 'asc'
+                }
+            });
+
+            // Get streak information
+            const streak = await prisma.habitStreak.findFirst({
+                where: {
+                    habit_id: habitIdNum,
+                    user_id: parseInt(userId)
+                }
+            });
+
+            // Get habit daily statuses
+            const habitStatuses = await prisma.habitDailyStatus.findMany({
+                where: {
+                    habit_id: habitIdNum,
+                    date: {
+                        gte: startDate,
+                        lte: endDate
+                    }
+                },
+                orderBy: {
+                    date: 'asc'
+                }
+            });
+
+            // Calculate completion stats
+            const completedLogs = habitLogs.filter(log => log.completed);
+            const scheduledDays = habitStatuses.filter(status => status.is_scheduled);
+            const completedDays = habitStatuses.filter(status => status.is_completed);
+            const skippedDays = habitStatuses.filter(status => status.is_skipped);
+
+            const completionRate = scheduledDays.length > 0
+                ? (completedDays.length / scheduledDays.length) * 100
+                : 0;
+
+            // Calculate day of week distribution
+            const dayDistribution = [0, 1, 2, 3, 4, 5, 6].map(dayNum => {
+                const count = completedLogs.filter(log => {
+                    const date = new Date(log.completed_at);
+                    return date.getDay() === dayNum;
+                }).length;
+
+                return {
+                    day: dayNum,
+                    name: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayNum],
+                    count,
+                    percentage: completedLogs.length > 0
+                        ? Math.round((count / completedLogs.length) * 100)
+                        : 0
+                };
+            });
+
+            // Calculate time of day distribution
+            const timeDistribution = calculateTimeOfDayDistribution(completedLogs);
+
+            // Format progress data for charts
+            const progressData = formatProgressData(habitLogs, habitStatuses, startDate, endDate, timeRange);
+
+            return res.status(200).json({
+                success: true,
+                data: {
+                    habitDetails: {
+                        id: habit.habit_id,
+                        name: habit.name,
+                        description: habit.description || '',
+                        color: habit.color || habit.domain.color || '#4285F4',
+                        icon: habit.icon || 'calendar',
+                        domain: habit.domain.name,
+                        frequency: formatFrequencyText(habit),
+                        trackingType: habit.tracking_type,
+                        startDate: habit.start_date
+                    },
+                    streakData: {
+                        current: streak ? streak.current_streak : 0,
+                        longest: streak ? streak.longest_streak : 0,
+                        lastCompleted: streak ? streak.last_completed : null
+                    },
+                    completionStats: {
+                        completionRate: Math.round(completionRate * 10) / 10,
+                        totalScheduled: scheduledDays.length,
+                        totalCompleted: completedDays.length,
+                        totalSkipped: skippedDays.length,
+                        dayDistribution,
+                        timeDistribution
+                    },
+                    progressData,
+                    timeRange,
+                    dateRange: {
+                        start: startDate.toISOString(),
+                        end: endDate.toISOString()
+                    }
+                }
+            });
+
+        } catch (error) {
+            console.error('Error generating habit analytics:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to generate habit analytics',
+                error: error.message || 'Server error'
+            });
+        }
+    },
+
+    /**
+     * Get personalized insights for the user
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
+     */
+    getPersonalInsights: async (req, res) => {
+        try {
+            // Get user ID from authentication
+            const userId = req.user;
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'Authentication required'
+                });
+            }
+
+            // Get user habits with related data
+            const habits = await prisma.habit.findMany({
+                where: {
+                    user_id: parseInt(userId),
+                    is_active: true
+                },
+                include: {
+                    domain: true,
+                    streak: true,
+                    habitLogs: {
+                        where: {
+                            completed_at: {
+                                gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // Last 30 days
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Get user achievements
+            const achievements = await prisma.userAchievement.findMany({
+                where: { user_id: parseInt(userId) },
+                include: { achievement: true },
+                orderBy: { unlocked_at: 'desc' }
+            });
+
+            // Get upcoming achievements
+            const achievementProgress = await prisma.achievementProgress.findMany({
+                where: {
+                    user_id: parseInt(userId),
+                    percent_complete: { lt: 100, gte: 50 } // At least 50% complete
+                },
+                include: { achievement: true },
+                orderBy: { percent_complete: 'desc' }
+            });
+
+            // Calculate insights
+            const insights = {
+                strengths: [],
+                improvements: [],
+                suggestions: [],
+                achievement_opportunities: [],
+                metrics: {}
+            };
+
+            // Identify domain strengths and weaknesses
+            const domainPerformance = {};
+            habits.forEach(habit => {
+                const domainName = habit.domain?.name;
+                if (!domainName) return;
+
+                if (!domainPerformance[domainName]) {
+                    domainPerformance[domainName] = { habits: 0, completed: 0, total: 0 };
+                }
+
+                domainPerformance[domainName].habits++;
+
+                // Calculate completion rate for this habit
+                const logs = habit.habitLogs || [];
+                domainPerformance[domainName].completed += logs.filter(log => log.completed).length;
+                domainPerformance[domainName].total += logs.length;
+            });
+
+            // Identify strengths and improvement areas
+            Object.entries(domainPerformance).forEach(([domain, stats]) => {
+                if (stats.total < 5) return; // Skip domains with insufficient data
+
+                const completionRate = stats.total > 0 ? (stats.completed / stats.total) * 100 : 0;
+
+                if (completionRate >= 80) {
+                    insights.strengths.push({
+                        type: 'domain',
+                        name: domain,
+                        metric: Math.round(completionRate),
+                        message: `You're excelling in ${domain} habits with ${Math.round(completionRate)}% completion rate`
+                    });
+                } else if (completionRate < 50 && stats.habits > 1) {
+                    insights.improvements.push({
+                        type: 'domain',
+                        name: domain,
+                        metric: Math.round(completionRate),
+                        message: `Your ${domain} habits need attention with only ${Math.round(completionRate)}% completion rate`
+                    });
+                }
+            });
+
+            // Identify streak opportunities
+            const streakOpportunities = habits
+                .filter(h => h.streak && h.streak.current_streak >= 3)
+                .sort((a, b) => (b.streak?.current_streak || 0) - (a.streak?.current_streak || 0))
+                .slice(0, 3);
+
+            streakOpportunities.forEach(habit => {
+                const nextMilestone = getNextStreakMilestone(habit.streak.current_streak);
+
+                insights.suggestions.push({
+                    type: 'streak',
+                    habitId: habit.habit_id,
+                    habitName: habit.name,
+                    current: habit.streak.current_streak,
+                    next: nextMilestone,
+                    message: `Keep going with "${habit.name}" - you're only ${nextMilestone - habit.streak.current_streak} days from a ${nextMilestone}-day streak!`
+                });
+            });
+
+            // Add achievement opportunities
+            achievementProgress.slice(0, 3).forEach(progress => {
+                insights.achievement_opportunities.push({
+                    id: progress.achievement_id,
+                    name: progress.achievement.name,
+                    percentComplete: progress.percent_complete,
+                    description: progress.achievement.description,
+                    message: `You're at ${Math.round(progress.percent_complete)}% progress toward unlocking "${progress.achievement.name}"`
+                });
+            });
+
+            // Calculate key metrics
+            const allCompletedLogs = habits.flatMap(h => (h.habitLogs || []).filter(log => log.completed));
+            const allLogs = habits.flatMap(h => h.habitLogs || []);
+
+            // Find most consistent habit
+            const mostConsistentHabit = habits.reduce((best, current) => {
+                const bestStreak = best.streak?.current_streak || 0;
+                const currentStreak = current.streak?.current_streak || 0;
+                return currentStreak > bestStreak ? current : best;
+            }, habits[0] || null);
+
+            insights.metrics = {
+                overallCompletionRate: allLogs.length > 0
+                    ? Math.round((allCompletedLogs.length / allLogs.length) * 100)
+                    : 0,
+                totalStreakDays: habits.reduce((sum, h) => sum + (h.streak?.current_streak || 0), 0),
+                mostConsistentHabit: mostConsistentHabit?.name || null,
+                achievementsEarned: achievements.length,
+                recentAchievement: achievements.length > 0 ? achievements[0].achievement.name : null
+            };
+
+            return res.status(200).json({
+                success: true,
+                data: insights
+            });
+
+        } catch (error) {
+            console.error('Error generating personalized insights:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to generate personalized insights',
+                error: error.message || 'Server error'
             });
         }
     }
 };
 
-// HELPER FUNCTIONS
+// ===== HELPER FUNCTIONS =====
 
-// Calculate streak information from sorted date data
+/**
+ * Calculate streak information from date data
+ * @param {Array} sortedDates - Array of date objects sorted chronologically
+ * @returns {Object} Streak info with current and longest streaks
+ */
 function calculateStreakInfo(sortedDates) {
     let longestStreak = 0;
     let currentStreak = 0;
@@ -831,159 +848,172 @@ function calculateStreakInfo(sortedDates) {
     };
 }
 
-// Calculate habit analysis data
-function calculateHabitAnalysisData(habit, habitLogs, habitStatuses, startDate, endDate) {
-    // Calculate completion rate
-    const scheduledStatuses = habitStatuses.filter(status => status.is_scheduled);
-    const completedStatuses = scheduledStatuses.filter(status => status.is_completed);
-    const skippedStatuses = scheduledStatuses.filter(status => status.is_skipped);
+/**
+ * Calculate expected weekly completions based on habit frequency
+ * @param {Object} habit - Habit object
+ * @returns {number} Expected completions per week
+ */
+function calculateExpectedWeeklyCompletions(habit) {
+    if (!habit || !habit.frequency_type) {
+        return 0;
+    }
 
-    const completionRate = scheduledStatuses.length > 0 ?
-        (completedStatuses.length / scheduledStatuses.length) * 100 : 0;
+    switch (habit.frequency_type) {
+        case 'DAILY':
+            return 7;
+        case 'WEEKDAYS':
+            return 5;
+        case 'WEEKENDS':
+            return 2;
+        case 'SPECIFIC_DAYS':
+            return habit.specific_days ? habit.specific_days.length : 0;
+        case 'INTERVAL':
+            return Math.ceil(7 / Math.max(habit.frequency_interval || 1, 1));
+        case 'X_TIMES_WEEK':
+            return habit.frequency_value || 0;
+        case 'X_TIMES_MONTH':
+            return Math.ceil((habit.frequency_value || 0) / 4); // rough weekly estimate
+        default:
+            return 0;
+    }
+}
 
-// Count completions by day of week
-    const completionsByDayOfWeek = {
-        0: 0, // Sunday
-        1: 0, // Monday
-        2: 0, // Tuesday
-        3: 0, // Wednesday
-        4: 0, // Thursday
-        5: 0, // Friday
-        6: 0  // Saturday
-    };
+/**
+ * Calculate distribution of habits by domain
+ * @param {Array} habits - Array of habits
+ * @param {Array} weekLogs - Array of habit logs for the week
+ * @returns {Array} Domain distribution data
+ */
+function calculateDomainDistribution(habits, weekLogs) {
+    const domainMap = {};
 
-    habitLogs.forEach(log => {
-        if (log.completed) {
-            const dayOfWeek = new Date(log.completed_at).getDay();
-            completionsByDayOfWeek[dayOfWeek]++;
+    // Initialize with all domains
+    habits.forEach(habit => {
+        if (!habit.domain) return;
+
+        const domainName = habit.domain.name;
+        if (!domainName) return;
+
+        if (!domainMap[domainName]) {
+            domainMap[domainName] = {
+                name: domainName,
+                color: habit.domain.color || '#4285F4',
+                habitCount: 0,
+                completionCount: 0,
+                percentage: 0
+            };
+        }
+        domainMap[domainName].habitCount++;
+    });
+
+    // Count completions by domain
+    weekLogs.forEach(log => {
+        if (!log.completed) return;
+
+        // Find the habit to get its domain
+        const habit = habits.find(h => h.habit_id === log.habit_id);
+        if (habit && habit.domain && habit.domain.name) {
+            const domainName = habit.domain.name;
+            if (domainMap[domainName]) {
+                domainMap[domainName].completionCount++;
+            }
         }
     });
 
-// Calculate consistency score (0-100)
-// A measure of how regularly the habit is completed
-    const consistencyScore = calculateConsistencyScore(habitLogs, habitStatuses, startDate, endDate, habit);
+    // Calculate percentages
+    const totalCompletions = weekLogs.filter(log => log.completed).length;
 
-// Calculate completion intervals (days between completions)
-    const intervals = calculateCompletionIntervals(habitLogs);
+    Object.values(domainMap).forEach(domain => {
+        domain.percentage = totalCompletions > 0 ?
+            Math.round((domain.completionCount / totalCompletions) * 100) : 0;
+    });
 
-    return {
-        completionRate: Math.round(completionRate * 10) / 10,
-        totalScheduled: scheduledStatuses.length,
-        totalCompleted: completedStatuses.length,
-        totalSkipped: skippedStatuses.length,
-        consistencyScore,
-        completionsByDayOfWeek,
-        completionIntervals: intervals
-    };
+    return Object.values(domainMap).sort((a, b) => b.completionCount - a.completionCount);
 }
 
-// Calculate consistency score based on completion patterns
-function calculateConsistencyScore(habitLogs, habitStatuses, startDate, endDate, habit) {
-    if (habitLogs.length === 0 || habitStatuses.length === 0) {
-        return 0;
-    }
+/**
+ * Calculate distribution of completions by time of day
+ * @param {Array} logs - Array of completed habit logs
+ * @returns {Array} Time distribution data
+ */
+function calculateTimeOfDayDistribution(logs) {
+    // Define time periods
+    const periods = [
+        { name: 'Early Morning', start: 5, end: 8, count: 0 },
+        { name: 'Morning', start: 8, end: 12, count: 0 },
+        { name: 'Afternoon', start: 12, end: 17, count: 0 },
+        { name: 'Evening', start: 17, end: 21, count: 0 },
+        { name: 'Night', start: 21, end: 24, count: 0 },
+        { name: 'Late Night', start: 0, end: 5, count: 0 }
+    ];
 
-    // Expected interval based on habit frequency
-    const expectedInterval = getExpectedInterval(habit);
+    // Count completions in each period
+    logs.forEach(log => {
+        if (!log.completed_at) return;
 
-    // Calculate actual intervals between completions
-    const intervals = calculateCompletionIntervals(habitLogs);
+        const hour = new Date(log.completed_at).getHours();
 
-    if (intervals.length === 0) {
-        return 0;
-    }
+        for (const period of periods) {
+            if ((period.start <= hour && hour < period.end) ||
+                (period.start > period.end && (hour >= period.start || hour < period.end))) {
+                period.count++;
+                break;
+            }
+        }
+    });
 
-    // Calculate coefficient of variation (lower is better)
-    const mean = intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
-    const variance = intervals.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / intervals.length;
-    const stdDev = Math.sqrt(variance);
-    const cv = mean > 0 ? (stdDev / mean) : 0;
+    // Calculate percentages
+    const total = logs.length;
+    periods.forEach(period => {
+        period.percentage = total > 0 ? Math.round((period.count / total) * 100) : 0;
+    });
 
-    // Calculate deviation from expected interval
-    const intervalDeviation = Math.abs(mean - expectedInterval) / expectedInterval;
-
-    // Combine metrics into a final score (0-100)
-    // Lower coefficient of variation and lower deviation from expected = higher score
-    const cvScore = Math.max(0, 100 - (cv * 100));
-    const deviationScore = Math.max(0, 100 - (intervalDeviation * 100));
-
-    // Weight: 60% completion rate, 20% consistency (CV), 20% adherence to schedule
-    const completionRate = habitStatuses.length > 0 ?
-        habitLogs.filter(log => log.completed).length / habitStatuses.filter(s => s.is_scheduled).length : 0;
-
-    return Math.round(
-        (completionRate * 100 * 0.6) +
-        (cvScore * 0.2) +
-        (deviationScore * 0.2)
-    );
+    return periods;
 }
 
-// Get expected interval between completions based on habit frequency
-function getExpectedInterval(habit) {
-    switch (habit.frequency_type) {
-        case 'DAILY':
-            return 1;
-        case 'WEEKDAYS':
-            return 1.4; // Average over a week (5 days out of 7)
-        case 'WEEKENDS':
-            return 3.5; // Average over a week (2 days out of 7)
-        case 'SPECIFIC_DAYS':
-            return habit.specific_days && habit.specific_days.length > 0 ?
-                7 / habit.specific_days.length : 7;
-        case 'INTERVAL':
-            return habit.frequency_interval || 1;
-        case 'X_TIMES_WEEK':
-            return habit.frequency_value > 0 ? 7 / habit.frequency_value : 7;
-        case 'X_TIMES_MONTH':
-            return habit.frequency_value > 0 ? 30 / habit.frequency_value : 30;
-        default:
-            return 1;
+/**
+ * Format progress data for charts based on time range
+ * @param {Array} logs - Habit logs
+ * @param {Array} statuses - Habit daily statuses
+ * @param {Date} startDate - Start date
+ * @param {Date} endDate - End date
+ * @param {string} timeRange - Time range selection
+ * @returns {Array} Formatted progress data
+ */
+function formatProgressData(logs, statuses, startDate, endDate, timeRange) {
+    // For shorter time ranges, use daily data
+    if (timeRange === 'week' || timeRange === 'month') {
+        return formatDailyProgressData(logs, statuses, startDate, endDate);
+    }
+    // Otherwise use weekly data
+    else {
+        return formatWeeklyProgressData(logs, statuses, startDate, endDate);
     }
 }
 
-// Calculate intervals (in days) between completions
-function calculateCompletionIntervals(habitLogs) {
-    if (habitLogs.length < 2) {
-        return [];
-    }
-
-    const completedLogs = habitLogs
-        .filter(log => log.completed)
-        .sort((a, b) => new Date(a.completed_at) - new Date(b.completed_at));
-
-    if (completedLogs.length < 2) {
-        return [];
-    }
-
-    const intervals = [];
-
-    for (let i = 1; i < completedLogs.length; i++) {
-        const prevDate = new Date(completedLogs[i-1].completed_at);
-        const currDate = new Date(completedLogs[i].completed_at);
-
-        // Calculate days between in case completions happen on different times of day
-        const diffTime = Math.abs(currDate - prevDate);
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-        intervals.push(diffDays);
-    }
-
-    return intervals;
-}
-
-// Format daily progress data for charts
-function formatDailyProgressData(habitLogs, habitStatuses, startDate, endDate) {
+/**
+ * Format daily progress data for charts
+ * @param {Array} logs - Habit logs
+ * @param {Array} statuses - Habit daily statuses
+ * @param {Date} startDate - Start date
+ * @param {Date} endDate - End date
+ * @returns {Array} Daily progress data
+ */
+function formatDailyProgressData(logs, statuses, startDate, endDate) {
     const progressData = [];
     const currentDate = new Date(startDate);
 
     // Create data for each day in the range
     while (currentDate <= endDate) {
         const dateStr = currentDate.toISOString().split('T')[0];
-        const status = habitStatuses.find(s =>
+
+        // Find status for this day
+        const status = statuses.find(s =>
             new Date(s.date).toISOString().split('T')[0] === dateStr
         );
 
-        const completed = habitLogs.filter(log =>
+        // Check if completed
+        const completed = logs.filter(log =>
             new Date(log.completed_at).toISOString().split('T')[0] === dateStr &&
             log.completed
         ).length > 0;
@@ -1003,73 +1033,15 @@ function formatDailyProgressData(habitLogs, habitStatuses, startDate, endDate) {
     return progressData;
 }
 
-// Format date label for charts
-function formatDateLabel(date) {
-    // For days, just show day of month and first 3 letters of month
-    return `${date.getDate()} ${date.toLocaleString('default', { month: 'short' }).substring(0, 3)}`;
-}
-
-// Format daily consistency data
-function formatDailyConsistencyData(habitLogs, habitStatuses, startDate, endDate) {
-    // Group by week number
-    const weeklyData = {};
-    const completedLogs = habitLogs.filter(log => log.completed);
-
-    completedLogs.forEach(log => {
-        const date = new Date(log.completed_at);
-        const weekNum = getWeekNumber(date);
-        const key = `${date.getFullYear()}-W${weekNum}`;
-
-        if (!weeklyData[key]) {
-            weeklyData[key] = { week: key, days: {} };
-        }
-
-        const dayOfWeek = date.getDay();
-        if (!weeklyData[key].days[dayOfWeek]) {
-            weeklyData[key].days[dayOfWeek] = 0;
-        }
-
-        weeklyData[key].days[dayOfWeek]++;
-    });
-
-    // Calculate daily consistency pattern
-    const dayConsistency = [0, 1, 2, 3, 4, 5, 6].map(day => {
-        const dayName = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day];
-        const completions = completedLogs.filter(log =>
-            new Date(log.completed_at).getDay() === day
-        ).length;
-
-        // Calculate percentage of weeks this day had a completion
-        let weekCount = 0;
-        Object.values(weeklyData).forEach(week => {
-            if (week.days[day] && week.days[day] > 0) {
-                weekCount++;
-            }
-        });
-
-        const totalWeeks = Object.keys(weeklyData).length || 1;
-        const percentage = Math.round((weekCount / totalWeeks) * 100);
-
-        return {
-            day,
-            name: dayName,
-            completions,
-            consistency: percentage
-        };
-    });
-
-    return dayConsistency;
-}
-
-// Get week number for a date
-function getWeekNumber(date) {
-    const firstDayOfYear = new Date(date.getFullYear(), 0, 1);
-    const pastDaysOfYear = (date - firstDayOfYear) / 86400000;
-    return Math.ceil((pastDaysOfYear + firstDayOfYear.getDay() + 1) / 7);
-}
-
-// Format weekly progress data
-function formatWeeklyProgressData(habitLogs, habitStatuses, startDate, endDate) {
+/**
+ * Format weekly progress data for charts
+ * @param {Array} logs - Habit logs
+ * @param {Array} statuses - Habit daily statuses
+ * @param {Date} startDate - Start date
+ * @param {Date} endDate - End date
+ * @returns {Array} Weekly progress data
+ */
+function formatWeeklyProgressData(logs, statuses, startDate, endDate) {
     const progressData = [];
     const currentDate = new Date(startDate);
 
@@ -1089,12 +1061,12 @@ function formatWeeklyProgressData(habitLogs, habitStatuses, startDate, endDate) 
         }
 
         // Count scheduled and completed for the week
-        const weekStatuses = habitStatuses.filter(s => {
+        const weekStatuses = statuses.filter(s => {
             const date = new Date(s.date);
             return date >= weekStart && date <= weekEnd;
         });
 
-        const weekLogs = habitLogs.filter(log => {
+        const weekLogs = logs.filter(log => {
             const date = new Date(log.completed_at);
             return date >= weekStart && date <= weekEnd && log.completed;
         });
@@ -1116,438 +1088,34 @@ function formatWeeklyProgressData(habitLogs, habitStatuses, startDate, endDate) 
     return progressData;
 }
 
-// Format weekly consistency data
-function formatWeeklyConsistencyData(habitLogs, habitStatuses, startDate, endDate) {
-    // Similar to daily consistency but aggregated by month
-    const monthlyData = {};
-    const completedLogs = habitLogs.filter(log => log.completed);
-
-    completedLogs.forEach(log => {
-        const date = new Date(log.completed_at);
-        const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
-
-        if (!monthlyData[key]) {
-            monthlyData[key] = { month: key, weeks: {} };
-        }
-
-        const weekNum = getWeekNumber(date);
-        const weekKey = weekNum % 5; // Group into 5 buckets for "week of month"
-
-        if (!monthlyData[key].weeks[weekKey]) {
-            monthlyData[key].weeks[weekKey] = 0;
-        }
-
-        monthlyData[key].weeks[weekKey]++;
-    });
-
-    // Calculate weekly consistency pattern
-    const weekConsistency = [0, 1, 2, 3, 4].map(weekIndex => {
-        const weekName = `Week ${weekIndex + 1}`;
-        const completions = Object.values(monthlyData).reduce((sum, month) => {
-            return sum + (month.weeks[weekIndex] || 0);
-        }, 0);
-
-        // Calculate percentage of months this week had a completion
-        let monthCount = 0;
-        Object.values(monthlyData).forEach(month => {
-            if (month.weeks[weekIndex] && month.weeks[weekIndex] > 0) {
-                monthCount++;
-            }
-        });
-
-        const totalMonths = Object.keys(monthlyData).length || 1;
-        const percentage = Math.round((monthCount / totalMonths) * 100);
-
-        return {
-            week: weekIndex,
-            name: weekName,
-            completions,
-            consistency: percentage
-        };
-    });
-
-    return weekConsistency;
+/**
+ * Format date label for charts
+ * @param {Date} date - Date to format
+ * @returns {string} Formatted date
+ */
+function formatDateLabel(date) {
+    return `${date.getDate()} ${date.toLocaleString('default', { month: 'short' }).substring(0, 3)}`;
 }
 
-// Format week label for charts
+/**
+ * Format week label for charts
+ * @param {Date} date - Start date of week
+ * @returns {string} Formatted week label
+ */
 function formatWeekLabel(date) {
     return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-// Calculate time of day distribution for habit completions
-function calculateTimeOfDayDistribution(habitLogs) {
-    const completedLogs = habitLogs.filter(log => log.completed);
-
-    // Define time periods
-    const periods = [
-        { name: 'Early Morning', start: 5, end: 8, count: 0 },
-        { name: 'Morning', start: 8, end: 12, count: 0 },
-        { name: 'Afternoon', start: 12, end: 17, count: 0 },
-        { name: 'Evening', start: 17, end: 21, count: 0 },
-        { name: 'Night', start: 21, end: 24, count: 0 },
-        { name: 'Late Night', start: 0, end: 5, count: 0 }
-    ];
-
-    // Count completions in each period
-    completedLogs.forEach(log => {
-        const hour = new Date(log.completed_at).getHours();
-
-        for (const period of periods) {
-            if ((period.start <= hour && hour < period.end) ||
-                (period.start > period.end && (hour >= period.start || hour < period.end))) {
-                period.count++;
-                break;
-            }
-        }
-    });
-
-    // Calculate percentages
-    const total = completedLogs.length;
-    periods.forEach(period => {
-        period.percentage = total > 0 ? Math.round((period.count / total) * 100) : 0;
-    });
-
-    return periods;
-}
-
-// Calculate duration statistics for tracked habits
-function calculateDurationStats(habit, habitLogs) {
-    // Only relevant for duration-tracked habits
-    if (habit.tracking_type !== 'DURATION' || !habitLogs.length) {
-        return null;
-    }
-
-    const completedLogs = habitLogs.filter(log => log.completed && log.duration_completed);
-
-    if (completedLogs.length === 0) {
-        return null;
-    }
-
-    // Extract durations
-    const durations = completedLogs.map(log => log.duration_completed);
-
-    // Calculate statistics
-    const totalDuration = durations.reduce((sum, val) => sum + val, 0);
-    const avgDuration = Math.round(totalDuration / durations.length);
-    const minDuration = Math.min(...durations);
-    const maxDuration = Math.max(...durations);
-
-    // Goal achievement rate
-    const goalRate = habit.duration_goal ?
-        Math.round((avgDuration / habit.duration_goal) * 100) : null;
-
-    return {
-        totalMinutes: totalDuration,
-        averageMinutes: avgDuration,
-        minMinutes: minDuration,
-        maxMinutes: maxDuration,
-        goalMinutes: habit.duration_goal,
-        goalAchievementRate: goalRate,
-        sessionsCount: completedLogs.length
-    };
-}
-
-// Calculate trends in completion time (when habit is typically completed)
-function calculateCompletionTimeTrend(habitLogs, timeRange) {
-    const completedLogs = habitLogs.filter(log => log.completed);
-
-    if (completedLogs.length === 0) {
-        return [];
-    }
-
-    // For shorter time ranges, group by hour
-    if (timeRange === 'month' || timeRange === 'quarter') {
-        const hourlyData = {};
-
-        for (let i = 0; i < 24; i++) {
-            hourlyData[i] = { hour: i, count: 0, displayHour: formatHour(i) };
-        }
-
-        completedLogs.forEach(log => {
-            const hour = new Date(log.completed_at).getHours();
-            hourlyData[hour].count++;
-        });
-
-        return Object.values(hourlyData);
-    }
-
-    // For longer ranges, group by time period
-    const periodData = {
-        'morning': { name: 'Morning (5am-12pm)', count: 0 },
-        'afternoon': { name: 'Afternoon (12pm-5pm)', count: 0 },
-        'evening': { name: 'Evening (5pm-9pm)', count: 0 },
-        'night': { name: 'Night (9pm-5am)', count: 0 }
-    };
-
-    completedLogs.forEach(log => {
-        const hour = new Date(log.completed_at).getHours();
-
-        if (hour >= 5 && hour < 12) {
-            periodData.morning.count++;
-        } else if (hour >= 12 && hour < 17) {
-            periodData.afternoon.count++;
-        } else if (hour >= 17 && hour < 21) {
-            periodData.evening.count++;
-        } else {
-            periodData.night.count++;
-        }
-    });
-
-    return Object.values(periodData);
-}
-
-// Format hour for display
-function formatHour(hour) {
-    if (hour === 0) return '12am';
-    if (hour === 12) return '12pm';
-    return hour > 12 ? `${hour - 12}pm` : `${hour}am`;
-}
-
-// Generate a default streak history structure if none exists
-function generateDefaultStreakHistory() {
-    return {
-        streaks: [],
-        average: 0,
-        total: 0
-    };
-}
-
-// Calculate expected weekly completions based on habit frequency
-function calculateExpectedWeeklyCompletions(habit) {
-    switch (habit.frequency_type) {
-        case 'DAILY':
-            return 7;
-        case 'WEEKDAYS':
-            return 5;
-        case 'WEEKENDS':
-            return 2;
-        case 'SPECIFIC_DAYS':
-            return habit.specific_days ? habit.specific_days.length : 0;
-        case 'INTERVAL':
-            return Math.ceil(7 / (habit.frequency_interval || 1));
-        case 'X_TIMES_WEEK':
-            return habit.frequency_value || 0;
-        case 'X_TIMES_MONTH':
-            return Math.ceil((habit.frequency_value || 0) / 4); // rough weekly estimate
-        default:
-            return 0;
-    }
-}
-
-// Format completion trend data from raw logs
-function formatCompletionTrendData(completionLogs) {
-    // Group by day
-    const trendData = {};
-
-    completionLogs.forEach(item => {
-        const date = new Date(item.completed_at);
-        const dateStr = date.toISOString().split('T')[0];
-
-        trendData[dateStr] = {
-            date: dateStr,
-            count: item._count
-        };
-    });
-
-    // Sort by date
-    return Object.values(trendData).sort((a, b) => a.date.localeCompare(b.date));
-}
-
-// Calculate distribution of habits by domain
-function calculateDomainDistribution(habits, weekLogs) {
-    const domainMap = {};
-
-    // Initialize with all domains
-    habits.forEach(habit => {
-        const domainName = habit.domain.name;
-        if (!domainMap[domainName]) {
-            domainMap[domainName] = {
-                name: domainName,
-                color: habit.domain.color,
-                habitCount: 0,
-                completionCount: 0,
-                percentage: 0
-            };
-        }
-        domainMap[domainName].habitCount++;
-    });
-
-    // Count completions by domain
-    weekLogs.forEach(log => {
-        if (!log.completed) return;
-
-        // Find the habit to get its domain
-        const habit = habits.find(h => h.habit_id === log.habit_id);
-        if (habit && habit.domain) {
-            const domainName = habit.domain.name;
-            if (domainMap[domainName]) {
-                domainMap[domainName].completionCount++;
-            }
-        }
-    });
-
-    // Calculate percentages
-    const totalCompletions = weekLogs.filter(log => log.completed).length;
-
-    Object.values(domainMap).forEach(domain => {
-        domain.percentage = totalCompletions > 0 ?
-            Math.round((domain.completionCount / totalCompletions) * 100) : 0;
-    });
-
-    return Object.values(domainMap).sort((a, b) => b.completionCount - a.completionCount);
-}
-
-// Calculate weekly status data (for stacked bar charts)
-function calculateWeekStatusData(habits, weekLogs, weekStart, weekEnd) {
-    const dayData = [];
-    const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-    // Process each day of the week
-    for (let i = 0; i < 7; i++) {
-        const date = new Date(weekStart);
-        date.setDate(date.getDate() + i);
-
-        const dateStr = date.toISOString().split('T')[0];
-
-        // Count completions for this day
-        const completed = weekLogs.filter(log => {
-            const logDate = new Date(log.completed_at);
-            return logDate.toISOString().split('T')[0] === dateStr && log.completed;
-        }).length;
-
-        // Count scheduled habits for this day (approximation)
-        let scheduled = 0;
-        habits.forEach(habit => {
-            if (shouldHabitBeScheduledForDay(habit, date)) {
-                scheduled++;
-            }
-        });
-
-        dayData.push({
-            day: i,
-            name: dayNames[i],
-            date: dateStr,
-            completed,
-            missed: Math.max(0, scheduled - completed),
-            total: scheduled
-        });
-    }
-
-    return dayData;
-}
-
-// Check if a habit should be scheduled for a specific day
-function shouldHabitBeScheduledForDay(habit, date) {
-    // Check if habit's start date is after the given date
-    if (new Date(habit.start_date) > date) {
-        return false;
-    }
-
-    // Check if habit's end date is before the given date
-    if (habit.end_date && new Date(habit.end_date) < date) {
-        return false;
-    }
-
-    const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, etc.
-
-    switch (habit.frequency_type) {
-        case 'DAILY':
-            return true;
-        case 'WEEKDAYS':
-            return dayOfWeek >= 1 && dayOfWeek <= 5;
-        case 'WEEKENDS':
-            return dayOfWeek === 0 || dayOfWeek === 6;
-        case 'SPECIFIC_DAYS':
-            return habit.specific_days && habit.specific_days.includes(dayOfWeek);
-        case 'INTERVAL':
-            // Calculate days since start
-            const daysSinceStart = Math.floor((date - new Date(habit.start_date)) / (1000 * 60 * 60 * 24));
-            return daysSinceStart % (habit.frequency_interval || 1) === 0;
-        case 'X_TIMES_WEEK':
-            // Can't precisely determine without additional state
-            return false;
-        case 'X_TIMES_MONTH':
-            // Can't precisely determine without additional state
-            return false;
-        default:
-            return false;
-    }
-}
-
-// Calculate mood trend over time
-function calculateMoodTrend(moodLogs, timeRange) {
-    if (moodLogs.length === 0) {
-        return [];
-    }
-
-    // Determine grouping based on time range
-    let groupByFormat;
-    if (timeRange === 'week') {
-        // Group by day
-        groupByFormat = date => date.toISOString().split('T')[0];
-    } else if (timeRange === 'month') {
-        // Group by day
-        groupByFormat = date => date.toISOString().split('T')[0];
-    } else if (timeRange === 'quarter') {
-        // Group by week
-        groupByFormat = date => {
-            const year = date.getFullYear();
-            const week = getWeekNumber(date);
-            return `${year}-W${week}`;
-        };
-    } else {
-        // Group by month
-        groupByFormat = date => {
-            const year = date.getFullYear();
-            const month = date.getMonth() + 1;
-            return `${year}-${month}`;
-        };
-    }
-
-    // Group logs
-    const groups = {};
-
-    moodLogs.forEach(log => {
-        const date = new Date(log.completed_at);
-        const key = groupByFormat(date);
-
-        if (!groups[key]) {
-            groups[key] = {
-                date: key,
-                totalMood: 0,
-                count: 0,
-                mood: 0,
-                displayDate: formatTrendDate(date, timeRange)
-            };
-        }
-
-        groups[key].totalMood += log.mood;
-        groups[key].count++;
-    });
-
-    // Calculate average mood for each group
-    Object.values(groups).forEach(group => {
-        group.mood = group.count > 0 ? Math.round((group.totalMood / group.count) * 10) / 10 : 0;
-    });
-
-    // Convert to array and sort by date
-    return Object.values(groups).sort((a, b) => a.date.localeCompare(b.date));
-}
-
-// Format date for trend display
-function formatTrendDate(date, timeRange) {
-    if (timeRange === 'week' || timeRange === 'month') {
-        return `${date.getMonth() + 1}/${date.getDate()}`;
-    } else if (timeRange === 'quarter') {
-        const week = getWeekNumber(date) % 52;
-        return `Week ${week}`;
-    } else {
-        return date.toLocaleString('default', { month: 'short' });
-    }
-}
-
-// Format habit frequency as human-readable text
+/**
+ * Format habit frequency as readable text
+ * @param {Object} habit - Habit object
+ * @returns {string} Human-readable frequency
+ */
 function formatFrequencyText(habit) {
+    if (!habit || !habit.frequency_type) {
+        return 'Custom schedule';
+    }
+
     switch (habit.frequency_type) {
         case 'DAILY':
             return 'Every day';
@@ -1581,4 +1149,22 @@ function formatFrequencyText(habit) {
     }
 }
 
-module.exports = enhancedAnalyticsController;
+/**
+ * Get next milestone for a streak
+ * @param {number} currentStreak - Current streak value
+ * @returns {number} Next milestone value
+ */
+function getNextStreakMilestone(currentStreak) {
+    const milestones = [7, 14, 21, 30, 60, 90, 100, 180, 365];
+
+    for (const milestone of milestones) {
+        if (currentStreak < milestone) {
+            return milestone;
+        }
+    }
+
+    // If beyond all predefined milestones, round up to next hundred
+    return Math.ceil(currentStreak / 100) * 100;
+}
+
+module.exports = AnalyticsController;

@@ -253,8 +253,9 @@ const Login = () => {
                 handleInvalidCredentials();
             }
         } catch (error: any) {
+            console.log(error)
             // Handle server/connection errors separately
-            if (error?.response?.status === 401) {
+            if (error?.status === 401) {
                 handleInvalidCredentials();
             } else {
                 setErrors(prev => ({

@@ -79,15 +79,14 @@ function RootLayoutNav() {
   if (!fontsLoaded || isInitializing) {
     return (
         <View className={`flex-1 justify-center items-center ${isDark ? 'bg-theme-background-dark' : 'bg-white'}`}>
-          <StatusBar style={isDark ? 'light' : 'dark'} />
+          <StatusBar style={isDark ? 'bg-theme-background-dark' : 'bg-gray-50'} />
           <ActivityIndicator size="large" color={isDark ? '#22C55E' : '#7C3AED'} />
         </View>
     );
   }
-
   return (
       <View className="flex-1">
-        <StatusBar style={isDark ? 'light' : 'dark'} />
+        <StatusBar className={`isDark ? 'bg-theme-background-dark' : 'bg-gray-50`} />
         <Stack
             screenOptions={{
               headerShown: false,

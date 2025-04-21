@@ -36,7 +36,7 @@
       [
         "expo-notifications",
         {
-          "icon": "./assets/images/icon.png",
+          "icon": "./assets/images/blogImage.png",
           "color": "#ffffff"
         }
       ],
@@ -72,8 +72,9 @@
         "origin": false
       },
       "eas": {
-        "projectId": "d3304beb-7ea2-4909-9069-4b68d9b08efc"
+        "projectId": "048c326b-7d3d-43fe-9573-e35212cdb896"
       }
-    }
+    },
+    "owner": "anir80"
   }
 }

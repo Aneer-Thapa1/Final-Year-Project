@@ -706,7 +706,7 @@
 
                 <TouchableOpacity
                     className="px-6 py-3.5 rounded-button bg-primary-500 shadow-button-light dark:shadow-button-dark"
-                    onPress={() => router.push('(habits)/create-habit')}
+                    onPress={() => router.push('(tabs)/add')}
                     activeOpacity={0.8}
                 >
                     <Text className="text-white font-montserrat-bold text-base text-center">

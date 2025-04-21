@@ -1,6 +1,8 @@
+// cron.js
 const cron = require('node-cron');
 const streakController = require('./controllers/streakController');
 const { ReminderService } = require('./services/reminderService');
+const notificationService = require('./controllers/pushNotificationController');
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
@@ -45,12 +47,13 @@ function logJobStatus(jobName, status, details = {}) {
 }
 
 /**
- * Create notification with appropriate type
+ * Create notification with appropriate type and send push notification
  * @param {Object} data - Notification data
  */
 async function createNotification(data) {
     try {
-        await prisma.notification.create({
+        // First, create the notification in database
+        const notification = await prisma.notification.create({
             data: {
                 user_id: data.user_id,
                 title: data.title,
@@ -61,6 +64,21 @@ async function createNotification(data) {
                 is_read: false
             }
         });
+
+        // Then, send push notification to user's devices
+        await notificationService.sendToUser(
+            data.user_id,
+            data.title,
+            data.content,
+            {
+                type: data.type,
+                relatedId: data.related_id,
+                actionUrl: data.action_url,
+                notificationId: notification.id
+            }
+        );
+
+        return notification;
     } catch (error) {
         console.error(`Error creating notification: ${error.message}`);
     }
@@ -360,15 +378,120 @@ cron.schedule('*/15 * * * *', async () => {
 
     try {
         const startTime = Date.now();
-        const result = await reminderService.processDueReminders();
+
+        // Find reminders that are due to be sent
+        const now = new Date();
+        const dueReminders = await prisma.scheduledReminder.findMany({
+            where: {
+                scheduled_time: { lte: now },
+                is_sent: false,
+                is_prepared: true
+            },
+            include: {
+                habit: true,
+                user: {
+                    select: {
+                        user_id: true,
+                        prefersNotifications: true,
+                        onVacation: true
+                    }
+                }
+            }
+        });
+
+        const results = {
+            processed: dueReminders.length,
+            sent: 0,
+            skipped: 0,
+            failed: 0
+        };
+
+        // Process each reminder
+        for (const reminder of dueReminders) {
+            try {
+                // Skip if user has disabled notifications or is on vacation
+                if (!reminder.user.prefersNotifications || reminder.user.onVacation) {
+                    await prisma.scheduledReminder.update({
+                        where: { scheduled_reminder_id: reminder.scheduled_reminder_id },
+                        data: {
+                            is_sent: true,
+                            actual_send_time: now,
+                            send_status: 'SKIPPED',
+                            failure_reason: 'User preferences or status'
+                        }
+                    });
+                    results.skipped++;
+                    continue;
+                }
+
+                // Check if habit is already completed today
+                const isCompletedToday = await reminderService.isHabitCompletedForDate(
+                    reminder.habit_id,
+                    reminder.user_id,
+                    now
+                );
+
+                if (isCompletedToday) {
+                    await prisma.scheduledReminder.update({
+                        where: { scheduled_reminder_id: reminder.scheduled_reminder_id },
+                        data: {
+                            is_sent: true,
+                            actual_send_time: now,
+                            send_status: 'SKIPPED',
+                            failure_reason: 'Already completed'
+                        }
+                    });
+                    results.skipped++;
+                    continue;
+                }
+
+                // Create notification in database and send push notification
+                const title = reminder.habit ? `Reminder: ${reminder.habit.name}` : 'Habit Reminder';
+                const notification = await createNotification({
+                    user_id: reminder.user_id,
+                    title: title,
+                    content: reminder.message,
+                    type: 'REMINDER',
+                    related_id: reminder.habit_id,
+                    action_url: `/habits/${reminder.habit_id}`
+                });
+
+                // Mark reminder as sent
+                await prisma.scheduledReminder.update({
+                    where: { scheduled_reminder_id: reminder.scheduled_reminder_id },
+                    data: {
+                        is_sent: true,
+                        actual_send_time: now,
+                        notification_id: notification.id,
+                        send_status: 'SENT'
+                    }
+                });
+
+                results.sent++;
+            } catch (error) {
+                console.error(`Error processing reminder ${reminder.scheduled_reminder_id}:`, error);
+
+                // Mark as failed
+                await prisma.scheduledReminder.update({
+                    where: { scheduled_reminder_id: reminder.scheduled_reminder_id },
+                    data: {
+                        send_status: 'FAILED',
+                        failure_reason: error.message
+                    }
+                });
+
+                results.failed++;
+            }
+        }
+
         const duration = Date.now() - startTime;
 
         logJobStatus(jobName, 'completed', {
             duration: `${duration}ms`,
-            processed: result.results.processed,
-            sent: result.results.sent,
-            skipped: result.results.skipped,
-            failed: result.results.failed
+            processed: results.processed,
+            sent: results.sent,
+            skipped: results.skipped,
+            failed: results.failed
         });
     } catch (error) {
         logJobStatus(jobName, 'failed', {
@@ -852,5 +975,31 @@ module.exports = {
     testChallengeInviteNotification,
     testQuoteOfTheDayNotification,
     testGoalReminderNotification,
-    testProgressUpdateNotification
+    testProgressUpdateNotification,
+    // Add a new test function for reminders
+    testHabitReminder: async (userId, habitId, message) => {
+        // Get habit details
+        const habit = await prisma.habit.findUnique({
+            where: { habit_id: habitId }
+        });
+
+        if (!habit) {
+            throw new Error(`Habit with ID ${habitId} not found`);
+        }
+
+        // Default message if not provided
+        const reminderMessage = message || `Time to work on your habit: ${habit.name}!`;
+
+        // Create notification and send push
+        await createNotification({
+            user_id: userId,
+            title: `Reminder: ${habit.name}`,
+            content: reminderMessage,
+            type: 'REMINDER',
+            related_id: habitId,
+            action_url: `/habits/${habitId}`
+        });
+
+        return { success: true, message: 'Test reminder sent' };
+    }
 };
