@@ -8,15 +8,12 @@ import {
     ActivityIndicator,
     Dimensions,
     RefreshControl,
-    Platform,
     StatusBar,
     Animated,
-    Image,
-    FlatList,
-    Alert
+    Alert,
+    SafeAreaView,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { LineChart, BarChart, ContributionGraph, PieChart } from 'react-native-chart-kit';
+import { BarChart, LineChart, ContributionGraph, PieChart } from 'react-native-chart-kit';
 import { MotiView, AnimatePresence } from 'moti';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -30,12 +27,8 @@ import {
     Clock,
     BarChart2,
     Award,
-    Hash,
-    Zap,
-    Check,
+    CheckCircle,
     X,
-    ChevronRight,
-    Filter,
     Plus,
     Minus,
     ArrowUp,
@@ -51,44 +44,21 @@ import {
     Users,
     Star,
     BrainCircuit,
-    Bell,
-    Share2,
-    Download,
-    ArrowUpRight,
-    Calendar as CalendarIcon,
     Info,
-    LifeBuoy,
-    Settings,
-    Lock,
-    CheckCircle,
-    Crown,
+    Download,
+    Share2,
+    Sun,
+    Moon,
     Compass,
-    BarChart as BarChartIcon,
-    Layers,
-    Rocket, Sun, Moon,
+    Crown,
+    Lock,
+    Zap,
 } from 'lucide-react-native';
+import { useSelector } from 'react-redux';
 
 // Import analytics services
-import {
-    getUserAnalytics,
-    getHabitAnalytics,
-    getContributionHeatmap,
-    getHabitProgressAnalytics,
-    getMoodAnalytics,
-    getDashboardAnalytics,
-    getPersonalizedInsights,
-    getProgressMilestones,
-    getStreakMilestones,
-    getPointsBreakdown,
-    exportAnalytics,
-    getHabitComparisons,
-    getHabitDomains,
-    getTimePatterns
-} from '../../services/analyticsService';
-
-// Import habit service
-import { getUserHabits, getHabitDetails } from '../../services/habitService';
-import {useSelector} from "react-redux";
+import analyticsService from '../../services/analyticsService';
+import { getUserHabits } from '../../services/habitService';
 
 // Constants for layout and styling
 const SCREEN_WIDTH = Dimensions.get('window').width;
@@ -105,7 +75,8 @@ const DOMAIN_ICONS = {
     'Productivity': { icon: <Zap size={20} color="#eab308" />, color: '#eab308', bgColor: '#fef9c3' },
     'Creativity': { icon: <Sparkles size={20} color="#a855f7" />, color: '#a855f7', bgColor: '#f3e8ff' },
     'Finance': { icon: <TrendingUp size={20} color="#10b981" />, color: '#10b981', bgColor: '#d1fae5' },
-    'Personal': { icon: <Star size={20} color="#0ea5e9" />, color: '#0ea5e9', bgColor: '#e0f2fe' }
+    'Personal': { icon: <Star size={20} color="#0ea5e9" />, color: '#0ea5e9', bgColor: '#e0f2fe' },
+    'default': { icon: <Star size={20} color="#0ea5e9" />, color: '#0ea5e9', bgColor: '#e0f2fe' }
 };
 
 // Time of day definitions
@@ -118,7 +89,6 @@ const TIME_PERIODS = [
     { id: 'late_night', name: 'Late Night', timeRange: '12-5am', icon: <Moon size={16} /> }
 ];
 
-// Analytics screen component
 const Analytics = () => {
     // Theme and device info
     const colorScheme = useColorScheme();
@@ -127,7 +97,8 @@ const Analytics = () => {
     const scrollViewRef = useRef(null);
     const insightAnimation = useRef(new Animated.Value(0)).current;
 
-    const userDetails = useSelector((state) => state.user)
+    const userDetails = useSelector((state) => state.user);
+    const userId = userDetails?.userId || userDetails?.user_id || userDetails?.user?.user_id;
 
     // State management
     const [loading, setLoading] = useState(true);
@@ -147,20 +118,16 @@ const Analytics = () => {
     // Data states
     const [habits, setHabits] = useState([]);
     const [domains, setDomains] = useState([]);
-    const [analytics, setAnalytics] = useState(null);
+    const [dashboardData, setDashboardData] = useState(null);
     const [habitAnalytics, setHabitAnalytics] = useState(null);
     const [insights, setInsights] = useState([]);
-    const [benchmarks, setBenchmarks] = useState(null);
-    const [suggestions, setSuggestions] = useState([]);
     const [streakMilestones, setStreakMilestones] = useState([]);
     const [personalizedInsights, setPersonalizedInsights] = useState(null);
-    const [upcomingMilestones, setUpcomingMilestones] = useState(null);
     const [heatmapData, setHeatmapData] = useState(null);
 
     // UI controls
     const [showTooltip, setShowTooltip] = useState(false);
     const [tooltipContent, setTooltipContent] = useState({ title: '', content: '' });
-    const [filterVisible, setFilterVisible] = useState(false);
 
     // Overall statistics shown at the top of the analytics screen
     const [overallStats, setOverallStats] = useState({
@@ -262,18 +229,6 @@ const Analytics = () => {
         return 'error';
     };
 
-    const getTrendColorClass = (trend) => {
-        if (trend > 0) return 'text-success-500 dark:text-success-dark';
-        if (trend < 0) return 'text-error-500 dark:text-error-dark';
-        return 'text-warning-500 dark:text-warning-dark';
-    };
-
-    const getTrendIcon = (trend) => {
-        if (trend > 0) return <ArrowUp size={16} className="text-success-500 dark:text-success-dark" />;
-        if (trend < 0) return <ArrowDown size={16} className="text-error-500 dark:text-error-dark" />;
-        return null;
-    };
-
     // Helper to format date strings
     const formatDate = (dateString) => {
         if (!dateString) return '';
@@ -286,6 +241,20 @@ const Analytics = () => {
             day: 'numeric',
             year: date.getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined
         });
+    };
+
+    // Safely access nested properties to handle null data
+    const safeGet = (obj, path, defaultValue = null) => {
+        try {
+            return path.split('.').reduce((o, key) => (o && o[key] !== undefined) ? o[key] : defaultValue, obj);
+        } catch (e) {
+            return defaultValue;
+        }
+    };
+
+    // Safely handle null/undefined values in arrays
+    const safeArray = (arr) => {
+        return Array.isArray(arr) ? arr : [];
     };
 
     // Load initial data
@@ -308,8 +277,8 @@ const Analytics = () => {
 
                     if (activeHabits.length > 0) {
                         const sortedByStreak = [...activeHabits].sort((a, b) => {
-                            const streakA = a.stats?.current_streak || 0;
-                            const streakB = b.stats?.current_streak || 0;
+                            const streakA = safeGet(a, 'stats.current_streak', 0);
+                            const streakB = safeGet(b, 'stats.current_streak', 0);
                             return streakB - streakA;
                         });
 
@@ -322,19 +291,22 @@ const Analytics = () => {
             }
 
             // Fetch domains
-            const domainsResponse = await getHabitDomains();
-            if (domainsResponse && domainsResponse.success && domainsResponse.data) {
-                setDomains(domainsResponse.data);
+            try {
+                const domainsResponse = await analyticsService.getHabitDomains();
+                if (domainsResponse && Array.isArray(domainsResponse)) {
+                    setDomains(domainsResponse);
+                }
+            } catch (err) {
+                console.warn('Error fetching domains:', err);
+                setDomains([]);
             }
 
             // Fetch analytics data
             await Promise.all([
-                fetchOverallAnalytics(),
+                fetchDashboardAnalytics(),
                 fetchHabitAnalytics(),
                 fetchInsights(),
-                fetchHeatmapData(),
-                fetchPersonalizedInsights(),
-                fetchProgressMilestones()
+                fetchHeatmapData()
             ]);
 
         } catch (error) {
@@ -361,28 +333,28 @@ const Analytics = () => {
         // Calculate statistics across all habits
         activeHabits.forEach(habit => {
             // Completion rate
-            if (habit.stats?.completion_rate) {
+            if (safeGet(habit, 'stats.completion_rate')) {
                 totalCompletion += habit.stats.completion_rate;
                 completionCount++;
             }
 
             // Best streak
-            if (habit.stats?.best_streak) {
+            if (safeGet(habit, 'stats.best_streak')) {
                 bestStreak = Math.max(bestStreak, habit.stats.best_streak);
             }
 
             // Current streak
-            if (habit.stats?.current_streak && habit.stats.current_streak > 0) {
+            if (safeGet(habit, 'stats.current_streak') && habit.stats.current_streak > 0) {
                 currentStreakCount++;
             }
 
             // Total completions
-            if (habit.stats?.total_completions) {
+            if (safeGet(habit, 'stats.total_completions')) {
                 totalCompletions += habit.stats.total_completions;
             }
 
             // Consistency score
-            if (habit.stats?.consistency_score) {
+            if (safeGet(habit, 'stats.consistency_score')) {
                 totalConsistency += habit.stats.consistency_score;
             }
         });
@@ -399,27 +371,37 @@ const Analytics = () => {
             bestStreak: bestStreak,
             currentStreak: currentStreakCount,
             totalCompletions: totalCompletions,
-            pointsEarned: habitsList.reduce((total, h) => total + (h.stats?.points_earned || 0), 0),
+            pointsEarned: habitsList.reduce((total, h) => total + (safeGet(h, 'stats.points_earned', 0)), 0),
             completionTrend: completionTrend,
             streakTrend: streakTrend,
             consistencyScore: activeHabits.length > 0 ? Math.round(totalConsistency / activeHabits.length) : 0
         });
     };
 
-
-
-    // Fetch overall analytics data
-    const fetchOverallAnalytics = async () => {
+    // Fetch dashboard analytics data
+    const fetchDashboardAnalytics = async () => {
         try {
-            const dashboardData = await getDashboardAnalytics(userDetails.userId);
-            if (dashboardData) {
-                setAnalytics(dashboardData);
+            const data = await analyticsService.getDashboardAnalytics();
+            if (data) {
+                setDashboardData(data);
 
-
+                // Update overall stats from dashboard data
+                if (data.summary) {
+                    setOverallStats(prevStats => ({
+                        ...prevStats,
+                        currentStreak: data.summary.currentStreak || prevStats.currentStreak,
+                        bestStreak: data.summary.longestStreak || prevStats.bestStreak,
+                        averageCompletion: data.summary.weekProgress || prevStats.averageCompletion,
+                        totalCompletions: data.summary.weekCompleted || prevStats.totalCompletions,
+                        pointsEarned: data.summary.monthPoints || prevStats.pointsEarned,
+                        activeHabits: data.summary.activeHabits || prevStats.activeHabits,
+                        totalHabits: data.summary.totalHabits || prevStats.totalHabits
+                    }));
+                }
             }
         } catch (error) {
-            console.error('Error fetching overall analytics:', error);
-            setError('Failed to load analytics data.');
+            console.error('Error fetching dashboard analytics:', error);
+            // Don't set error state to prevent blocking the entire screen
         }
     };
 
@@ -429,7 +411,7 @@ const Analytics = () => {
 
         try {
             setLoadingHabit(true);
-            const result = await getHabitProgressAnalytics(selectedHabit, period);
+            const result = await analyticsService.getHabitAnalytics(selectedHabit, period);
 
             if (result) {
                 setHabitAnalytics(result);
@@ -444,21 +426,20 @@ const Analytics = () => {
     // Fetch heatmap data
     const fetchHeatmapData = async () => {
         try {
-            const heatmap = await getContributionHeatmap(userDetails.user_id, period === 'year' ? 'year' : 'quarter');
+            const heatmap = await analyticsService.getHabitHeatmap(period === 'year' ? 'year' : 'quarter', viewMode === 'habit' ? selectedHabit : null);
             if (heatmap) {
                 setHeatmapData(heatmap);
             }
         } catch (error) {
             console.error('Error fetching heatmap data:', error);
+            setHeatmapData(null);
         }
     };
 
-
-
     // Fetch personalized insights
-    const fetchPersonalizedInsights = async () => {
+    const fetchInsights = async () => {
         try {
-            const insights = await getPersonalizedInsights(userDetails.userId);
+            const insights = await analyticsService.getPersonalInsights();
             if (insights) {
                 setPersonalizedInsights(insights);
 
@@ -466,7 +447,7 @@ const Analytics = () => {
                 const formattedInsights = [];
 
                 // Strengths
-                if (insights.strengths && insights.strengths.length > 0) {
+                if (Array.isArray(insights.strengths) && insights.strengths.length > 0) {
                     insights.strengths.forEach(strength => {
                         formattedInsights.push({
                             id: `strength-${formattedInsights.length}`,
@@ -480,7 +461,7 @@ const Analytics = () => {
                 }
 
                 // Improvement areas
-                if (insights.improvements && insights.improvements.length > 0) {
+                if (Array.isArray(insights.improvements) && insights.improvements.length > 0) {
                     insights.improvements.forEach(improvement => {
                         formattedInsights.push({
                             id: `improvement-${formattedInsights.length}`,
@@ -494,7 +475,7 @@ const Analytics = () => {
                 }
 
                 // Suggestions
-                if (insights.suggestions && insights.suggestions.length > 0) {
+                if (Array.isArray(insights.suggestions) && insights.suggestions.length > 0) {
                     insights.suggestions.forEach(suggestion => {
                         let icon = <Lightbulb size={20} className="text-primary-500" />;
 
@@ -519,73 +500,14 @@ const Analytics = () => {
                 // Add insights to the insights panel
                 if (formattedInsights.length > 0) {
                     setInsights(formattedInsights);
+                } else {
+                    generateFallbackInsights();
                 }
+            } else {
+                generateFallbackInsights();
             }
         } catch (error) {
             console.error('Error fetching personalized insights:', error);
-            generateFallbackInsights();
-        }
-    };
-
-    // Fetch progress milestones
-    const fetchProgressMilestones = async () => {
-        try {
-            const milestones = await getProgressMilestones();
-            if (milestones) {
-                setUpcomingMilestones(milestones);
-
-                // Fetch streak milestones for the achievements section
-                const streakMilestonesData = [];
-
-                if (milestones.streakMilestones && milestones.streakMilestones.length > 0) {
-                    milestones.streakMilestones.forEach(milestone => {
-                        streakMilestonesData.push({
-                            milestone: milestone.nextMilestone,
-                            label: `${milestone.nextMilestone}-Day Streak`,
-                            completed: false,
-                            progress: Math.round((milestone.currentStreak / milestone.nextMilestone) * 100),
-                            count: 0,
-                            points: milestone.nextMilestone * 10 // Example points calculation
-                        });
-                    });
-                }
-
-                // Add completed milestones from achievements
-                if (milestones.stats && milestones.stats.totalCurrentStreakDays > 0) {
-                    const completedMilestones = [7, 14, 21, 30, 60, 90];
-                    completedMilestones.forEach(days => {
-                        if (milestones.stats.totalCurrentStreakDays >= days) {
-                            streakMilestonesData.push({
-                                milestone: days,
-                                label: `${days}-Day Streak`,
-                                completed: true,
-                                progress: 100,
-                                count: 1,
-                                points: days * 10
-                            });
-                        }
-                    });
-                }
-
-                setStreakMilestones(streakMilestonesData);
-            }
-        } catch (error) {
-            console.error('Error fetching progress milestones:', error);
-        }
-    };
-
-    // Fetch AI insights
-    const fetchInsights = async () => {
-        try {
-            // If we already have personalized insights, don't fetch additional AI insights
-            if (insights && insights.length > 0) {
-                return;
-            }
-
-            // Generate placeholder insights if we don't have personalized insights
-            generateFallbackInsights();
-        } catch (error) {
-            console.error('Error fetching AI insights:', error);
             generateFallbackInsights();
         }
     };
@@ -598,21 +520,24 @@ const Analytics = () => {
                 title: 'Consistency Opportunities',
                 description: 'Your completion rate is higher on weekdays than weekends. Consider adjusting weekend habits to be simpler or more enjoyable.',
                 type: 'suggestion',
-                icon: <Calendar size={20} className="text-primary-500" />
+                icon: <Calendar size={20} className="text-primary-500" />,
+                action: "View Details"
             },
             {
                 id: 'insight-2',
                 title: 'Streak Achievement',
                 description: 'You\'re building a great streak with your morning meditation habit. You\'re now in the top 15% of users!',
-                type: 'achievement',
-                icon: <Trophy size={20} className="text-accent-500" />
+                type: 'positive',
+                icon: <Trophy size={20} className="text-accent-500" />,
+                action: "View Progress"
             },
             {
                 id: 'insight-3',
                 title: 'Optimal Timing',
                 description: 'You complete 72% more habits in the morning than evening. Consider scheduling important habits before noon.',
-                type: 'insight',
-                icon: <Clock size={20} className="text-secondary-500" />
+                type: 'suggestion',
+                icon: <Clock size={20} className="text-secondary-500" />,
+                action: "Apply"
             }
         ];
 
@@ -655,7 +580,7 @@ const Analytics = () => {
     // Perform the actual export
     const performExport = async (format) => {
         try {
-            const data = await exportAnalytics(format, period, viewMode === 'habit' ? selectedHabit : null);
+            const data = await analyticsService.exportAnalytics(format, period, viewMode === 'habit' ? selectedHabit : null);
 
             if (data) {
                 showTooltipInfo(
@@ -738,7 +663,7 @@ const Analytics = () => {
     // Refetch data when period changes
     useEffect(() => {
         if (!loading && habits.length > 0) {
-            Promise.all([fetchOverallAnalytics(), fetchHabitAnalytics(), fetchHeatmapData()]);
+            Promise.all([fetchDashboardAnalytics(), fetchHabitAnalytics(), fetchHeatmapData()]);
         }
     }, [period, habits.length, loading]);
 
@@ -746,12 +671,20 @@ const Analytics = () => {
     useEffect(() => {
         if (selectedHabit) {
             fetchHabitAnalytics();
+            if (viewMode === 'habit') {
+                fetchHeatmapData();
+            }
         }
     }, [selectedHabit]);
 
+    // Refetch heatmap data when view mode changes
+    useEffect(() => {
+        fetchHeatmapData();
+    }, [viewMode]);
+
     // Prepare chart data for day of week completion
     const weekdayCompletionData = useMemo(() => {
-        if (!analytics || !analytics.summary || !analytics.weekStatus) {
+        if (!dashboardData || !safeGet(dashboardData, 'weekStatus')) {
             return {
                 labels: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
                 datasets: [{ data: [0, 0, 0, 0, 0, 0, 0] }]
@@ -759,98 +692,101 @@ const Analytics = () => {
         }
 
         return {
-            labels: analytics.weekStatus.map(day => day.name.substring(0, 3)),
+            labels: safeArray(dashboardData.weekStatus).map(day => safeGet(day, 'name', '').substring(0, 3)),
             datasets: [{
-                data: analytics.weekStatus.map(day =>
-                    day.total > 0 ? Math.round((day.completed / day.total) * 100) : 0
-                ),
+                data: safeArray(dashboardData.weekStatus).map(day => {
+                    const total = safeGet(day, 'total', 0);
+                    const completed = safeGet(day, 'completed', 0);
+                    return total > 0 ? Math.round((completed / total) * 100) : 0;
+                }),
                 color: (opacity = 1) => `rgba(34, 197, 94, ${opacity})`,
                 strokeWidth: 2,
             }]
         };
-    }, [analytics]);
+    }, [dashboardData]);
 
     // Prepare chart data for habit-specific day completion
     const habitWeekdayData = useMemo(() => {
-        if (!habitAnalytics || !habitAnalytics.day_analysis) {
+        if (!habitAnalytics || !safeGet(habitAnalytics, 'completionStats.dayDistribution')) {
             return {
                 labels: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
                 datasets: [{ data: [0, 0, 0, 0, 0, 0, 0] }]
             };
         }
 
+        const dayDistribution = safeGet(habitAnalytics, 'completionStats.dayDistribution', []);
         return {
-            labels: habitAnalytics.day_analysis.map(day => day.day.substring(0, 3)),
+            labels: dayDistribution.map(day => safeGet(day, 'name', '').substring(0, 3)),
             datasets: [{
-                data: habitAnalytics.day_analysis.map(day => day.completion_rate || 0)
+                data: dayDistribution.map(day => safeGet(day, 'percentage', 0))
             }]
         };
     }, [habitAnalytics]);
 
     // Prepare domain performance data
     const domainPerformanceData = useMemo(() => {
-        if (!domains || domains.length === 0) {
+        if (!dashboardData || !safeGet(dashboardData, 'domainPerformance') || dashboardData.domainPerformance.length === 0) {
             return {
                 labels: ['Health', 'Fitness', 'Learning'],
                 datasets: [{ data: [0, 0, 0] }]
             };
         }
 
-        // Get top 5 domains by completion rate
-        const topDomains = [...domains]
-            .filter(domain => domain.stats && domain.stats.scheduled_today > 0)
-            .sort((a, b) => {
-                const rateA = a.stats.completed_today / a.stats.scheduled_today;
-                const rateB = b.stats.completed_today / b.stats.scheduled_today;
-                return rateB - rateA;
-            })
+        // Get top 5 domains by completion percentage
+        const topDomains = [...dashboardData.domainPerformance]
+            .sort((a, b) => b.completionPercentage - a.completionPercentage)
             .slice(0, 5);
 
         return {
-            labels: topDomains.map(domain => domain.name.length > 8 ? domain.name.substring(0, 7) + '...' : domain.name),
+            labels: topDomains.map(domain => {
+                const name = safeGet(domain, 'name', '');
+                return name.length > 8 ? name.substring(0, 7) + '...' : name;
+            }),
             datasets: [{
-                data: topDomains.map(domain =>
-                    Math.round((domain.stats.completed_today / domain.stats.scheduled_today) * 100)
-                )
+                data: topDomains.map(domain => safeGet(domain, 'completionPercentage', 0))
             }]
         };
-    }, [domains]);
+    }, [dashboardData]);
 
-    // Prepare streak data for line chart
-    const streakProgressionData = useMemo(() => {
-        if (!habitAnalytics || !habitAnalytics.streak_progression || habitAnalytics.streak_progression.length === 0) {
-            return {
-                labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-                datasets: [{ data: [0, 0, 0, 0] }]
-            };
+    // Prepare time of day distribution data
+    const timeOfDayData = useMemo(() => {
+        if (!habitAnalytics || !safeGet(habitAnalytics, 'completionStats.timeDistribution')) {
+            return TIME_PERIODS.map(period => ({
+                name: period.name,
+                value: 0
+            }));
         }
 
-        // Get week numbers and group streak data by week
-        const weekData = habitAnalytics.streak_progression.reduce((acc, item) => {
-            const date = new Date(item.date);
-            const weekNum = Math.ceil((date.getDate() - 1 + new Date(date.getFullYear(), date.getMonth(), 1).getDay()) / 7);
-            const weekLabel = `Week ${weekNum}`;
+        const timeDistribution = safeGet(habitAnalytics, 'completionStats.timeDistribution', []);
+        return timeDistribution.map(time => ({
+            name: time.name,
+            value: time.percentage || 0
+        }));
+    }, [habitAnalytics]);
 
-            if (!acc[weekLabel]) {
-                acc[weekLabel] = [];
-            }
+    // Format heatmap data for visualization
+    const processedHeatmapData = useMemo(() => {
+        if (!heatmapData || !safeGet(heatmapData, 'weeks')) {
+            return [];
+        }
 
-            acc[weekLabel].push(item.streak);
-            return acc;
-        }, {});
+        // Process the nested structure into a flat array for the chart
+        const processed = [];
 
-        // Convert to chart format
-        const labels = Object.keys(weekData);
-        const data = labels.map(week => {
-            // Use max streak for the week
-            return Math.max(...weekData[week]);
+        heatmapData.weeks.forEach(week => {
+            week.forEach(day => {
+                if (day) {  // Skip null values (empty days)
+                    processed.push({
+                        date: day.date,
+                        count: day.count,
+                        level: day.level
+                    });
+                }
+            });
         });
 
-        return {
-            labels,
-            datasets: [{ data }]
-        };
-    }, [habitAnalytics]);
+        return processed;
+    }, [heatmapData]);
 
     // Custom reusable components for the analytics screen
     const StatsCard = ({ title, value, icon, subtitle, colorClass = 'primary', trend = null, trendValue = null }) => (
@@ -906,7 +842,7 @@ const Analytics = () => {
                 showsHorizontalScrollIndicator={false}
                 className="flex-row"
             >
-                {habits.filter(h => h.is_active).map((habit) => (
+                {safeArray(habits).filter(h => h.is_active).map((habit) => (
                     <TouchableOpacity
                         key={habit.habit_id}
                         onPress={() => setSelectedHabit(habit.habit_id)}
@@ -1128,48 +1064,16 @@ const Analytics = () => {
         </View>
     );
 
-    const AchievementCard = ({ milestone, index }) => (
-        <MotiView
-            from={{ opacity: 0, translateY: 20 }}
-            animate={{ opacity: 1, translateY: 0 }}
-            transition={{ delay: index * 50, type: 'timing', duration: 300 }}
-            className="bg-theme-card dark:bg-theme-card-dark rounded-lg p-4 mb-3 shadow-sm"
-        >
-            <View className="flex-row items-center">
-                <View className="bg-accent-100 dark:bg-accent-900 p-2 rounded-lg mr-3">
-                    {milestone.completed ? (
-                        <Trophy size={24} className="text-accent-500 dark:text-accent-300" />
-                    ) : (
-                        <Lock size={24} className="text-theme-text-muted dark:text-theme-text-muted-dark" />
-                    )}
-                </View>
-                <View className="flex-1">
-                    <Text className="text-base font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                        {milestone.label}
-                    </Text>
-                    <Text className="text-xs font-montserrat text-theme-text-muted dark:text-theme-text-muted-dark">
-                        {milestone.completed ?
-                            `Achieved ${milestone.count} times` :
-                            milestone.progress ? `Progress: ${milestone.progress}%` : 'Not yet achieved'}
-                    </Text>
-                </View>
-                {milestone.completed && (
-                    <View className="bg-accent-50 dark:bg-accent-900 dark:bg-opacity-30 px-2 py-1 rounded">
-                        <Text className="text-xs font-montserrat-medium text-accent-700 dark:text-accent-300">
-                            +{milestone.points || 100} pts
-                        </Text>
-                    </View>
-                )}
+    // NoDataView component to display when no data is available
+    const NoDataView = ({ message, icon }) => (
+        <View className="py-6 items-center justify-center">
+            <View className="mb-3 bg-theme-card dark:bg-theme-card-dark p-3 rounded-full">
+                {icon}
             </View>
-            {milestone.progress > 0 && !milestone.completed && (
-                <View className="mt-2 bg-theme-background dark:bg-theme-background-dark h-1.5 rounded-full overflow-hidden">
-                    <View
-                        className="bg-accent-500 dark:bg-accent-400 h-full rounded-full"
-                        style={{ width: `${milestone.progress}%` }}
-                    />
-                </View>
-            )}
-        </MotiView>
+            <Text className="text-center text-theme-text-muted dark:text-theme-text-muted-dark font-montserrat">
+                {message}
+            </Text>
+        </View>
     );
 
     // Loading state
@@ -1340,13 +1244,13 @@ const Analytics = () => {
                         </ScrollView>
 
                         {/* Insights list */}
-                        {insights
+                        {safeArray(insights)
                             .filter(insight => insightCategory === 'all' || insight.type === insightCategory)
                             .map((insight, index) => (
                                 <InsightCard key={insight.id || index} insight={insight} index={index} />
                             ))}
 
-                        {insights.filter(i => insightCategory === 'all' || i.type === insightCategory).length === 0 && (
+                        {safeArray(insights).filter(i => insightCategory === 'all' || i.type === insightCategory).length === 0 && (
                             <View className="bg-theme-card dark:bg-theme-card-dark rounded-lg p-4 items-center">
                                 <Info size={24} className="text-theme-text-muted dark:text-theme-text-muted-dark mb-2" />
                                 <Text className="text-center text-theme-text-secondary dark:text-theme-text-secondary-dark font-montserrat">
@@ -1432,8 +1336,8 @@ const Analytics = () => {
                                         <SectionTitle
                                             icon={<BarChart2 size={20} className="text-primary-500" />}
                                             title="Completion Rate by Day"
-                                        />
-                                        <View className="mt-2">
+                                        /><View className="mt-2">
+                                        {dashboardData && safeGet(dashboardData, 'weekStatus') ? (
                                             <BarChart
                                                 data={weekdayCompletionData}
                                                 width={SCREEN_WIDTH - 48}
@@ -1447,7 +1351,13 @@ const Analytics = () => {
                                                 fromZero={true}
                                                 showValuesOnTopOfBars={true}
                                             />
-                                        </View>
+                                        ) : (
+                                            <NoDataView
+                                                message="No completion data available for this period"
+                                                icon={<BarChart2 size={24} className="text-theme-text-muted dark:text-theme-text-muted-dark" />}
+                                            />
+                                        )}
+                                    </View>
                                     </View>
 
                                     <View className="mb-6">
@@ -1456,23 +1366,30 @@ const Analytics = () => {
                                             title="Domain Performance"
                                         />
                                         <View className="mt-2">
-                                            <BarChart
-                                                data={domainPerformanceData}
-                                                width={SCREEN_WIDTH - 48}
-                                                height={220}
-                                                yAxisSuffix="%"
-                                                chartConfig={{
-                                                    ...getChartConfig(),
-                                                    color: (opacity = 1) => isDark ? `rgba(168, 85, 247, ${opacity})` : `rgba(168, 85, 247, ${opacity})`,
-                                                    fillShadowGradient: isDark ? '#a855f7' : '#a855f7',
-                                                }}
-                                                style={{
-                                                    borderRadius: 16,
-                                                    marginVertical: 8,
-                                                }}
-                                                fromZero={true}
-                                                showValuesOnTopOfBars={true}
-                                            />
+                                            {dashboardData && safeGet(dashboardData, 'domainPerformance.length', 0) > 0 ? (
+                                                <BarChart
+                                                    data={domainPerformanceData}
+                                                    width={SCREEN_WIDTH - 48}
+                                                    height={220}
+                                                    yAxisSuffix="%"
+                                                    chartConfig={{
+                                                        ...getChartConfig(),
+                                                        color: (opacity = 1) => isDark ? `rgba(168, 85, 247, ${opacity})` : `rgba(168, 85, 247, ${opacity})`,
+                                                        fillShadowGradient: isDark ? '#a855f7' : '#a855f7',
+                                                    }}
+                                                    style={{
+                                                        borderRadius: 16,
+                                                        marginVertical: 8,
+                                                    }}
+                                                    fromZero={true}
+                                                    showValuesOnTopOfBars={true}
+                                                />
+                                            ) : (
+                                                <NoDataView
+                                                    message="No domain data available"
+                                                    icon={<PieChartIcon size={24} className="text-theme-text-muted dark:text-theme-text-muted-dark" />}
+                                                />
+                                            )}
                                         </View>
                                     </View>
 
@@ -1482,9 +1399,9 @@ const Analytics = () => {
                                             title="Habit Contribution"
                                         />
                                         <View className="mt-2">
-                                            {heatmapData ? (
+                                            {heatmapData && processedHeatmapData.length > 0 ? (
                                                 <ContributionGraph
-                                                    values={heatmapData}
+                                                    values={processedHeatmapData}
                                                     endDate={new Date()}
                                                     numDays={84}
                                                     width={SCREEN_WIDTH - 48}
@@ -1501,9 +1418,10 @@ const Analytics = () => {
                                                     }}
                                                 />
                                             ) : (
-                                                <View className="h-[220] justify-center items-center">
-                                                    <ActivityIndicator size="small" color={isDark ? '#4ade80' : '#22c55e'} />
-                                                </View>
+                                                <NoDataView
+                                                    message="No contribution data available for this period"
+                                                    icon={<Calendar size={24} className="text-theme-text-muted dark:text-theme-text-muted-dark" />}
+                                                />
                                             )}
                                         </View>
                                     </View>
@@ -1520,29 +1438,27 @@ const Analytics = () => {
                                             <View className="flex-row flex-wrap mb-6">
                                                 <MetricCard
                                                     title="Current Streak"
-                                                    value={habitAnalytics.current_streak || 0}
+                                                    value={safeGet(habitAnalytics, 'streakData.current', 0)}
                                                     icon={<Flame size={16} className="text-accent-500" />}
                                                     suffix="days"
                                                     colorClass="accent"
-                                                    trend={habitAnalytics.streak_trend > 0 ? 'up' : (habitAnalytics.streak_trend < 0 ? 'down' : 'neutral')}
                                                 />
                                                 <MetricCard
                                                     title="Best Streak"
-                                                    value={habitAnalytics.best_streak || 0}
+                                                    value={safeGet(habitAnalytics, 'streakData.longest', 0)}
                                                     icon={<Trophy size={16} className="text-warning-500" />}
                                                     suffix="days"
                                                     colorClass="warning"
                                                 />
                                                 <MetricCard
                                                     title="Completion Rate"
-                                                    value={`${habitAnalytics.completion_rate || 0}%`}
+                                                    value={`${safeGet(habitAnalytics, 'completionStats.completionRate', 0)}%`}
                                                     icon={<CheckCircle size={16} className="text-success-500" />}
                                                     colorClass="success"
-                                                    trend={habitAnalytics.completion_trend > 0 ? 'up' : (habitAnalytics.completion_trend < 0 ? 'down' : 'neutral')}
                                                 />
                                                 <MetricCard
                                                     title="Total Completions"
-                                                    value={habitAnalytics.total_completions || 0}
+                                                    value={safeGet(habitAnalytics, 'completionStats.totalCompleted', 0)}
                                                     icon={<CheckCircle size={16} className="text-primary-500" />}
                                                     colorClass="primary"
                                                 />
@@ -1554,43 +1470,62 @@ const Analytics = () => {
                                                     title="Completion by Day of Week"
                                                 />
                                                 <View className="mt-2">
-                                                    <BarChart
-                                                        data={habitWeekdayData}
-                                                        width={SCREEN_WIDTH - 48}
-                                                        height={220}
-                                                        yAxisSuffix="%"
-                                                        chartConfig={getChartConfig()}
-                                                        style={{
-                                                            borderRadius: 16,
-                                                            marginVertical: 8,
-                                                        }}
-                                                        fromZero={true}
-                                                        showValuesOnTopOfBars={true}
-                                                    />
+                                                    {safeGet(habitAnalytics, 'completionStats.dayDistribution') ? (
+                                                        <BarChart
+                                                            data={habitWeekdayData}
+                                                            width={SCREEN_WIDTH - 48}
+                                                            height={220}
+                                                            yAxisSuffix="%"
+                                                            chartConfig={getChartConfig()}
+                                                            style={{
+                                                                borderRadius: 16,
+                                                                marginVertical: 8,
+                                                            }}
+                                                            fromZero={true}
+                                                            showValuesOnTopOfBars={true}
+                                                        />
+                                                    ) : (
+                                                        <NoDataView
+                                                            message="No daily completion data available"
+                                                            icon={<BarChart2 size={24} className="text-theme-text-muted dark:text-theme-text-muted-dark" />}
+                                                        />
+                                                    )}
                                                 </View>
                                             </View>
 
                                             <View className="mb-6">
                                                 <SectionTitle
-                                                    icon={<TrendingUp size={20} className="text-secondary-500" />}
-                                                    title="Streak Progression"
+                                                    icon={<Clock size={20} className="text-secondary-500" />}
+                                                    title="Time of Day Distribution"
                                                 />
                                                 <View className="mt-2">
-                                                    <LineChart
-                                                        data={streakProgressionData}
-                                                        width={SCREEN_WIDTH - 48}
-                                                        height={220}
-                                                        chartConfig={{
-                                                            ...getChartConfig(),
-                                                            color: (opacity = 1) => isDark ? `rgba(236, 72, 153, ${opacity})` : `rgba(236, 72, 153, ${opacity})`,
-                                                            fillShadowGradient: isDark ? '#ec4899' : '#ec4899',
-                                                        }}
-                                                        style={{
-                                                            borderRadius: 16,
-                                                            marginVertical: 8,
-                                                        }}
-                                                        bezier
-                                                    />
+                                                    {safeGet(habitAnalytics, 'completionStats.timeDistribution.length', 0) > 0 ? (
+                                                        <BarChart
+                                                            data={{
+                                                                labels: timeOfDayData.map(t => t.name.substring(0, 5)),
+                                                                datasets: [{ data: timeOfDayData.map(t => t.value) }]
+                                                            }}
+                                                            width={SCREEN_WIDTH - 48}
+                                                            height={220}
+                                                            yAxisSuffix="%"
+                                                            chartConfig={{
+                                                                ...getChartConfig(),
+                                                                color: (opacity = 1) => isDark ? `rgba(236, 72, 153, ${opacity})` : `rgba(236, 72, 153, ${opacity})`,
+                                                                fillShadowGradient: isDark ? '#ec4899' : '#ec4899',
+                                                            }}
+                                                            style={{
+                                                                borderRadius: 16,
+                                                                marginVertical: 8,
+                                                            }}
+                                                            fromZero={true}
+                                                            showValuesOnTopOfBars={true}
+                                                        />
+                                                    ) : (
+                                                        <NoDataView
+                                                            message="No time distribution data available"
+                                                            icon={<Clock size={24} className="text-theme-text-muted dark:text-theme-text-muted-dark" />}
+                                                        />
+                                                    )}
                                                 </View>
                                             </View>
                                         </>
@@ -1647,17 +1582,13 @@ const Analytics = () => {
                                             Your most productive days
                                         </Text>
                                         <View className="flex-row flex-wrap">
-                                            {analytics && analytics.weekStatus ? (
-                                                analytics.weekStatus
-                                                    .sort((a, b) => {
-                                                        const rateA = a.total > 0 ? (a.completed / a.total) * 100 : 0;
-                                                        const rateB = b.total > 0 ? (b.completed / b.total) * 100 : 0;
-                                                        return rateB - rateA;
-                                                    })
+                                            {dashboardData && safeGet(dashboardData, 'weekStatus') ? (
+                                                safeArray(dashboardData.weekStatus)
                                                     .map((day, index) => {
-                                                        const completionRate = day.total > 0 ? Math.round((day.completed / day.total) * 100) : 0;
+                                                        const completionRate = safeGet(day, 'total', 0) > 0 ?
+                                                            Math.round((safeGet(day, 'completed', 0) / safeGet(day, 'total', 0)) * 100) : 0;
                                                         return (
-                                                            <View key={day.name} className="w-1/3 p-1">
+                                                            <View key={day.name || index} className="w-1/3 p-1">
                                                                 <MotiView
                                                                     from={{ opacity: 0, scale: 0.9 }}
                                                                     animate={{ opacity: 1, scale: 1 }}
@@ -1665,7 +1596,7 @@ const Analytics = () => {
                                                                     className="bg-theme-card dark:bg-theme-card-dark rounded-lg p-3 items-center"
                                                                 >
                                                                     <Text className="text-xs font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
-                                                                        {day.name.substring(0, 3)}
+                                                                        {safeGet(day, 'name', '').substring(0, 3)}
                                                                     </Text>
                                                                     <View className="my-2 h-1.5 w-full bg-theme-background dark:bg-theme-background-dark rounded-full overflow-hidden">
                                                                         <View
@@ -1702,12 +1633,10 @@ const Analytics = () => {
                                             Your most productive times
                                         </Text>
                                         <View className="flex-row flex-wrap">
-                                            {TIME_PERIODS.map((period, index) => {
-                                                // Generate random percentages for demonstration
-                                                // In a real app, this would come from the analytics data
-                                                const completionRate = Math.floor(Math.random() * 100);
-                                                return (
-                                                    <View key={period.id} className="w-1/2 p-1">
+                                            {/* Use real data if available, otherwise show time periods */}
+                                            {(viewMode === 'habit' && habitAnalytics && safeGet(habitAnalytics, 'completionStats.timeDistribution.length', 0) > 0) ? (
+                                                timeOfDayData.map((period, index) => (
+                                                    <View key={period.name} className="w-1/2 p-1">
                                                         <MotiView
                                                             from={{ opacity: 0, scale: 0.9 }}
                                                             animate={{ opacity: 1, scale: 1 }}
@@ -1715,74 +1644,78 @@ const Analytics = () => {
                                                             className="bg-theme-card dark:bg-theme-card-dark rounded-lg p-3"
                                                         >
                                                             <View className="flex-row items-center mb-1">
-                                                                {period.icon}
+                                                                <Clock size={16} className="text-secondary-500" />
                                                                 <Text className="ml-1.5 text-xs font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
                                                                     {period.name}
                                                                 </Text>
                                                             </View>
-                                                            <Text className="text-xs text-theme-text-muted dark:text-theme-text-muted-dark mb-2">
-                                                                {period.timeRange}
-                                                            </Text>
-                                                            <View className="h-1.5 w-full bg-theme-background dark:bg-theme-background-dark rounded-full overflow-hidden">
+                                                            <View className="h-1.5 w-full bg-theme-background dark:bg-theme-background-dark rounded-full overflow-hidden mt-2">
                                                                 <View
                                                                     className={`h-full rounded-full ${
-                                                                        completionRate >= 80 ? 'bg-success-500' :
-                                                                            completionRate >= 60 ? 'bg-success-500' :
-                                                                                completionRate >= 40 ? 'bg-warning-500' :
-                                                                                    completionRate >= 20 ? 'bg-warning-500' :
+                                                                        period.value >= 80 ? 'bg-success-500' :
+                                                                            period.value >= 60 ? 'bg-success-500' :
+                                                                                period.value >= 40 ? 'bg-warning-500' :
+                                                                                    period.value >= 20 ? 'bg-warning-500' :
                                                                                         'bg-error-500'
                                                                     }`}
-                                                                    style={{ width: `${completionRate}%` }}
+                                                                    style={{ width: `${period.value}%` }}
                                                                 />
                                                             </View>
                                                             <Text className="mt-1 text-xs font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark">
-                                                                {completionRate}% completion
+                                                                {period.value}% completion
                                                             </Text>
                                                         </MotiView>
                                                     </View>
-                                                );
-                                            })}
+                                                ))
+                                            ) : (
+                                                TIME_PERIODS.map((period, index) => {
+                                                    // Use mock data for demonstration if real data isn't available
+                                                    const completionRate = Math.floor(Math.random() * 100);
+                                                    return (
+                                                        <View key={period.id} className="w-1/2 p-1">
+                                                            <MotiView
+                                                                from={{ opacity: 0, scale: 0.9 }}
+                                                                animate={{ opacity: 1, scale: 1 }}
+                                                                transition={{ delay: index * 100, type: 'timing', duration: 400 }}
+                                                                className="bg-theme-card dark:bg-theme-card-dark rounded-lg p-3"
+                                                            >
+                                                                <View className="flex-row items-center mb-1">
+                                                                    {period.icon}
+                                                                    <Text className="ml-1.5 text-xs font-montserrat-bold text-theme-text-primary dark:text-theme-text-primary-dark">
+                                                                        {period.name}
+                                                                    </Text>
+                                                                </View>
+                                                                <Text className="text-xs text-theme-text-muted dark:text-theme-text-muted-dark mb-2">
+                                                                    {period.timeRange}
+                                                                </Text>
+                                                                <View className="h-1.5 w-full bg-theme-background dark:bg-theme-background-dark rounded-full overflow-hidden">
+                                                                    <View
+                                                                        className={`h-full rounded-full ${
+                                                                            completionRate >= 80 ? 'bg-success-500' :
+                                                                                completionRate >= 60 ? 'bg-success-500' :
+                                                                                    completionRate >= 40 ? 'bg-warning-500' :
+                                                                                        completionRate >= 20 ? 'bg-warning-500' :
+                                                                                            'bg-error-500'
+                                                                        }`}
+                                                                        style={{ width: `${completionRate}%` }}
+                                                                    />
+                                                                </View>
+                                                                <Text className="mt-1 text-xs font-montserrat text-theme-text-secondary dark:text-theme-text-secondary-dark">
+                                                                    {completionRate}% completion
+                                                                </Text>
+                                                            </MotiView>
+                                                        </View>
+                                                    );
+                                                })
+                                            )}
                                         </View>
                                     </View>
                                 )}
                             </View>
                         </CollapsibleSection>
 
-                        {/* Achievements Section */}
-                        <CollapsibleSection
-                            title="Achievements"
-                            icon={<Award size={24} className="text-accent-500 dark:text-accent-400" />}
-                            isExpanded={expandedSection === 'achievements'}
-                            onToggle={() => toggleSection('achievements')}
-                        >
-                            {streakMilestones && streakMilestones.length > 0 ? (
-                                <View className="mb-4">
-                                    <SectionTitle
-                                        icon={<Trophy size={20} className="text-accent-500" />}
-                                        title="Streak Milestones"
-                                    />
-                                    <View className="mt-2">
-                                        {streakMilestones.map((milestone, index) => (
-                                            <AchievementCard
-                                                key={`milestone-${milestone.milestone}`}
-                                                milestone={milestone}
-                                                index={index}
-                                            />
-                                        ))}
-                                    </View>
-                                </View>
-                            ) : (
-                                <View className="py-8 items-center">
-                                    <Crown size={32} className="text-theme-text-muted dark:text-theme-text-muted-dark mb-2" />
-                                    <Text className="text-center text-theme-text-muted dark:text-theme-text-muted-dark font-montserrat">
-                                        Keep building your streaks to unlock achievements!
-                                    </Text>
-                                </View>
-                            )}
-                        </CollapsibleSection>
-
                         {/* Export and Share Section */}
-                        <View className="mt-2 mb-8">
+                        <View className="mt-4 mb-8">
                             <View className="flex-row">
                                 <TouchableOpacity
                                     onPress={handleExportAnalytics}

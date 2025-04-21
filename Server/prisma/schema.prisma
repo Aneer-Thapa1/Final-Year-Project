@@ -23,6 +23,7 @@ model User {
   language             String    @default("en")
   premium_status       Boolean   @default(false)
   premium_until        DateTime?
+  pushTokens           String[]
 
   // Vacation Mode
   onVacation     Boolean   @default(false)
@@ -146,6 +147,7 @@ model ScheduledReminder {
   reminder_config_id    Int? // References the HabitReminder that generated this
   metadata              Json? // Additional data like habit color, icon, etc.
   createdAt             DateTime  @default(now())
+  notification_id       Int?
 
   // Relationships
   habit          Habit          @relation(fields: [habit_id], references: [habit_id], onDelete: Cascade)
@@ -694,6 +696,7 @@ enum NotificationType {
   NEW_MESSAGE
   GROUP_INVITATION
   POINTS_AWARDED
+  CHAT_MESSAGE
 }
 
 // 🔹 HabitReset - Tracks When and Why Streaks Reset
@@ -727,7 +730,7 @@ enum ResetReason {
 model HabitDailyStatus {
   status_id       Int       @id @default(autoincrement())
   habit_id        Int
-  user_id         Int
+  user_id         Intcd
   date            DateTime // The specific date this status applies to
   is_scheduled    Boolean   @default(true) // Whether habit was scheduled for this day
   is_completed    Boolean   @default(false) // Whether habit was completed

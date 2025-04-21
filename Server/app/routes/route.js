@@ -14,6 +14,7 @@ const notificationRoute = require('./notificationRoute');
 const settingsRoute = require('./settingsRoute');
 const analyticsRoute = require('./analyticsRoute');
 const achievementsRoute = require('./achievementsRoute');
+const pushTokenRoute = require('./PushTokenRoute');
 
 const router = express.Router();
 
@@ -61,5 +62,8 @@ router.use('/analytics', analyticsRoute)
 
 // routes related to achievements (/api/achievements)
 router.use('/achievements', achievementsRoute)
+
+// routes related to achievements (/api/pushToken)
+router.use('/pushToken', pushTokenRoute)
 
 module.exports = router;

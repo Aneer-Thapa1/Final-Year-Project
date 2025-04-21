@@ -70,7 +70,7 @@ const getComments = async (req, res) => {
 const addComment = async (req, res) => {
     try {
         const blog_id = parseInt(req.params.blog_id);
-        const user_id = req.user;
+        const user_id = parseInt(req.user);
         const { content, parent_id } = req.body;
 
         if (!content) {
@@ -82,7 +82,12 @@ const addComment = async (req, res) => {
 
         // Check if blog exists
         const blog = await prisma.blog.findUnique({
-            where: { blog_id }
+            where: { blog_id },
+            select: {
+                blog_id: true,
+                title: true,
+                user_id: true
+            }
         });
 
         if (!blog) {
@@ -92,10 +97,22 @@ const addComment = async (req, res) => {
             });
         }
 
-        // If parent_id is provided, check if parent comment exists
+        // If parent_id is provided, check if parent comment exists and get parent author info
+        let parentComment = null;
+        let isReplyToOtherUser = false;
+        let parentAuthorId = null;
+
         if (parent_id) {
-            const parentComment = await prisma.comment.findUnique({
-                where: { comment_id: parseInt(parent_id) }
+            parentComment = await prisma.comment.findUnique({
+                where: { comment_id: parseInt(parent_id) },
+                include: {
+                    user: {
+                        select: {
+                            user_id: true,
+                            user_name: true
+                        }
+                    }
+                }
             });
 
             if (!parentComment) {
@@ -104,13 +121,17 @@ const addComment = async (req, res) => {
                     error: 'Parent comment not found'
                 });
             }
+
+            // Check if replying to someone else's comment
+            parentAuthorId = parentComment.user_id;
+            isReplyToOtherUser = parentAuthorId !== user_id;
         }
 
         // Create the comment
         const newComment = await prisma.comment.create({
             data: {
                 content,
-                user_id: parseInt(user_id),
+                user_id,
                 blog_id,
                 parent_id: parent_id ? parseInt(parent_id) : null
             },
@@ -121,21 +142,83 @@ const addComment = async (req, res) => {
                         user_name: true,
                         avatar: true
                     }
+                },
+                blog: {
+                    select: {
+                        title: true,
+                    }
                 }
             }
         });
 
-        // Create a notification for the blog owner if the comment is not by the owner
-        if (blog.user_id !== parseInt(user_id)) {
+        // Get notification service
+        const notificationService = require('../controllers/pushNotificationController');
+
+        // Create a shortened version of the comment if it's too long
+        const commentPreview = content.length > 50
+            ? content.substring(0, 47) + '...'
+            : content;
+
+        // CASE 1: Notify blog owner if the comment is not by the owner
+        if (blog.user_id !== user_id) {
+            // Create in-app notification for blog owner
             await prisma.notification.create({
                 data: {
                     user_id: blog.user_id,
                     title: 'New Comment',
-                    content: `Someone commented on your post: "${blog.title}"`,
+                    content: `${newComment.user.user_name} commented on your post: "${blog.title}"\n"${commentPreview}"`,
                     type: 'BLOG_COMMENT',
-                    related_id: newComment.comment_id
+                    related_id: newComment.comment_id,
+                    action_url: `/blog/${blog_id}#comment-${newComment.comment_id}`
                 }
             });
+
+            // Send push notification to blog owner
+            await notificationService.sendToUser(
+                blog.user_id,
+                'New Comment',
+                `${newComment.user.user_name} commented on your post: "${commentPreview}"`,
+                {
+                    type: 'BLOG_COMMENT',
+                    blogId: blog_id,
+                    commentId: newComment.comment_id,
+                    commenterId: user_id,
+                    commenterName: newComment.user.user_name,
+                    blogTitle: blog.title
+                }
+            );
+        }
+
+        // CASE 2: Notify parent comment author if this is a reply to someone else's comment
+        // and that person is not the blog owner (to avoid duplicate notifications)
+        if (isReplyToOtherUser && parentAuthorId !== blog.user_id) {
+            // Create in-app notification for parent comment author
+            await prisma.notification.create({
+                data: {
+                    user_id: parentAuthorId,
+                    title: 'New Reply',
+                    content: `${newComment.user.user_name} replied to your comment on "${blog.title}"\n"${commentPreview}"`,
+                    type: 'COMMENT_REPLY',
+                    related_id: newComment.comment_id,
+                    action_url: `/blog/${blog_id}#comment-${newComment.comment_id}`
+                }
+            });
+
+            // Send push notification to parent comment author
+            await notificationService.sendToUser(
+                parentAuthorId,
+                'New Reply',
+                `${newComment.user.user_name} replied to your comment: "${commentPreview}"`,
+                {
+                    type: 'COMMENT_REPLY',
+                    blogId: blog_id,
+                    commentId: newComment.comment_id,
+                    parentCommentId: parseInt(parent_id),
+                    replierId: user_id,
+                    replierName: newComment.user.user_name,
+                    blogTitle: blog.title
+                }
+            );
         }
 
         return res.status(201).json({
@@ -276,7 +359,13 @@ const toggleLike = async (req, res) => {
 
         // Check if blog exists
         const blog = await prisma.blog.findUnique({
-            where: { blog_id }
+            where: { blog_id },
+            select: {
+                blog_id: true,
+                title: true,
+                user_id: true,
+                slug: true
+            }
         });
 
         if (!blog) {
@@ -335,15 +424,46 @@ const toggleLike = async (req, res) => {
 
             // Create notification for blog owner if the like is not by the owner
             if (blog.user_id !== user_id) {
+                // Get user data for the person who liked the post
+                const liker = await prisma.user.findUnique({
+                    where: { user_id },
+                    select: {
+                        user_id: true,
+                        user_name: true,
+                        avatar: true
+                    }
+                });
+
+                // Get notification service
+                const notificationService = require('../controllers/pushNotificationController');
+
+                // Create in-app notification with the liker's name
                 await prisma.notification.create({
                     data: {
                         user_id: blog.user_id,
                         title: 'New Like',
-                        content: `Someone liked your post: "${blog.title}"`,
+                        content: `${liker.user_name} liked your post "${blog.title}"`,
                         type: 'BLOG_LIKE',
-                        related_id: blog_id
+                        related_id: blog_id,
+                        action_url: `/blog/${blog.slug || blog_id}`
                     }
                 });
+
+                // Send push notification with liker's name
+                await notificationService.sendToUser(
+                    blog.user_id,
+                    'New Like',
+                    `${liker.user_name} liked your post "${blog.title}"`,
+                    {
+                        type: 'BLOG_LIKE',
+                        blogId: blog_id,
+                        likerId: user_id,
+                        likerName: liker.user_name,
+                        likerAvatar: liker.avatar,
+                        blogTitle: blog.title,
+                        blogSlug: blog.slug
+                    }
+                );
             }
 
             return res.status(200).json({
@@ -358,6 +478,153 @@ const toggleLike = async (req, res) => {
         return res.status(500).json({
             success: false,
             error: 'Failed to toggle like',
+            details: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
+
+// Toggle like on a comment
+const toggleCommentLike = async (req, res) => {
+    try {
+        const comment_id = parseInt(req.params.comment_id);
+        const user_id = parseInt(req.user);
+
+        // Check if comment exists
+        const comment = await prisma.comment.findUnique({
+            where: { comment_id },
+            include: {
+                user: {
+                    select: {
+                        user_id: true,
+                        user_name: true
+                    }
+                },
+                blog: {
+                    select: {
+                        blog_id: true,
+                        title: true,
+                        slug: true
+                    }
+                }
+            }
+        });
+
+        if (!comment) {
+            return res.status(404).json({
+                success: false,
+                error: 'Comment not found'
+            });
+        }
+
+        // Check if user already liked this comment
+        const existingLike = await prisma.commentLike.findUnique({
+            where: {
+                user_id_comment_id: {
+                    user_id,
+                    comment_id
+                }
+            }
+        });
+
+        // If already liked, unlike it
+        if (existingLike) {
+            await prisma.commentLike.delete({
+                where: {
+                    user_id_comment_id: {
+                        user_id,
+                        comment_id
+                    }
+                }
+            });
+
+            // Get updated likes count
+            const likesCount = await prisma.commentLike.count({
+                where: { comment_id }
+            });
+
+            return res.status(200).json({
+                success: true,
+                message: 'Comment unliked successfully',
+                liked: false,
+                likesCount
+            });
+        }
+        // Otherwise, like it
+        else {
+            await prisma.commentLike.create({
+                data: {
+                    user_id,
+                    comment_id
+                }
+            });
+
+            // Get updated likes count
+            const likesCount = await prisma.commentLike.count({
+                where: { comment_id }
+            });
+
+            // Create notification for comment author if the like is not by the author
+            if (comment.user_id !== user_id) {
+                // Get user data for the person who liked the comment
+                const liker = await prisma.user.findUnique({
+                    where: { user_id },
+                    select: {
+                        user_id: true,
+                        user_name: true,
+                        avatar: true
+                    }
+                });
+
+                // Create a shortened version of the comment if it's too long
+                const commentPreview = comment.content.length > 50
+                    ? comment.content.substring(0, 47) + '...'
+                    : comment.content;
+
+                // Get notification service
+                const notificationService = require('../controllers/pushNotificationController');
+
+                // Create in-app notification with the liker's name
+                await prisma.notification.create({
+                    data: {
+                        user_id: comment.user_id,
+                        title: 'Comment Liked',
+                        content: `${liker.user_name} liked your comment "${commentPreview}" on "${comment.blog.title}"`,
+                        type: 'COMMENT_LIKE',
+                        related_id: comment_id,
+                        action_url: `/blog/${comment.blog.slug || comment.blog.blog_id}#comment-${comment_id}`
+                    }
+                });
+
+                // Send push notification with liker's name
+                await notificationService.sendToUser(
+                    comment.user_id,
+                    'Comment Liked',
+                    `${liker.user_name} liked your comment on "${comment.blog.title}"`,
+                    {
+                        type: 'COMMENT_LIKE',
+                        blogId: comment.blog.blog_id,
+                        commentId: comment_id,
+                        likerId: user_id,
+                        likerName: liker.user_name,
+                        likerAvatar: liker.avatar,
+                        commentPreview: commentPreview,
+                        blogTitle: comment.blog.title
+                    }
+                );
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: 'Comment liked successfully',
+                liked: true,
+                likesCount
+            });
+        }
+    } catch (error) {
+        console.error('Error toggling comment like:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Failed to toggle comment like',
             details: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }

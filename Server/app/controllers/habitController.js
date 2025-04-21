@@ -206,9 +206,8 @@ const addHabit = async (req, res) => {
             domain_id,
             reminders,
             grace_period_enabled,
-            grace_period_hours,
-            points_per_completion,
-            bonus_points_streak
+            grace_period_hours
+            // Removed points_per_completion and bonus_points_streak to prevent abuse
         } = req.body;
 
         const user_id = parseInt(req.user);
@@ -263,29 +262,65 @@ const addHabit = async (req, res) => {
             processedTags = JSON.stringify(tags);
         }
 
-        // Determine difficulty-appropriate points
-        let pointsValue = points_per_completion || 5; // Default to 5 points
-        let streakBonusPoints = bonus_points_streak || 1; // Default to 1 bonus point per streak day
+        // Determine points without using user input to prevent abuse
+        let pointsValue = 5; // Default base points
+        let streakBonusPoints = 1; // Default streak bonus
 
-        // Adjust points based on difficulty if not explicitly provided
-        if (!points_per_completion && difficulty) {
+        // Calculate points based on difficulty (not allowing user override)
+        if (difficulty) {
             switch (difficulty) {
                 case 'VERY_EASY':
-                    pointsValue = 2;
-                    break;
-                case 'EASY':
-                    pointsValue = 3;
-                    break;
-                case 'MEDIUM':
                     pointsValue = 5;
                     break;
-                case 'HARD':
-                    pointsValue = 8;
-                    break;
-                case 'VERY_HARD':
+                case 'EASY':
                     pointsValue = 10;
                     break;
+                case 'MEDIUM':
+                    pointsValue = 15;
+                    break;
+                case 'HARD':
+                    pointsValue = 20;
+                    break;
+                case 'VERY_HARD':
+                    pointsValue = 30;
+                    break;
+                default:
+                    pointsValue = 15; // Default to medium
             }
+        }
+
+        // Adjust streak bonus based on difficulty
+        if (difficulty) {
+            switch (difficulty) {
+                case 'VERY_EASY':
+                    streakBonusPoints = 1;
+                    break;
+                case 'EASY':
+                    streakBonusPoints = 2;
+                    break;
+                case 'MEDIUM':
+                    streakBonusPoints = 3;
+                    break;
+                case 'HARD':
+                    streakBonusPoints = 4;
+                    break;
+                case 'VERY_HARD':
+                    streakBonusPoints = 5;
+                    break;
+                default:
+                    streakBonusPoints = 3; // Default to medium
+            }
+        }
+
+        // Add small bonuses for additional complexity
+        if (tracking_type === 'DURATION' || tracking_type === 'COUNT') {
+            pointsValue += 2;
+        } else if (tracking_type === 'NUMERIC') {
+            pointsValue += 3;
+        }
+
+        if (require_evidence) {
+            pointsValue += 2;
         }
 
         // Create the new habit
@@ -370,23 +405,58 @@ const addHabit = async (req, res) => {
             }
         });
 
-        // Add reminders with enhanced features
+        // Process and add reminders - Fixed for the Invalid Date issue
         if (reminders && Array.isArray(reminders) && reminders.length > 0) {
-            const reminderData = reminders.map(reminder => ({
-                habit_id: newHabit.habit_id,
-                user_id: user_id,
-                reminder_time: new Date(reminder.time),
-                repeat: reminder.repeat || 'DAILY',
-                notification_message: reminder.message || `Time to complete your habit: ${name}`,
-                is_enabled: true,
-                pre_notification_minutes: reminder.pre_notification_minutes || 10,
-                follow_up_enabled: reminder.follow_up_enabled !== undefined ? reminder.follow_up_enabled : true,
-                follow_up_minutes: reminder.follow_up_minutes || 30
-            }));
+            // Process each reminder one at a time to handle any time format issues
+            for (const reminder of reminders) {
+                try {
+                    // Create a default reminder time (9:00 AM today)
+                    const defaultTime = new Date();
+                    defaultTime.setHours(9, 0, 0, 0);
 
-            await prisma.habitReminder.createMany({
-                data: reminderData
-            });
+                    // Parse the time string properly
+                    let reminderTime = defaultTime;
+
+                    if (reminder.time) {
+                        // Handle time string format (HH:MM:SS or HH:MM)
+                        if (typeof reminder.time === 'string') {
+                            if (reminder.time.includes(':')) {
+                                // Format: "09:00:00" or "09:00"
+                                const now = new Date();
+                                const [hourStr, minuteStr, secondStr = '0'] = reminder.time.split(':');
+
+                                const hour = parseInt(hourStr, 10);
+                                const minute = parseInt(minuteStr, 10);
+                                const second = parseInt(secondStr, 10);
+
+                                if (!isNaN(hour) && !isNaN(minute) && !isNaN(second) &&
+                                    hour >= 0 && hour < 24 && minute >= 0 && minute < 60 && second >= 0 && second < 60) {
+                                    reminderTime = new Date(now);
+                                    reminderTime.setHours(hour, minute, second, 0);
+                                }
+                            }
+                        }
+                    }
+
+                    // Create the reminder with the validated time
+                    await prisma.habitReminder.create({
+                        data: {
+                            habit_id: newHabit.habit_id,
+                            user_id: user_id,
+                            reminder_time: reminderTime,
+                            repeat: reminder.repeat || 'DAILY',
+                            notification_message: reminder.message || `Time to complete your habit: ${name}`,
+                            is_enabled: reminder.is_enabled !== undefined ? reminder.is_enabled : true,
+                            pre_notification_minutes: reminder.pre_notification_minutes || 10,
+                            follow_up_enabled: reminder.follow_up_enabled !== undefined ? reminder.follow_up_enabled : true,
+                            follow_up_minutes: reminder.follow_up_minutes || 30
+                        }
+                    });
+                } catch (reminderError) {
+                    console.error(`Failed to create reminder:`, reminderError);
+                    // Continue with other reminders
+                }
+            }
         }
 
         // Update user's totalHabitsCreated stat
@@ -1858,6 +1928,51 @@ const updateHabit = async (req, res) => {
             processedTags = JSON.stringify(habitData.tags);
         }
 
+        // Determine points based on difficulty if difficulty is being updated
+        let pointsValue = existingHabit.points_per_completion;
+        let streakBonusPoints = existingHabit.bonus_points_streak;
+
+        // Only recalculate points if difficulty is being changed
+        if (habitData.difficulty && habitData.difficulty !== existingHabit.difficulty) {
+            // Calculate points based on difficulty
+            switch (habitData.difficulty) {
+                case 'VERY_EASY':
+                    pointsValue = 5;
+                    streakBonusPoints = 1;
+                    break;
+                case 'EASY':
+                    pointsValue = 10;
+                    streakBonusPoints = 2;
+                    break;
+                case 'MEDIUM':
+                    pointsValue = 15;
+                    streakBonusPoints = 3;
+                    break;
+                case 'HARD':
+                    pointsValue = 20;
+                    streakBonusPoints = 4;
+                    break;
+                case 'VERY_HARD':
+                    pointsValue = 30;
+                    streakBonusPoints = 5;
+                    break;
+            }
+
+            // Add complexity bonuses
+            const trackingType = habitData.tracking_type || existingHabit.tracking_type;
+            if (trackingType === 'DURATION' || trackingType === 'COUNT') {
+                pointsValue += 2;
+            } else if (trackingType === 'NUMERIC') {
+                pointsValue += 3;
+            }
+
+            const requireEvidence = habitData.require_evidence !== undefined ?
+                habitData.require_evidence : existingHabit.require_evidence;
+            if (requireEvidence) {
+                pointsValue += 2;
+            }
+        }
+
         // Update the habit
         const updatedHabit = await prisma.habit.update({
             where: {
@@ -1888,7 +2003,8 @@ const updateHabit = async (req, res) => {
                 skip_on_vacation: habitData.skip_on_vacation !== undefined ?
                     habitData.skip_on_vacation : existingHabit.skip_on_vacation,
                 require_evidence: habitData.require_evidence !== undefined ?
-                    habitData.require_evidence : existingHabit.require_evidence,location_based: habitData.location_based !== undefined ?
+                    habitData.require_evidence : existingHabit.require_evidence,
+                location_based: habitData.location_based !== undefined ?
                     habitData.location_based : existingHabit.location_based,
                 location_name: habitData.location_name !== undefined ?
                     habitData.location_name : existingHabit.location_name,
@@ -1912,10 +2028,9 @@ const updateHabit = async (req, res) => {
                     habitData.grace_period_enabled : existingHabit.grace_period_enabled,
                 grace_period_hours: habitData.grace_period_hours !== undefined ?
                     parseInt(habitData.grace_period_hours, 10) : existingHabit.grace_period_hours,
-                points_per_completion: habitData.points_per_completion !== undefined ?
-                    parseInt(habitData.points_per_completion, 10) : existingHabit.points_per_completion,
-                bonus_points_streak: habitData.bonus_points_streak !== undefined ?
-                    parseInt(habitData.bonus_points_streak, 10) : existingHabit.bonus_points_streak
+                // Use calculated points values instead of user input
+                points_per_completion: pointsValue,
+                bonus_points_streak: streakBonusPoints
             },
             include: {
                 domain: true,
@@ -1934,23 +2049,55 @@ const updateHabit = async (req, res) => {
                 }
             });
 
-            // Then create new reminders
-            const reminderData = habitData.reminders.map(reminder => ({
-                habit_id: parseInt(habitId, 10),
-                user_id: userId,
-                reminder_time: new Date(reminder.time),
-                repeat: reminder.repeat || 'DAILY',
-                notification_message: reminder.message || `Time to complete your habit: ${updatedHabit.name}`,
-                is_enabled: reminder.is_enabled !== undefined ? reminder.is_enabled : true,
-                pre_notification_minutes: reminder.pre_notification_minutes || 10,
-                follow_up_enabled: reminder.follow_up_enabled !== undefined ? reminder.follow_up_enabled : true,
-                follow_up_minutes: reminder.follow_up_minutes || 30
-            }));
+            // Process each reminder individually to handle time format issues
+            for (const reminder of habitData.reminders) {
+                try {
+                    // Create a default reminder time (9:00 AM today)
+                    const defaultTime = new Date();
+                    defaultTime.setHours(9, 0, 0, 0);
 
-            if (reminderData.length > 0) {
-                await prisma.habitReminder.createMany({
-                    data: reminderData
-                });
+                    // Parse the time string properly
+                    let reminderTime = defaultTime;
+
+                    if (reminder.time) {
+                        // Handle time string format (HH:MM:SS or HH:MM)
+                        if (typeof reminder.time === 'string') {
+                            if (reminder.time.includes(':')) {
+                                // Format: "09:00:00" or "09:00"
+                                const now = new Date();
+                                const [hourStr, minuteStr, secondStr = '0'] = reminder.time.split(':');
+
+                                const hour = parseInt(hourStr, 10);
+                                const minute = parseInt(minuteStr, 10);
+                                const second = parseInt(secondStr, 10);
+
+                                if (!isNaN(hour) && !isNaN(minute) && !isNaN(second) &&
+                                    hour >= 0 && hour < 24 && minute >= 0 && minute < 60 && second >= 0 && second < 60) {
+                                    reminderTime = new Date(now);
+                                    reminderTime.setHours(hour, minute, second, 0);
+                                }
+                            }
+                        }
+                    }
+
+                    // Create each reminder with validated time
+                    await prisma.habitReminder.create({
+                        data: {
+                            habit_id: parseInt(habitId, 10),
+                            user_id: userId,
+                            reminder_time: reminderTime,
+                            repeat: reminder.repeat || 'DAILY',
+                            notification_message: reminder.message || `Time to complete your habit: ${updatedHabit.name}`,
+                            is_enabled: reminder.is_enabled !== undefined ? reminder.is_enabled : true,
+                            pre_notification_minutes: reminder.pre_notification_minutes || 10,
+                            follow_up_enabled: reminder.follow_up_enabled !== undefined ? reminder.follow_up_enabled : true,
+                            follow_up_minutes: reminder.follow_up_minutes || 30
+                        }
+                    });
+                } catch (reminderError) {
+                    console.error(`Failed to create reminder:`, reminderError);
+                    // Continue with other reminders
+                }
             }
 
             // Fetch updated habit with new reminders
@@ -3300,5 +3447,6 @@ module.exports = {
     getHabitDomains,
     addHabitDomain,
     updateHabitDomain,
-    deleteHabitDomain,getAllHabitDomains
+    deleteHabitDomain,
+    getAllHabitDomains
 };

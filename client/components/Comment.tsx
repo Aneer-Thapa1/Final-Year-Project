@@ -69,7 +69,6 @@ const Comment = ({
     const commentTime = formatDate ? formatDate(comment.createdAt || comment.time) : (comment.time || 'Recently');
 
 
-    console.log(currentUser)
     // Check if current user is the comment author (with null checking)
     const isCommentAuthor = currentUser && currentUser.user_id && (userId && currentUser?.user_id === userId);
 

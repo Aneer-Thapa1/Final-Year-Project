@@ -17,7 +17,7 @@ export const loginUser = async (credentials: { userEmail: string; password: stri
     try {
         return await postData('/api/users/login', credentials); // Used the `postData` utility from userService
     } catch (error: any) {
-        throw error.response?.data?.message || 'Login failed';
+        throw error || 'Login failed';
     }
 };
 

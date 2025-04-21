@@ -23,7 +23,7 @@ const EditHabitScreen = () => {
 
     // Get habit ID from params
     const habitId = params.id || params.habitId;
-
+console.log("from edit habit",habitId);
     console.log(params.habitId);
     // State
     const [habit, setHabit] = useState(null);
@@ -37,7 +37,7 @@ const EditHabitScreen = () => {
 
                 if (habitId) {
                     const habitDetails = await getHabitDetails(habitId);
-                    setHabit(habitDetails.data);
+                    setHabit(habitDetails.data.habit);
                 }
             } catch (err) {
                 console.error('Error fetching habit details:', err);

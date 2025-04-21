@@ -369,7 +369,7 @@ const Index = () => {
                             </Text>
                             <TouchableOpacity
                                 className="flex-row items-center"
-                                onPress={() => router.push('/all-habits')}
+                                onPress={() => router.push('(notification)/test')}
                             >
                                 <Text className="text-primary-500 font-montserrat-medium text-sm mr-1">
                                     View All

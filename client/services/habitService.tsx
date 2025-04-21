@@ -94,7 +94,8 @@
             throw error.response?.data?.message || 'Failed to add habit';
         }
     };
-    
+
+
     /**
      * Helper function to normalize reminder data and ensure all fields are properly set
      */

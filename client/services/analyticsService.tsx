@@ -1,479 +1,466 @@
 import { fetchData, postData } from './api';
-import {useSelector} from 'react-redux'
 
-// Helper function to get current user ID
+// Utility function to get current user ID from Redux store
 const getCurrentUserId = () => {
-    const userDetails = useSelector((state) => state.user)
-    return userDetails?.user_id || userDetails?.user?.user?.user_id
+    const userDetails = useSelector((state) => state.user);
+    return userDetails?.user_id ||
+        userDetails?.user?.user?.user_id ||
+        userDetails?.userId ||
+        null;
 };
 
+// Data Transformer Utility
+const transformers = {
+    // Dashboard Analytics Transformer
+    dashboardAnalytics: (rawData) => {
+        if (!rawData || !rawData.data) return null;
 
-// Get user analytics based on timeframe
-export const getUserAnalytics = async (timeframe = 'week') => {
-    try {
-        const userId = getCurrentUserId();
+        const { data } = rawData;
 
-        console.log(userId)
-        const response = await fetchData(`/api/analytics/getUserAnalytics/${userId}?timeframe=${timeframe}`);
+        return {
+            summary: {
+                totalHabits: data.summary?.totalHabits || 0,
+                activeHabits: data.habitsOverview?.totalActive || 0,
+                todayProgress: data.summary?.todayProgress || 0,
+                todayCompleted: data.summary?.todayCompleted || 0,
+                todayRemaining: data.summary?.todayRemaining || 0,
+                weekProgress: data.summary?.weekProgress || 0,
+                weekCompleted: data.summary?.weekCompleted || 0,
+                weekExpected: data.summary?.weekExpected || 0,
+                monthPoints: data.summary?.monthPoints || 0,
+                currentStreak: data.user?.currentStreak || 0,
+                longestStreak: data.user?.longestStreak || 0,
+                activeStreaks: data.summary?.activeStreaks || 0
+            },
+            weekStatus: [
+                { day: 0, name: 'Sun', completed: 0, missed: 0, total: 0 },
+                { day: 1, name: 'Mon', completed: 0, missed: 0, total: 0 },
+                { day: 2, name: 'Tue', completed: 0, missed: 0, total: 0 },
+                { day: 3, name: 'Wed', completed: 0, missed: 0, total: 0 },
+                { day: 4, name: 'Thu', completed: 0, missed: 0, total: 0 },
+                { day: 5, name: 'Fri', completed: 0, missed: 0, total: 0 },
+                { day: 6, name: 'Sat', completed: 0, missed: 0, total: 0 }
+            ],
+            domainPerformance: (data.habitsOverview?.byDomain || []).map(domain => ({
+                name: domain.name,
+                color: domain.color || '#4285F4',
+                habitsCount: domain.habitCount || 0,
+                completedCount: domain.completionCount || 0,
+                completionPercentage: domain.percentage || 0
+            })),
+            completionTrend: data.completionTrend || [],
+            topStreaks: (data.habitsOverview?.topStreaks || []).map(streak => ({
+                id: streak.id,
+                name: streak.name,
+                color: streak.color || '#4285F4',
+                currentStreak: streak.current_streak || 0,
+                longestStreak: streak.longest_streak || 0
+            })),
+            dateRanges: data.dateRanges || {
+                today: new Date().toISOString(),
+                weekStart: new Date(new Date().setDate(new Date().getDate() - new Date().getDay())).toISOString(),
+                weekEnd: new Date(new Date().setDate(new Date().getDate() + (6 - new Date().getDay()))).toISOString(),
+                monthStart: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString(),
+                monthEnd: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString()
+            }
+        };
+    },
 
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getUserAnalytics:', response);
+    // Habit Heatmap Transformer
+    habitHeatmap: (rawData) => {
+        if (!rawData || !rawData.data) return null;
+
+        const { data } = rawData;
+
+        // Format the weeks data structure for rendering
+        return {
+            weeks: data.weeks || [],
+            contributionDays: data.contributionDays || 0,
+            totalDays: data.totalDays || 0,
+            completionRate: data.completionRate || 0,
+            longestStreak: data.longestStreak || 0,
+            currentStreak: data.currentStreak || 0,
+            maxCount: data.maxCount || 0,
+            timeRange: data.timeRange || 'month'
+        };
+    },
+
+    // Habit Analytics Transformer
+    habitAnalytics: (rawData) => {
+        if (!rawData || !rawData.data) return null;
+
+        const { data } = rawData;
+        return {
+            habitDetails: data.habitDetails || {},
+            streakData: {
+                current: data.streakData?.current || 0,
+                longest: data.streakData?.longest || 0,
+                lastCompleted: data.streakData?.lastCompleted || null
+            },
+            completionStats: data.completionStats || {
+                completionRate: 0,
+                totalScheduled: 0,
+                totalCompleted: 0,
+                totalSkipped: 0,
+                dayDistribution: [],
+                timeDistribution: []
+            },
+            progressData: data.progressData || [],
+            timeRange: data.timeRange || 'month',
+            dateRange: data.dateRange || {
+                start: new Date().toISOString(),
+                end: new Date().toISOString()
+            }
+        };
+    },
+
+    // Personal Insights Transformer
+    personalInsights: (rawData) => {
+        if (!rawData || !rawData.data) return null;
+
+        const { data } = rawData;
+        return {
+            strengths: data.strengths || [],
+            improvements: data.improvements || [],
+            suggestions: data.suggestions || [],
+            achievement_opportunities: data.achievement_opportunities || [],
+            metrics: data.metrics || {}
+        };
+    }
+};
+
+// Analytics Service with Error Handling
+const analyticsService = {
+    // Dashboard Analytics
+    getDashboardAnalytics: async () => {
+        try {
+            const response = await fetchData('/api/analytics/dashboard');
+
+            if (response?.success && response?.data) {
+                return transformers.dashboardAnalytics(response);
+            }
+
+            console.warn('Unexpected dashboard analytics response:', response);
             return null;
+        } catch (error) {
+            console.error('Dashboard Analytics Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch dashboard analytics';
         }
-    } catch (error) {
-        console.error('Error in getUserAnalytics:', error);
-        throw error.response?.data?.error || 'Failed to fetch analytics data';
-    }
-};
+    },
 
-// Get weekly habit summary
-export const getWeeklySummary = async (date) => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/getWeeklySummary/${userId}`;
-        if (date) {
-            url += `?date=${date}`;
-        }
+    // Habit Heatmap
+    getHabitHeatmap: async (timeRange = 'month', habitId = null) => {
+        try {
+            let url = '/api/analytics/heatmap';
+            const params = [];
 
-        const response = await fetchData(url);
+            if (timeRange) params.push(`timeRange=${timeRange}`);
+            if (habitId) params.push(`habitId=${habitId}`);
 
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getWeeklySummary:', response);
+            if (params.length > 0) {
+                url += `?${params.join('&')}`;
+            }
+
+            const response = await fetchData(url);
+
+            if (response?.success && response?.data) {
+                return transformers.habitHeatmap(response);
+            }
+
+            console.warn('Unexpected habit heatmap response:', response);
             return null;
+        } catch (error) {
+            console.error('Habit Heatmap Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch habit heatmap';
         }
-    } catch (error) {
-        console.error('Error in getWeeklySummary:', error);
-        throw error.response?.data?.error || 'Failed to fetch weekly summary';
-    }
-};
+    },
 
-// Get monthly performance stats
-export const getMonthlyPerformance = async (month, year) => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/getMonthlyPerformance/${userId}`;
-        const params = [];
+    // Habit Analytics
+    getHabitAnalytics: async (habitId, timeRange = 'month') => {
+        try {
+            const url = `/api/analytics/habit/${habitId}?timeRange=${timeRange}`;
+            const response = await fetchData(url);
 
-        if (month) params.push(`month=${month}`);
-        if (year) params.push(`year=${year}`);
+            if (response?.success && response?.data) {
+                return transformers.habitAnalytics(response);
+            }
 
-        if (params.length > 0) {
-            url += `?${params.join('&')}`;
-        }
-
-        const response = await fetchData(url);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getMonthlyPerformance:', response);
+            console.warn('Unexpected habit analytics response:', response);
             return null;
+        } catch (error) {
+            console.error('Habit Analytics Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch habit analytics';
         }
-    } catch (error) {
-        console.error('Error in getMonthlyPerformance:', error);
-        throw error.response?.data?.error || 'Failed to fetch monthly performance';
-    }
-};
+    },
 
-// Get yearly analytics
-export const getYearlyAnalytics = async (year) => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/getYearlyAnalytics/${userId}`;
-        if (year) {
-            url += `?year=${year}`;
-        }
+    // Personal Insights
+    getPersonalInsights: async () => {
+        try {
+            const response = await fetchData('/api/analytics/insights');
 
-        const response = await fetchData(url);
+            if (response?.success && response?.data) {
+                return transformers.personalInsights(response);
+            }
 
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getYearlyAnalytics:', response);
+            console.warn('Unexpected personal insights response:', response);
             return null;
+        } catch (error) {
+            console.error('Personal Insights Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch personal insights';
         }
-    } catch (error) {
-        console.error('Error in getYearlyAnalytics:', error);
-        throw error.response?.data?.error || 'Failed to fetch yearly analytics';
-    }
-};
+    },
 
-// Get habit-specific analytics
-export const getHabitAnalytics = async (habitId, timeframe = 'month', includeStreaks = true, limit = 10, compareToPrevious = false) => {
-    try {
-        let url = `/api/analytics/getHabitAnalytics/${habitId}?timeframe=${timeframe}`;
+    // Legacy Support - These methods maintain backward compatibility
 
-        if (includeStreaks) url += '&include_streaks=true';
-        if (limit) url += `&limit=${limit}`;
-        if (compareToPrevious) url += '&compare_to_previous=true';
-
-        const response = await fetchData(url);
-
-        if (response && response.success) {
-            return response;
-        } else {
-            console.warn('Unexpected API response format in getHabitAnalytics:', response);
-            return { success: false, message: 'Invalid response format' };
+    // Contribution Heatmap (now maps to Habit Heatmap)
+    getContributionHeatmap: async (timeRange = 'year', habitId = null) => {
+        try {
+            return await analyticsService.getHabitHeatmap(timeRange, habitId);
+        } catch (error) {
+            console.error('Contribution Heatmap Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch contribution heatmap';
         }
-    } catch (error) {
-        console.error('Error in getHabitAnalytics:', error);
-        throw error.response?.data?.error || 'Failed to fetch habit analytics';
-    }
-};
+    },
 
-// ENHANCED ANALYTICS ENDPOINTS
+    // Habit Progress Analytics (now maps to Habit Analytics)
+    getHabitProgressAnalytics: async (habitId, timeRange = 'all') => {
+        try {
+            return await analyticsService.getHabitAnalytics(habitId, timeRange);
+        } catch (error) {
+            console.error('Habit Progress Analytics Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch habit progress analytics';
+        }
+    },
 
-// Get GitHub-style contribution heatmap
-export const getContributionHeatmap = async (userId, timeRange = 'year', habitId = null) => {
-    try {
-        let url = `/api/analytics/contribution-heatmap`;
-        //
-        // if (habitId) {
-        //     url += `&habitId=${habitId}`;
-        // }
+    // Methods that use endpoints not yet implemented in the new controller
 
-        const response = await fetchData(url);
+    // Progress Milestones
+    getProgressMilestones: async () => {
+        try {
+            const response = await fetchData('/api/analytics/milestones');
 
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getContributionHeatmap:', response);
+            if (response?.success && response?.data) {
+                return response.data;
+            }
+
+            console.warn('Unexpected progress milestones response:', response);
             return null;
+        } catch (error) {
+            console.error('Progress Milestones Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch progress milestones';
         }
-    } catch (error) {
-        console.error('Error in getContributionHeatmap:', error);
-        throw error.response?.data?.error || 'Failed to fetch contribution heatmap data';
-    }
-};
+    },
 
-// Get detailed habit progress analytics
-export const getHabitProgressAnalytics = async ( habitId, timeRange = 'all') => {
-    try {
-        const url = `/api/analytics/habit-progress/${habitId}`;
+    // Mood Analytics
+    getMoodAnalytics: async (timeRange = 'month', habitId = null) => {
+        try {
+            let url = `/api/analytics/mood?timeRange=${timeRange}`;
+            if (habitId) url += `&habitId=${habitId}`;
 
-        const response = await fetchData(url);
+            const response = await fetchData(url);
 
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getHabitProgressAnalytics:', response);
+            if (response?.success && response?.data) {
+                return response.data;
+            }
+
+            console.warn('Unexpected mood analytics response:', response);
             return null;
+        } catch (error) {
+            console.error('Mood Analytics Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch mood analytics';
         }
-    } catch (error) {
-        console.error('Error in getHabitProgressAnalytics:', error);
-        throw error.response?.data?.error || 'Failed to fetch habit progress analytics';
-    }
-};
+    },
 
-// Get mood analysis data
-export const getMoodAnalytics = async (timeRange = 'month', habitId = null) => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/mood-analytics/${userId}?timeRange=${timeRange}`;
+    // Habit Domains
+    getHabitDomains: async () => {
+        try {
+            const response = await fetchData('/api/habit/allDomains');
 
-        if (habitId) {
-            url += `&habitId=${habitId}`;
-        }
+            if (response?.success && response?.data) {
+                return response.data;
+            }
 
-        const response = await fetchData(url);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getMoodAnalytics:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getMoodAnalytics:', error);
-        throw error.response?.data?.error || 'Failed to fetch mood analytics data';
-    }
-};
-
-// Get comprehensive dashboard analytics
-export const getDashboardAnalytics = async (userId) => {
-    try {
-
-        const url = `/api/analytics/dashboard-analytics`;
-
-        const response = await fetchData(url);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getDashboardAnalytics:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getDashboardAnalytics:', error);
-        throw error.response?.data?.error || 'Failed to fetch dashboard analytics data';
-    }
-};
-
-// NEW ANALYTICS ENDPOINTS
-
-// Get personalized insights and improvement suggestions
-export const getPersonalizedInsights = async (userId) => {
-    try {
-        const url = `/api/analytics/personalized-insights`;
-
-        const response = await fetchData(url);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getPersonalizedInsights:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getPersonalizedInsights:', error);
-        throw error.response?.data?.error || 'Failed to fetch personalized insights';
-    }
-};
-
-// Get progress milestones and achievement predictions
-export const getProgressMilestones = async () => {
-    try {
-        const url = `/api/analytics/progress-milestones`;
-
-        const response = await fetchData(url);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getProgressMilestones:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getProgressMilestones:', error);
-        throw error.response?.data?.error || 'Failed to fetch progress milestones';
-    }
-};
-
-// Get streak milestones
-export const getStreakMilestones = async (timeframe = 'all') => {
-    try {
-        const userId = getCurrentUserId();
-        const response = await fetchData(`/api/analytics/getStreakMilestones/${userId}?timeframe=${timeframe}`);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getStreakMilestones:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getStreakMilestones:', error);
-        throw error.response?.data?.error || 'Failed to fetch streak milestones';
-    }
-};
-
-// Get points breakdown
-export const getPointsBreakdown = async (timeframe = 'month') => {
-    try {
-        const userId = getCurrentUserId();
-        const response = await fetchData(`/api/analytics/getPointsBreakdown/${userId}?timeframe=${timeframe}`);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getPointsBreakdown:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getPointsBreakdown:', error);
-        throw error.response?.data?.error || 'Failed to fetch points breakdown';
-    }
-};
-
-// Get completion heatmap data
-export const getCompletionHeatmap = async (year) => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/getCompletionHeatmap/${userId}`;
-        if (year) {
-            url += `?year=${year}`;
-        }
-
-        const response = await fetchData(url);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getCompletionHeatmap:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getCompletionHeatmap:', error);
-        throw error.response?.data?.error || 'Failed to fetch completion heatmap';
-    }
-};
-
-// Get user achievements
-export const getAchievements = async () => {
-    try {
-        const userId = getCurrentUserId();
-        const response = await fetchData(`/api/analytics/getUserAchievements/${userId}`);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getAchievements:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getAchievements:', error);
-        throw error.response?.data?.error || 'Failed to fetch user achievements';
-    }
-};
-
-// Get streak history for a specific habit
-export const getStreakHistory = async (habitId, limit = 10) => {
-    try {
-        const response = await fetchData(`/api/habits/${habitId}/streakHistory?limit=${limit}`);
-
-        if (response && response.success) {
-            return response;
-        } else {
-            console.warn('Unexpected API response format in getStreakHistory:', response);
-            return { success: false, message: 'Invalid response format' };
-        }
-    } catch (error) {
-        console.error('Error in getStreakHistory:', error);
-        throw error.response?.data?.error || 'Failed to fetch streak history';
-    }
-};
-
-// Get time patterns for analytics
-export const getTimePatterns = async (habitId = null, timeframe = 'month') => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/timePatterns/${userId}?timeframe=${timeframe}`;
-
-        if (habitId) url += `&habit_id=${habitId}`;
-
-        const response = await fetchData(url);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getTimePatterns:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getTimePatterns:', error);
-        throw error.response?.data?.error || 'Failed to fetch time patterns';
-    }
-};
-
-// Get habit domains with analytics data
-export const getHabitDomains = async () => {
-    try {
-
-        const response = await fetchData(`/api/habit/allDomains`);
-
-        if (response && response.success) {
-            return response;
-        } else {
-            console.warn('Unexpected API response format in getHabitDomains:', response);
-            return { success: false, data: [] };
-        }
-    } catch (error) {
-        console.error('Error in getHabitDomains:', error);
-        throw error.response?.data?.error || 'Failed to fetch habit domains';
-    }
-};
-
-// Get AI insights based on habit data
-export const getAIInsights = async (habitId = null) => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/insights/${userId}`;
-
-        if (habitId) url += `?habit_id=${habitId}`;
-
-        const response = await fetchData(url);
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getAIInsights:', response);
+            console.warn('Unexpected habit domains response:', response);
             return [];
+        } catch (error) {
+            console.error('Habit Domains Error:', error);
+            throw error.response?.data?.error || 'Failed to fetch habit domains';
         }
-    } catch (error) {
-        console.error('Error in getAIInsights:', error);
-        throw error.response?.data?.error || 'Failed to fetch AI insights';
-    }
-};
+    },
 
-// Generate detailed habit report for export/share
-export const generateHabitReport = async (habitId = null, timeframe = 'month', format = 'json') => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/generateReport/${userId}?timeframe=${timeframe}&format=${format}`;
+    // Export Analytics
+    exportAnalytics: async (format = 'csv', timeRange = 'month', habitId = null) => {
+        try {
+            let url = `/api/analytics/export?format=${format}&timeRange=${timeRange}`;
+            if (habitId) url += `&habitId=${habitId}`;
 
-        if (habitId) url += `&habit_id=${habitId}`;
+            const response = await fetchData(url, { responseType: 'blob' });
 
-        const response = await fetchData(url);
+            if (response?.success && response?.data) {
+                return response.data;
+            }
 
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in generateHabitReport:', response);
+            console.warn('Unexpected export analytics response:', response);
             return null;
+        } catch (error) {
+            console.error('Export Analytics Error:', error);
+            throw error.response?.data?.error || 'Failed to export analytics';
         }
-    } catch (error) {
-        console.error('Error in generateHabitReport:', error);
-        throw error.response?.data?.error || 'Failed to generate habit report';
     }
 };
 
-// Get comparisons between habits
-export const getHabitComparisons = async (habitIds, timeframe = 'month') => {
-    try {
-        if (!habitIds || !habitIds.length || habitIds.length < 2) {
-            throw new Error('At least two habits are required for comparison');
-        }
+export default analyticsService;
 
-        const userId = getCurrentUserId();
-        const habitsParam = habitIds.join(',');
-        const url = `/api/analytics/compareHabits/${userId}?habits=${habitsParam}&timeframe=${timeframe}`;
+// Type definitions for TypeScript
+export interface DashboardAnalytics {
+    summary: {
+        totalHabits: number;
+        activeHabits: number;
+        todayProgress: number;
+        todayCompleted: number;
+        todayRemaining: number;
+        weekProgress: number;
+        weekCompleted: number;
+        weekExpected: number;
+        monthPoints: number;
+        currentStreak: number;
+        longestStreak: number;
+        activeStreaks: number;
+    };
+    weekStatus: Array<{
+        day: number;
+        name: string;
+        completed: number;
+        missed: number;
+        total: number;
+    }>;
+    domainPerformance: Array<{
+        name: string;
+        color: string;
+        habitsCount: number;
+        completedCount: number;
+        completionPercentage: number;
+    }>;
+    completionTrend: Array<{
+        date: string;
+        count: number;
+    }>;
+    topStreaks: Array<{
+        id: number;
+        name: string;
+        color: string;
+        currentStreak: number;
+        longestStreak: number;
+    }>;
+    dateRanges: {
+        today: string;
+        weekStart: string;
+        weekEnd: string;
+        monthStart: string;
+        monthEnd: string;
+    };
+}
 
-        const response = await fetchData(url);
+export interface HabitHeatmap {
+    weeks: Array<Array<{
+        date: string;
+        count: number;
+        level: number;
+        isToday?: boolean;
+        habits?: Array<{
+            id: number;
+            name: string;
+            color: string;
+        }>;
+    } | null>>;
+    contributionDays: number;
+    totalDays: number;
+    completionRate: number;
+    longestStreak: number;
+    currentStreak: number;
+    maxCount: number;
+    timeRange: string;
+}
 
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in getHabitComparisons:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in getHabitComparisons:', error);
-        throw error.response?.data?.error || 'Failed to compare habits';
-    }
-};
+export interface HabitAnalytics {
+    habitDetails: {
+        id: number;
+        name: string;
+        description: string;
+        color: string;
+        icon: string;
+        domain: string;
+        frequency: string;
+        trackingType: string;
+        startDate: string;
+    };
+    streakData: {
+        current: number;
+        longest: number;
+        lastCompleted: string | null;
+    };
+    completionStats: {
+        completionRate: number;
+        totalScheduled: number;
+        totalCompleted: number;
+        totalSkipped: number;
+        dayDistribution: Array<{
+            day: number;
+            name: string;
+            count: number;
+            percentage: number;
+        }>;
+        timeDistribution: Array<{
+            name: string;
+            start: number;
+            end: number;
+            count: number;
+            percentage: number;
+        }>;
+    };
+    progressData: Array<any>; // Shape depends on timeRange
+    timeRange: string;
+    dateRange: {
+        start: string;
+        end: string;
+    };
+}
 
-// Export analytics data to file (CSV, PDF)
-export const exportAnalytics = async (format = 'csv', timeframe = 'month', habitId = null) => {
-    try {
-        const userId = getCurrentUserId();
-        let url = `/api/analytics/export/${userId}?format=${format}&timeframe=${timeframe}`;
-
-        if (habitId) url += `&habit_id=${habitId}`;
-
-        const response = await fetchData(url, { responseType: 'blob' });
-
-        if (response && response.success && response.data) {
-            return response.data;
-        } else {
-            console.warn('Unexpected API response format in exportAnalytics:', response);
-            return null;
-        }
-    } catch (error) {
-        console.error('Error in exportAnalytics:', error);
-        throw error.response?.data?.error || 'Failed to export analytics data';
-    }
-};
+export interface PersonalInsights {
+    strengths: Array<{
+        type: string;
+        name: string;
+        metric: number;
+        message: string;
+    }>;
+    improvements: Array<{
+        type: string;
+        name: string;
+        metric: number;
+        message: string;
+    }>;
+    suggestions: Array<{
+        type: string;
+        habitId?: number;
+        habitName?: string;
+        current?: number;
+        next?: number;
+        message: string;
+        hour?: number;
+        count?: number;
+    }>;
+    achievement_opportunities: Array<{
+        id: number;
+        name: string;
+        percentComplete: number;
+        description: string;
+        message: string;
+    }>;
+    metrics: {
+        overallCompletionRate: number;
+        totalStreakDays: number;
+        mostConsistentHabit: string | null;
+        achievementsEarned: number;
+        recentAchievement: string | null;
+    };
+}

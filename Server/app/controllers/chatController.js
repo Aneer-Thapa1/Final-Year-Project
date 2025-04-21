@@ -849,6 +849,10 @@ const sendMessage = async (req, res) => {
         const { roomId } = req.params;
         const { content, message_type = 'TEXT', reply_to_id, media_url, media_type, media_size, media_width, media_height, media_duration } = req.body;
         const userId = parseInt(req.user);
+
+        // Get notification service
+        const notificationService = require('../controllers/pushNotificationController');
+
         if (!content || content.trim() === '') {
             return res.status(400).json({
                 success: false,
@@ -876,9 +880,17 @@ const sendMessage = async (req, res) => {
         // Get room type and participants
         const room = await prisma.chatRoom.findUnique({
             where: { room_id: parseInt(roomId) },
-            include: {
+            select: {
+                room_id: true,
                 participants: {
-                    select: { user_id: true }
+                    select: {
+                        user_id: true,
+                        user: {
+                            select: {
+                                user_name: true
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -943,6 +955,73 @@ const sendMessage = async (req, res) => {
             roomId: parseInt(roomId),
             userId
         });
+
+        // Send push notifications to participants who aren't currently online
+        const sender = message.sender;
+        const now = new Date();
+        const twoMinutesAgo = new Date(now.getTime() - 2 * 60 * 1000); // Consider inactive after 2 minutes
+
+        // Determine room name for notification
+        const roomName = room.name || (room.type === 'DM' ?
+            room.participants.find(p => p.user_id !== userId)?.user?.user_name || 'Chat' :
+            'Group Chat');
+
+        // Remove the offline filtering logic and send to all participants
+        const participantsToNotify = room.participants.filter(participant =>
+            participant.user_id !== userId  // Only exclude the sender
+        );
+
+// Send push notifications to all participants (except sender)
+        for (const participant of participantsToNotify) {
+            // Format notification title and body based on message type
+            let title = `${sender.user_name}`;
+            let body = content;
+
+            if (room.type !== 'DM') {
+                title += ` in ${roomName}`;
+            }
+
+            if (message_type === 'IMAGE') {
+                body = '📷 Sent a photo';
+            } else if (message_type === 'VIDEO') {
+                body = '🎥 Sent a video';
+            } else if (message_type === 'AUDIO') {
+                body = '🎵 Sent an audio message';
+            } else if (message_type === 'FILE') {
+                body = '📎 Sent a file';
+            } else if (content.length > 100) {
+                body = content.substring(0, 97) + '...';
+            }
+
+            // Send the notification
+            await notificationService.sendToUser(
+                participant.user_id,
+                title,
+                body,
+                {
+                    type: 'CHAT_MESSAGE',
+                    roomId: parseInt(roomId),
+                    messageId: message.message_id,
+                    senderId: userId,
+                    senderName: sender.user_name,
+                    roomType: room.type,
+                    roomName: roomName
+                }
+            );
+
+            // Optionally create in-app notification too
+            await prisma.notification.create({
+                data: {
+                    user_id: participant.user_id,
+                    title: title,
+                    content: body,
+                    type: 'CHAT_MESSAGE',
+                    related_id: message.message_id,
+                    action_url: `/(chat)/${roomId}`,
+                    is_read: false
+                }
+            });
+        }
 
         res.status(201).json({
             success: true,
